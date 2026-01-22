@@ -631,12 +631,7 @@ async def _handle_spotify_auto_pause(member_count: int):
                 spotify_set_runtime(paused_by_bot=True, last_action_at=now)
         return
 
-    # member_count <= 1: resume only if we paused it
-    if member_count <= 1 and paused_by_bot:
-        ok = await spotify_play(bot.http_session, access)
-        if ok:
-            spotify_set_runtime(paused_by_bot=False, last_action_at=now)
-
+    return
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
