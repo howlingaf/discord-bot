@@ -3,6 +3,7 @@ import secrets
 import sqlite3
 import time
 import urllib.parse
+import asyncio
 
 import discord
 from aiohttp import ClientSession, web
@@ -36,7 +37,7 @@ SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
 SPOTIFY_ALLOWED_USER_ID = int(os.getenv("SPOTIFY_ALLOWED_USER_ID", "0"))  # your discord user id
 SPOTIFY_VOICE_CHANNEL_ID = int(os.getenv("SPOTIFY_VOICE_CHANNEL_ID", "0"))
 SPOTIFY_PAUSE_THRESHOLD = int(os.getenv("SPOTIFY_PAUSE_THRESHOLD", "2"))
-SPOTIFY_DEBOUNCE_SECONDS = int(os.getenv("SPOTIFY_DEBOUNCE_SECONDS", "2"))
+SPOTIFY_DEBOUNCE_SECONDS = int(os.getenv("SPOTIFY_DEBOUNCE_SECONDS", "0"))
 
 SPOTIFY_SCOPES = "user-read-playback-state user-modify-playback-state"
 
@@ -331,18 +332,34 @@ async def spotify_get_playback(session: ClientSession, access_token: str) -> dic
         return js
 
 
-async def spotify_pause(session: ClientSession, access_token: str) -> bool:
-    url = "https://api.spotify.com/v1/me/player/pause"
+async def spotify_player_put(session: ClientSession, access_token: str, endpoint: str) -> tuple[bool, int, str]:
+    url = f"https://api.spotify.com/v1/me/player/{endpoint}"
     headers = {"Authorization": f"Bearer {access_token}"}
+
     async with session.put(url, headers=headers) as resp:
-        return resp.status in (204, 202)
+        text = await resp.text()
+
+        # Treat any 2xx as success UNLESS body indicates an error.
+        if 200 <= resp.status < 300:
+            # Sometimes Spotify returns JSON with {"error": {...}} even with odd statuses.
+            if '"error"' in text:
+                print(f"[SPOTIFY] {endpoint} got 2xx but body contains error: {text}")
+                return False, resp.status, text
+            print(f"[SPOTIFY] {endpoint} ok (status={resp.status})")
+            return True, resp.status, text
+
+        print(f"[SPOTIFY] {endpoint} failed (status={resp.status}): {text}")
+        return False, resp.status, text
+
+
+async def spotify_pause(session: ClientSession, access_token: str) -> bool:
+    ok, _, _ = await spotify_player_put(session, access_token, "pause")
+    return ok
 
 
 async def spotify_play(session: ClientSession, access_token: str) -> bool:
-    url = "https://api.spotify.com/v1/me/player/play"
-    headers = {"Authorization": f"Bearer {access_token}"}
-    async with session.put(url, headers=headers) as resp:
-        return resp.status in (204, 202)
+    ok, _, _ = await spotify_player_put(session, access_token, "play")
+    return ok
 
 
 # ---------------- Bot ----------------
@@ -593,46 +610,47 @@ def _count_humans_in_channel(channel: discord.VoiceChannel) -> int:
 
 
 async def _handle_spotify_auto_pause(member_count: int):
-    """
-    member_count is # of non-bot users in the watched voice channel.
-    Pause if member_count >= threshold.
-    Resume if member_count <= 1 AND bot had paused it.
-    """
     if not bot.http_session:
         return
 
     paused_by_bot, last_action_at, last_member_count = spotify_get_runtime()
     now = int(time.time())
 
-    # debounce + avoid repeated calls for same count
-    if member_count == last_member_count and (now - last_action_at) < SPOTIFY_DEBOUNCE_SECONDS:
-        return
-    if (now - last_action_at) < SPOTIFY_DEBOUNCE_SECONDS:
-        # still update member count so we can react after debounce
-        spotify_set_runtime(last_member_count=member_count)
-        return
+    print(f"[AUTO] member_count={member_count} paused_by_bot={paused_by_bot}")
 
+    # No debounce (you set default 0). Keep it simple:
     spotify_set_runtime(last_member_count=member_count)
 
     access = await spotify_get_access_token(bot.http_session)
     if not access:
-        # not linked
+        print("[AUTO] no spotify access token (not linked?)")
         return
 
     threshold = SPOTIFY_PAUSE_THRESHOLD if SPOTIFY_PAUSE_THRESHOLD > 0 else 2
 
+    # ---- PAUSE when >= threshold ----
     if member_count >= threshold:
-        # only pause if currently playing
         playback = await spotify_get_playback(bot.http_session, access)
         is_playing = bool(playback and playback.get("is_playing"))
+        print(f"[AUTO] threshold hit (>= {threshold}) is_playing={is_playing}")
+
         if is_playing:
             ok = await spotify_pause(bot.http_session, access)
+            print(f"[AUTO] pause ok={ok}")
             if ok:
                 spotify_set_runtime(paused_by_bot=True, last_action_at=now)
         return
 
-    return
+    # ---- RESUME when <= 1 (only if we paused it) ----
+    if member_count <= 1 and paused_by_bot:
+        print("[AUTO] attempting resume...")
+        ok = await spotify_play(bot.http_session, access)
+        print(f"[AUTO] play ok={ok}")
+        if ok:
+            spotify_set_runtime(paused_by_bot=False, last_action_at=now)
+        return
 
+    print("[AUTO] no action")
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     # must be configured
@@ -643,6 +661,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     watched_id = SPOTIFY_VOICE_CHANNEL_ID
     before_id = before.channel.id if before and before.channel else None
     after_id = after.channel.id if after and after.channel else None
+    print(f"[VOICE] member={member} before={before_id} after={after_id} watched={watched_id}")
     if before_id != watched_id and after_id != watched_id:
         return
 
