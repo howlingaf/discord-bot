@@ -1,9 +1,12 @@
+import asyncio
+import html
 import os
+import re
 import secrets
 import sqlite3
 import time
 import urllib.parse
-import asyncio
+from datetime import datetime
 
 import discord
 from aiohttp import ClientSession, web
@@ -41,12 +44,23 @@ SPOTIFY_DEBOUNCE_SECONDS = int(os.getenv("SPOTIFY_DEBOUNCE_SECONDS", "0"))
 
 SPOTIFY_SCOPES = "user-read-playback-state user-modify-playback-state"
 
+# ---------------- LeetCode Daily ----------------
+LEETCODE_DAILY_CHANNEL_ID = 1469550906587611260
+LEETCODE_DAILY_POLL_SECONDS = int(os.getenv("LEETCODE_DAILY_POLL_SECONDS", "600"))
+
+LEETCODE_DAILY_URL = "https://leetcode-api-pied.vercel.app/daily"
+LEETCODE_BASE = "https://leetcode.com"
+
+# Thread is created for discussion, but bot posts NO messages inside thread.
+# Discord embed/message limits mean we may split statement/examples across multiple embeds.
+MAX_EXAMPLES = int(os.getenv("LEETCODE_MAX_EXAMPLES", "3"))
+
 
 # ---------------- Discord intents ----------------
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
-intents.voice_states = True  # <-- needed for voiceStateUpdate events
+intents.voice_states = True  # needed for voiceStateUpdate
 
 
 # ---------------- SQLite helpers ----------------
@@ -93,6 +107,18 @@ def db_init():
         )
         """)
         conn.execute("INSERT OR IGNORE INTO spotify_runtime(id, paused_by_bot, last_action_at, last_member_count) VALUES(1,0,0,-1)")
+
+        # LeetCode daily state (dedupe across restarts)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS leetcode_daily_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          last_date TEXT,
+          last_title_slug TEXT,
+          updated_at INTEGER NOT NULL
+        )
+        """)
+        conn.execute("INSERT OR IGNORE INTO leetcode_daily_state(id, last_date, last_title_slug, updated_at) VALUES(1, NULL, NULL, 0)")
+
         conn.commit()
 
 
@@ -146,6 +172,25 @@ def consume_state(state: str) -> int | None:
 
     discord_user_id, expires_at = int(row[0]), int(row[1])
     return discord_user_id if expires_at >= now else None
+
+
+# ---------------- LeetCode Daily DB helpers ----------------
+def leetcode_get_daily_state() -> tuple[str | None, str | None]:
+    with _db() as conn:
+        row = conn.execute("SELECT last_date, last_title_slug FROM leetcode_daily_state WHERE id=1").fetchone()
+        if not row:
+            return None, None
+        return row[0], row[1]
+
+
+def leetcode_set_daily_state(*, last_date: str | None, last_title_slug: str | None):
+    now = int(time.time())
+    with _db() as conn:
+        conn.execute(
+            "UPDATE leetcode_daily_state SET last_date=?, last_title_slug=?, updated_at=? WHERE id=1",
+            (last_date, last_title_slug, now),
+        )
+        conn.commit()
 
 
 # ---------------- Spotify DB helpers ----------------
@@ -302,25 +347,7 @@ async def spotify_get_access_token(session: ClientSession) -> str | None:
     return new_access
 
 
-async def spotify_api_json(session: ClientSession, method: str, url: str, access_token: str, *, expected=(200,), json_body=None):
-    headers = {"Authorization": f"Bearer {access_token}"}
-    async with session.request(method, url, headers=headers, json=json_body) as resp:
-        if resp.status in expected:
-            if resp.status == 204:
-                return None
-            ct = resp.headers.get("Content-Type", "")
-            if "application/json" in ct:
-                return await resp.json()
-            return None
-        try:
-            js = await resp.json()
-        except Exception:
-            js = await resp.text()
-        raise web.HTTPBadRequest(text=f"Spotify API error {resp.status}: {js}")
-
-
 async def spotify_get_playback(session: ClientSession, access_token: str) -> dict | None:
-    # returns None if no active device or nothing playing
     url = "https://api.spotify.com/v1/me/player"
     headers = {"Authorization": f"Bearer {access_token}"}
     async with session.get(url, headers=headers) as resp:
@@ -332,34 +359,264 @@ async def spotify_get_playback(session: ClientSession, access_token: str) -> dic
         return js
 
 
-async def spotify_player_put(session: ClientSession, access_token: str, endpoint: str) -> tuple[bool, int, str]:
+async def spotify_player_put(session: ClientSession, access_token: str, endpoint: str) -> bool:
     url = f"https://api.spotify.com/v1/me/player/{endpoint}"
     headers = {"Authorization": f"Bearer {access_token}"}
 
     async with session.put(url, headers=headers) as resp:
         text = await resp.text()
-
-        # Treat any 2xx as success UNLESS body indicates an error.
-        if 200 <= resp.status < 300:
-            # Sometimes Spotify returns JSON with {"error": {...}} even with odd statuses.
-            if '"error"' in text:
-                print(f"[SPOTIFY] {endpoint} got 2xx but body contains error: {text}")
-                return False, resp.status, text
-            print(f"[SPOTIFY] {endpoint} ok (status={resp.status})")
-            return True, resp.status, text
-
-        print(f"[SPOTIFY] {endpoint} failed (status={resp.status}): {text}")
-        return False, resp.status, text
+        if 200 <= resp.status < 300 and '"error"' not in text:
+            return True
+        print(f"[SPOTIFY] {endpoint} failed status={resp.status} body={text}")
+        return False
 
 
 async def spotify_pause(session: ClientSession, access_token: str) -> bool:
-    ok, _, _ = await spotify_player_put(session, access_token, "pause")
-    return ok
+    return await spotify_player_put(session, access_token, "pause")
 
 
 async def spotify_play(session: ClientSession, access_token: str) -> bool:
-    ok, _, _ = await spotify_player_put(session, access_token, "play")
-    return ok
+    return await spotify_player_put(session, access_token, "play")
+
+
+# ---------------- LeetCode formatting helpers ----------------
+def _clean_zw(text: str) -> str:
+    return (
+        text.replace("\u200b", "")
+        .replace("\u200c", "")
+        .replace("\u200d", "")
+        .replace("\ufeff", "")
+    )
+
+
+def html_to_text_preserve_newlines(content_html: str) -> str:
+    s = content_html or ""
+    s = re.sub(r"</p\s*>", "\n\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"</li\s*>", "\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"</h\d\s*>", "\n\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"<(script|style)[\s\S]*?</\1>", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"<[^>]+>", "", s)
+    s = html.unescape(s)
+    s = _clean_zw(s)
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    s = re.sub(r"[ \t]{2,}", " ", s)
+    return s.strip()
+
+
+def extract_pre_blocks(content_html: str) -> list[str]:
+    blocks = re.findall(r"<pre[\s\S]*?</pre>", content_html or "", flags=re.IGNORECASE)
+    out: list[str] = []
+    for b in blocks:
+        b = re.sub(r"^<pre[^>]*>", "", b.strip(), flags=re.IGNORECASE)
+        b = re.sub(r"</pre>$", "", b.strip(), flags=re.IGNORECASE)
+        b = re.sub(r"<[^>]+>", "", b)
+        b = html.unescape(b)
+        b = _clean_zw(b)
+        b = b.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if b:
+            out.append(b)
+    return out
+
+
+def split_statement_and_constraints(plain_text: str) -> tuple[str, str]:
+    # Match common variations: "Constraints:", "Constraints :", "constraints:"
+    m = re.search(r"\bConstraints\s*:\s*", plain_text, flags=re.IGNORECASE)
+    if not m:
+        return plain_text.strip(), ""
+    stmt = plain_text[:m.start()].strip()
+    cons = plain_text[m.end():].strip()
+    return stmt, cons
+
+
+def chunk_text(text: str, max_len: int) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= max_len:
+        return [text]
+
+    paras = text.split("\n\n")
+    chunks: list[str] = []
+    cur = ""
+    for p in paras:
+        p = p.strip()
+        if not p:
+            continue
+        candidate = (cur + ("\n\n" if cur else "") + p)
+        if len(candidate) <= max_len:
+            cur = candidate
+        else:
+            if cur:
+                chunks.append(cur)
+            while len(p) > max_len:
+                chunks.append(p[:max_len])
+                p = p[max_len:]
+            cur = p
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+def format_leetcode_date(date_str: str) -> str:
+    # date_str expected like "2026-02-07"
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%B %-d, %Y")  # Linux/mac
+    except ValueError:
+        return date_str
+    except Exception:
+        # Windows uses %#d instead of %-d
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            return dt.strftime("%B %#d, %Y")
+        except Exception:
+            return date_str
+
+DIFF_COLORS = {"Easy": 0x00b8a3, "Medium": 0xffc01e, "Hard": 0xff375f}
+DIFF_EMOJI = {"Easy": "🟢", "Medium": "🟡", "Hard": "🔴"}
+
+
+def build_daily_embeds(daily: dict) -> list[discord.Embed]:
+    date = daily.get("date") or ""
+    pretty = format_leetcode_date(date) if date else ""
+    link = daily.get("link") or ""
+    q = daily.get("question") or {}
+    title = q.get("title") or "LeetCode Daily"
+    difficulty = q.get("difficulty") or "Unknown"
+    url = f"{LEETCODE_BASE}{link}" if link.startswith("/") else (link or LEETCODE_BASE)
+
+    content_html = q.get("content") or ""
+
+    # Extract examples BEFORE stripping <pre> blocks
+    examples = extract_pre_blocks(content_html)[:max(0, MAX_EXAMPLES)]
+
+    # Strip <pre> blocks so statement doesn't duplicate examples
+    statement_html = re.sub(r"<pre[\s\S]*?</pre>", "", content_html, flags=re.IGNORECASE)
+    plain = html_to_text_preserve_newlines(statement_html)
+    statement, constraints = split_statement_and_constraints(plain)
+
+    # Remove leftover "Example N:" headers
+    statement = re.sub(r"Example\s+\d+:\s*", "", statement).strip()
+
+    diff_emoji = DIFF_EMOJI.get(difficulty, "⚪")
+    color = DIFF_COLORS.get(difficulty, 0x808080)
+
+    embeds: list[discord.Embed] = []
+
+    # ── Main embed: header + statement ──────────────────────────
+    header_line = f"{diff_emoji} **{difficulty}**"
+    if pretty:
+        header_line += f"  •  🗓️ {pretty}"
+
+    desc_parts = [header_line, ""]
+
+    if statement:
+        trimmed = statement[:2800]
+        if len(statement) > 2800:
+            trimmed += "\n*(...continued on LeetCode)*"
+        desc_parts.append(trimmed)
+
+    main_embed = discord.Embed(
+        title=title,
+        url=url,
+        description="\n".join(desc_parts),
+        color=color,
+    )
+    embeds.append(main_embed)
+
+    # ── Constraints embed ───────────────────────────────────────
+    if constraints:
+        lines = [ln.strip() for ln in constraints.split("\n") if ln.strip()]
+        bullet = "\n".join(f"• `{ln}`" for ln in lines) if lines else constraints
+
+        if len(bullet) > 4000:
+            bullet = bullet[:3997] + "..."
+
+        embeds.append(discord.Embed(
+            title="Constraints",
+            description=bullet,
+            color=color,
+        ))
+
+    # ── Example embeds (separate) ───────────────────────────────
+    for i, ex in enumerate(examples, start=1):
+        ex_text = ex.strip()
+        if len(ex_text) > 1200:
+            ex_text = ex_text[:1200] + "\n..."
+        embeds.append(discord.Embed(
+            title=f"Example {i}",
+            description=f"```\n{ex_text}\n```",
+            color=color,
+        ))
+
+    return embeds[:10]
+
+
+async def fetch_leetcode_daily(session: ClientSession) -> dict:
+    async with session.get(LEETCODE_DAILY_URL) as resp:
+        js = await resp.json()
+        if resp.status != 200:
+            raise RuntimeError(f"LeetCode daily API failed: {resp.status} {js}")
+        return js
+
+
+async def post_leetcode_daily(*, force: bool = False) -> tuple[bool, str]:
+    """
+    Posts ONE message (embeds) to the channel, creates a thread, and posts NOTHING inside the thread.
+    """
+    if not bot.http_session:
+        return False, "http session not ready"
+
+    daily = await fetch_leetcode_daily(bot.http_session)
+    date = daily.get("date")
+    q = (daily.get("question") or {})
+    title_slug = q.get("titleSlug") or ""
+
+    last_date, last_slug = leetcode_get_daily_state()
+    if not force:
+        if date and last_date == date:
+            return False, f"already posted for date={date}"
+        if (not date) and title_slug and last_slug == title_slug:
+            return False, f"already posted for slug={title_slug}"
+
+    channel = bot.get_channel(LEETCODE_DAILY_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_DAILY_CHANNEL_ID)
+    if not isinstance(channel, discord.TextChannel):
+        return False, "LEETCODE_DAILY_CHANNEL_ID must be a text channel"
+
+    embeds = build_daily_embeds(daily)
+
+    # One message in the channel with embeds
+    sent = await channel.send(embeds=embeds)
+
+    # Create thread for discussion, no bot messages inside
+    thread_name = f"{date or ''} — {q.get('title') or 'Daily'}".strip(" —")[:100] or "LeetCode Daily"
+    try:
+        await channel.create_thread(
+            name=thread_name,
+            message=sent,
+            auto_archive_duration=1440,
+            reason="Daily LeetCode discussion thread",
+        )
+    except Exception as e:
+        print("[DAILY] thread create failed:", repr(e))
+
+    leetcode_set_daily_state(last_date=date, last_title_slug=title_slug)
+    return True, f"posted {date=} {title_slug=}"
+
+
+async def leetcode_daily_poller():
+    await bot.wait_until_ready()
+    await asyncio.sleep(3)
+    print(f"✅ LeetCode daily poller started (every {LEETCODE_DAILY_POLL_SECONDS}s)")
+    while not bot.is_closed():
+        try:
+            posted, msg = await post_leetcode_daily(force=False)
+            print(f"[DAILY] posted={posted} {msg}")
+        except Exception as e:
+            print("[DAILY] error:", repr(e))
+
+        await asyncio.sleep(max(60, LEETCODE_DAILY_POLL_SECONDS))
 
 
 # ---------------- Bot ----------------
@@ -558,51 +815,45 @@ async def dm_spotify_link(user: discord.Member):
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (id={bot.user.id})")
 
+    # start LeetCode poller once
+    if not getattr(bot, "_daily_task_started", False):
+        bot._daily_task_started = True
+        bot.loop.create_task(leetcode_daily_poller())
+
 
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
-    print("---- MEMBER UPDATE EVENT ----")
-    print("Member:", after, after.id)
-
     before_roles = {r.id for r in before.roles}
     after_roles = {r.id for r in after.roles}
-
     added = after_roles - before_roles
 
     if VERIFIED_ROLE_ID not in added:
         return
 
-    print("✅ Verified role was added!")
-
     if has_mapping(after.id):
-        print("User already verified — skipping DM")
         return
 
     try:
         await dm_verify_link(after)
-        print("✅ DM sent successfully")
         return
     except discord.Forbidden:
-        print("❌ DM FAILED — Forbidden")
-    except Exception as e:
-        print("❌ DM FAILED — Exception:", repr(e))
+        pass
+    except Exception:
+        pass
 
     if not VERIFY_FALLBACK_CHANNEL_ID:
-        print("❌ VERIFY_FALLBACK_CHANNEL_ID not set")
         return
 
     channel = bot.get_channel(VERIFY_FALLBACK_CHANNEL_ID)
     if not channel:
-        print("❌ Could not resolve fallback channel ID:", VERIFY_FALLBACK_CHANNEL_ID)
         return
 
     try:
         state = create_state(after.id)
         url = f"{PUBLIC_BASE_URL}/verify/start?state={urllib.parse.quote(state)}"
         await channel.send(f"{after.mention} verify your Twitch account here:\n{url}")
-        print("✅ Fallback channel message sent")
-    except Exception as e:
-        print("❌ Failed to post in fallback channel:", repr(e))
+    except Exception:
+        pass
 
 
 def _count_humans_in_channel(channel: discord.VoiceChannel) -> int:
@@ -613,59 +864,46 @@ async def _handle_spotify_auto_pause(member_count: int):
     if not bot.http_session:
         return
 
-    paused_by_bot, last_action_at, last_member_count = spotify_get_runtime()
+    paused_by_bot, _, _ = spotify_get_runtime()
     now = int(time.time())
 
-    print(f"[AUTO] member_count={member_count} paused_by_bot={paused_by_bot}")
-
-    # No debounce (you set default 0). Keep it simple:
     spotify_set_runtime(last_member_count=member_count)
 
     access = await spotify_get_access_token(bot.http_session)
     if not access:
-        print("[AUTO] no spotify access token (not linked?)")
         return
 
     threshold = SPOTIFY_PAUSE_THRESHOLD if SPOTIFY_PAUSE_THRESHOLD > 0 else 2
 
-    # ---- PAUSE when >= threshold ----
+    # PAUSE when >= threshold
     if member_count >= threshold:
         playback = await spotify_get_playback(bot.http_session, access)
         is_playing = bool(playback and playback.get("is_playing"))
-        print(f"[AUTO] threshold hit (>= {threshold}) is_playing={is_playing}")
-
         if is_playing:
             ok = await spotify_pause(bot.http_session, access)
-            print(f"[AUTO] pause ok={ok}")
             if ok:
                 spotify_set_runtime(paused_by_bot=True, last_action_at=now)
         return
 
-    # ---- RESUME when <= 1 (only if we paused it) ----
+    # RESUME when <= 1 (only if we paused it)
     if member_count <= 1 and paused_by_bot:
-        print("[AUTO] attempting resume...")
         ok = await spotify_play(bot.http_session, access)
-        print(f"[AUTO] play ok={ok}")
         if ok:
             spotify_set_runtime(paused_by_bot=False, last_action_at=now)
         return
 
-    print("[AUTO] no action")
+
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    # must be configured
     if not SPOTIFY_VOICE_CHANNEL_ID:
         return
 
-    # If neither before nor after involve the watched channel, ignore
     watched_id = SPOTIFY_VOICE_CHANNEL_ID
     before_id = before.channel.id if before and before.channel else None
     after_id = after.channel.id if after and after.channel else None
-    print(f"[VOICE] member={member} before={before_id} after={after_id} watched={watched_id}")
     if before_id != watched_id and after_id != watched_id:
         return
 
-    # Resolve watched channel and count humans
     guild = bot.get_guild(GUILD_ID)
     if not guild:
         return
@@ -678,7 +916,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     await _handle_spotify_auto_pause(member_count)
 
 
-# ---- Existing command ----
+# ---- Commands ----
 @bot.tree.command(name="settwitch", description="Set your server nickname to your Twitch display name.")
 @app_commands.describe(display_name="Your Twitch display name (e.g., hairyrug_)")
 async def settwitch(interaction: discord.Interaction, display_name: str):
@@ -694,17 +932,11 @@ async def settwitch(interaction: discord.Interaction, display_name: str):
 
     await interaction.response.send_message(
         "❌ I can't change your nickname.\n"
-        f"Reason: {why}\n\n"
-        "Fix:\n"
-        "• Give me **Manage Nicknames** permission\n"
-        "• Put my bot role **above** your role in **Server Settings → Roles**\n"
-        "• Enable **Server Members Intent** in the Developer Portal\n"
-        "• Note: bots cannot rename server owners/admins",
+        f"Reason: {why}",
         ephemeral=True
     )
 
 
-# ---- /verify fallback ----
 @bot.tree.command(name="verify", description="Get the Twitch verify link (fallback if you didn’t receive a DM).")
 async def verify(interaction: discord.Interaction):
     if has_mapping(interaction.user.id):
@@ -716,7 +948,6 @@ async def verify(interaction: discord.Interaction):
     await interaction.response.send_message(f"Click to verify your Twitch name:\n{url}", ephemeral=True)
 
 
-# ---- /spotifylink (only you) ----
 @bot.tree.command(name="spotifylink", description="(Owner) DM yourself the Spotify link so the bot can auto pause/resume.")
 async def spotifylink(interaction: discord.Interaction):
     if SPOTIFY_ALLOWED_USER_ID and interaction.user.id != SPOTIFY_ALLOWED_USER_ID:
@@ -736,7 +967,18 @@ async def spotifylink(interaction: discord.Interaction):
         await dm_spotify_link(member)
         await interaction.response.send_message("✅ Check your DMs for the Spotify link.", ephemeral=True)
     except discord.Forbidden:
-        await interaction.response.send_message("❌ I can't DM you. Open DMs temporarily or I can post a link in a channel.", ephemeral=True)
+        await interaction.response.send_message("❌ I can't DM you.", ephemeral=True)
+
+
+@bot.tree.command(name="daily", description="Post the current LeetCode daily (manual trigger).")
+@app_commands.describe(force="If true, post even if it was already posted today.")
+async def daily(interaction: discord.Interaction, force: bool = True):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        posted, msg = await post_leetcode_daily(force=force)
+        await interaction.followup.send(("✅ " if posted else "ℹ️ ") + msg, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Failed: {repr(e)}", ephemeral=True)
 
 
 if __name__ == "__main__":
