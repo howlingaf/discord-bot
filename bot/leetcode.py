@@ -1,0 +1,288 @@
+import asyncio
+import html
+import re
+from datetime import datetime
+
+import discord
+from aiohttp import ClientSession
+
+from .config import (
+    LEETCODE_DAILY_URL,
+    LEETCODE_BASE,
+    LEETCODE_DAILY_CHANNEL_ID,
+    LEETCODE_DAILY_POLL_SECONDS,
+    LEETCODE_MAX_ACTIVE_THREADS,
+    MAX_EXAMPLES,
+)
+from .database import leetcode_get_daily_state, leetcode_set_daily_state
+
+
+# ---------------- Thread cap helper ----------------
+async def enforce_active_thread_cap(
+    channel: discord.TextChannel,
+    *,
+    limit: int = 5,
+    lock: bool = True,
+    reason: str = "Thread cap enforcement",
+):
+    threads: list[discord.Thread] = []
+
+    try:
+        threads = list(await channel.active_threads())
+    except Exception:
+        threads = list(getattr(channel, "threads", []))
+
+    active = [
+        t for t in threads
+        if isinstance(t, discord.Thread) and not t.archived
+    ]
+
+    if len(active) <= limit:
+        return
+
+    active.sort(key=lambda t: t.created_at or discord.utils.snowflake_time(t.id))
+    to_close = active[: max(0, len(active) - limit)]
+
+    for t in to_close:
+        try:
+            await t.edit(archived=True, locked=lock, reason=reason)
+        except discord.Forbidden:
+            print(f"[THREAD CAP] Forbidden archiving thread {t.id} ({t.name})")
+        except discord.HTTPException as e:
+            print(f"[THREAD CAP] HTTPException archiving thread {t.id} ({t.name}): {e}")
+
+
+# ---------------- Formatting helpers ----------------
+def _clean_zw(text: str) -> str:
+    return (
+        text.replace("\u200b", "")
+        .replace("\u200c", "")
+        .replace("\u200d", "")
+        .replace("\ufeff", "")
+    )
+
+
+def html_to_text_preserve_newlines(content_html: str) -> str:
+    s = content_html or ""
+    s = re.sub(r"</p\s*>", "\n\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"</li\s*>", "\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"</h\d\s*>", "\n\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"<(script|style)[\s\S]*?</\1>", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"<[^>]+>", "", s)
+    s = html.unescape(s)
+    s = _clean_zw(s)
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    s = re.sub(r"[ \t]{2,}", " ", s)
+    return s.strip()
+
+
+def extract_pre_blocks(content_html: str) -> list[str]:
+    blocks = re.findall(r"<pre[\s\S]*?</pre>", content_html or "", flags=re.IGNORECASE)
+    out: list[str] = []
+    for b in blocks:
+        b = re.sub(r"^<pre[^>]*>", "", b.strip(), flags=re.IGNORECASE)
+        b = re.sub(r"</pre>$", "", b.strip(), flags=re.IGNORECASE)
+        b = re.sub(r"<[^>]+>", "", b)
+        b = html.unescape(b)
+        b = _clean_zw(b)
+        b = b.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if b:
+            out.append(b)
+    return out
+
+
+def split_statement_and_constraints(plain_text: str) -> tuple[str, str]:
+    m = re.search(r"\bConstraints\s*:\s*", plain_text, flags=re.IGNORECASE)
+    if not m:
+        return plain_text.strip(), ""
+    stmt = plain_text[:m.start()].strip()
+    cons = plain_text[m.end():].strip()
+    return stmt, cons
+
+
+def chunk_text(text: str, max_len: int) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= max_len:
+        return [text]
+
+    paras = text.split("\n\n")
+    chunks: list[str] = []
+    cur = ""
+    for p in paras:
+        p = p.strip()
+        if not p:
+            continue
+        candidate = (cur + ("\n\n" if cur else "") + p)
+        if len(candidate) <= max_len:
+            cur = candidate
+        else:
+            if cur:
+                chunks.append(cur)
+            while len(p) > max_len:
+                chunks.append(p[:max_len])
+                p = p[max_len:]
+            cur = p
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def format_leetcode_date(date_str: str) -> str:
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%B %-d, %Y")  # Linux/mac
+    except ValueError:
+        return date_str
+    except Exception:
+        # Windows uses %#d instead of %-d
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            return dt.strftime("%B %#d, %Y")
+        except Exception:
+            return date_str
+
+
+DIFF_COLORS = {"Easy": 0x00b8a3, "Medium": 0xffc01e, "Hard": 0xff375f}
+DIFF_EMOJI = {"Easy": "\U0001f7e2", "Medium": "\U0001f7e1", "Hard": "\U0001f534"}
+
+
+def build_daily_embeds(daily: dict) -> list[discord.Embed]:
+    date = daily.get("date") or ""
+    pretty = format_leetcode_date(date) if date else ""
+    link = daily.get("link") or ""
+    q = daily.get("question") or {}
+    title = q.get("title") or "LeetCode Daily"
+    difficulty = q.get("difficulty") or "Unknown"
+    url = f"{LEETCODE_BASE}{link}" if link.startswith("/") else (link or LEETCODE_BASE)
+
+    content_html = q.get("content") or ""
+
+    examples = extract_pre_blocks(content_html)[:max(0, MAX_EXAMPLES)]
+
+    statement_html = re.sub(r"<pre[\s\S]*?</pre>", "", content_html, flags=re.IGNORECASE)
+    plain = html_to_text_preserve_newlines(statement_html)
+    statement, constraints = split_statement_and_constraints(plain)
+
+    statement = re.sub(r"Example\s+\d+:\s*", "", statement).strip()
+
+    diff_emoji = DIFF_EMOJI.get(difficulty, "\u26aa")
+    color = DIFF_COLORS.get(difficulty, 0x808080)
+
+    embeds: list[discord.Embed] = []
+
+    header_line = f"{diff_emoji} **{difficulty}**"
+    if pretty:
+        header_line += f"  \u2022  \U0001f5d3\ufe0f {pretty}"
+
+    desc_parts = [header_line, ""]
+
+    if statement:
+        trimmed = statement[:2800]
+        if len(statement) > 2800:
+            trimmed += "\n*(...continued on LeetCode)*"
+        desc_parts.append(trimmed)
+
+    main_embed = discord.Embed(
+        title=title,
+        url=url,
+        description="\n".join(desc_parts),
+        color=color,
+    )
+    embeds.append(main_embed)
+
+    if constraints:
+        lines = [ln.strip() for ln in constraints.split("\n") if ln.strip()]
+        bullet = "\n".join(f"\u2022 `{ln}`" for ln in lines) if lines else constraints
+
+        if len(bullet) > 4000:
+            bullet = bullet[:3997] + "..."
+
+        embeds.append(discord.Embed(
+            title="Constraints",
+            description=bullet,
+            color=color,
+        ))
+
+    for i, ex in enumerate(examples, start=1):
+        ex_text = ex.strip()
+        if len(ex_text) > 1200:
+            ex_text = ex_text[:1200] + "\n..."
+        embeds.append(discord.Embed(
+            title=f"Example {i}",
+            description=f"```\n{ex_text}\n```",
+            color=color,
+        ))
+
+    return embeds[:10]
+
+
+async def fetch_leetcode_daily(session: ClientSession) -> dict:
+    async with session.get(LEETCODE_DAILY_URL) as resp:
+        js = await resp.json()
+        if resp.status != 200:
+            raise RuntimeError(f"LeetCode daily API failed: {resp.status} {js}")
+        return js
+
+
+async def post_leetcode_daily(bot, *, force: bool = False) -> tuple[bool, str]:
+    if not bot.http_session:
+        return False, "http session not ready"
+
+    daily = await fetch_leetcode_daily(bot.http_session)
+    date = daily.get("date")
+    q = (daily.get("question") or {})
+    title_slug = q.get("titleSlug") or ""
+
+    last_date, last_slug = leetcode_get_daily_state()
+    if not force:
+        if date and last_date == date:
+            return False, f"already posted for date={date}"
+        if (not date) and title_slug and last_slug == title_slug:
+            return False, f"already posted for slug={title_slug}"
+
+    channel = bot.get_channel(LEETCODE_DAILY_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_DAILY_CHANNEL_ID)
+    if not isinstance(channel, discord.TextChannel):
+        return False, "LEETCODE_DAILY_CHANNEL_ID must be a text channel"
+
+    embeds = build_daily_embeds(daily)
+
+    sent = await channel.send(embeds=embeds)
+
+    thread_name = f"{date or ''} \u2014 {q.get('title') or 'Daily'}".strip(" \u2014")[:100] or "LeetCode Daily"
+    try:
+        await channel.create_thread(
+            name=thread_name,
+            message=sent,
+            auto_archive_duration=1440,
+            reason="Daily LeetCode discussion thread",
+        )
+
+        await enforce_active_thread_cap(
+            channel,
+            limit=LEETCODE_MAX_ACTIVE_THREADS,
+            lock=True,
+            reason=f"Keep only {LEETCODE_MAX_ACTIVE_THREADS} active daily threads",
+        )
+    except Exception as e:
+        print("[DAILY] thread create failed:", repr(e))
+
+    leetcode_set_daily_state(last_date=date, last_title_slug=title_slug)
+    return True, f"posted {date=} {title_slug=}"
+
+
+async def leetcode_daily_poller(bot):
+    await bot.wait_until_ready()
+    await asyncio.sleep(3)
+    print(f"\u2705 LeetCode daily poller started (every {LEETCODE_DAILY_POLL_SECONDS}s)")
+    while not bot.is_closed():
+        try:
+            posted, msg = await post_leetcode_daily(bot, force=False)
+            print(f"[DAILY] posted={posted} {msg}")
+        except Exception as e:
+            print("[DAILY] error:", repr(e))
+
+        await asyncio.sleep(max(60, LEETCODE_DAILY_POLL_SECONDS))
