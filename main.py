@@ -55,13 +55,14 @@ LEETCODE_BASE = "https://leetcode.com"
 # Discord embed/message limits mean we may split statement/examples across multiple embeds.
 MAX_EXAMPLES = int(os.getenv("LEETCODE_MAX_EXAMPLES", "3"))
 
+# Max active threads (unarchived) allowed in the daily channel
+LEETCODE_MAX_ACTIVE_THREADS = int(os.getenv("LEETCODE_MAX_ACTIVE_THREADS", "5"))
 
 # ---------------- Discord intents ----------------
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
 intents.voice_states = True  # needed for voiceStateUpdate
-
 
 # ---------------- SQLite helpers ----------------
 def _db():
@@ -379,6 +380,48 @@ async def spotify_play(session: ClientSession, access_token: str) -> bool:
     return await spotify_player_put(session, access_token, "play")
 
 
+# ---------------- Thread cap helper (NEW) ----------------
+async def enforce_active_thread_cap(
+    channel: discord.TextChannel,
+    *,
+    limit: int = 5,
+    lock: bool = True,
+    reason: str = "Thread cap enforcement",
+):
+    """
+    Ensure at most `limit` active (unarchived) threads exist in `channel`.
+    If over limit, archive (and optionally lock) the oldest threads first.
+    """
+    threads: list[discord.Thread] = []
+
+    try:
+        # Preferred: API-backed list of active threads
+        threads = list(await channel.active_threads())
+    except Exception:
+        # Fallback: cached threads (may be incomplete)
+        threads = list(getattr(channel, "threads", []))
+
+    active = [
+        t for t in threads
+        if isinstance(t, discord.Thread) and not t.archived
+    ]
+
+    if len(active) <= limit:
+        return
+
+    # Oldest first
+    active.sort(key=lambda t: t.created_at or discord.utils.snowflake_time(t.id))
+    to_close = active[: max(0, len(active) - limit)]
+
+    for t in to_close:
+        try:
+            await t.edit(archived=True, locked=lock, reason=reason)
+        except discord.Forbidden:
+            print(f"[THREAD CAP] Forbidden archiving thread {t.id} ({t.name})")
+        except discord.HTTPException as e:
+            print(f"[THREAD CAP] HTTPException archiving thread {t.id} ({t.name}): {e}")
+
+
 # ---------------- LeetCode formatting helpers ----------------
 def _clean_zw(text: str) -> str:
     return (
@@ -458,6 +501,7 @@ def chunk_text(text: str, max_len: int) -> list[str]:
         chunks.append(cur)
     return chunks
 
+
 def format_leetcode_date(date_str: str) -> str:
     # date_str expected like "2026-02-07"
     try:
@@ -472,6 +516,7 @@ def format_leetcode_date(date_str: str) -> str:
             return dt.strftime("%B %#d, %Y")
         except Exception:
             return date_str
+
 
 DIFF_COLORS = {"Easy": 0x00b8a3, "Medium": 0xffc01e, "Hard": 0xff375f}
 DIFF_EMOJI = {"Easy": "🟢", "Medium": "🟡", "Hard": "🔴"}
@@ -564,6 +609,7 @@ async def fetch_leetcode_daily(session: ClientSession) -> dict:
 async def post_leetcode_daily(*, force: bool = False) -> tuple[bool, str]:
     """
     Posts ONE message (embeds) to the channel, creates a thread, and posts NOTHING inside the thread.
+    Also enforces a cap on active threads (archives oldest when over cap).
     """
     if not bot.http_session:
         return False, "http session not ready"
@@ -597,6 +643,14 @@ async def post_leetcode_daily(*, force: bool = False) -> tuple[bool, str]:
             message=sent,
             auto_archive_duration=1440,
             reason="Daily LeetCode discussion thread",
+        )
+
+        # NEW: enforce max active threads in the channel
+        await enforce_active_thread_cap(
+            channel,
+            limit=LEETCODE_MAX_ACTIVE_THREADS,
+            lock=True,
+            reason=f"Keep only {LEETCODE_MAX_ACTIVE_THREADS} active daily threads",
         )
     except Exception as e:
         print("[DAILY] thread create failed:", repr(e))
