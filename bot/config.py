@@ -8,20 +8,12 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 
-VERIFIED_ROLE_ID = int(os.getenv("VERIFIED_ROLE_ID", "0"))
 PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").rstrip("/")
 
 WEB_BIND_HOST = os.getenv("WEB_BIND_HOST", "127.0.0.1")
 WEB_PORT = int(os.getenv("WEB_PORT", "8787"))
 
 DB_PATH = os.getenv("DB_PATH", "overlay.db")
-
-VERIFY_FALLBACK_CHANNEL_ID = int(os.getenv("VERIFY_FALLBACK_CHANNEL_ID", "0"))
-
-# ---------------- Twitch ----------------
-TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
-TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
-TWITCH_REDIRECT_URI = os.getenv("TWITCH_REDIRECT_URI")
 
 # ---------------- Spotify ----------------
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")

@@ -1,14 +1,12 @@
 from aiohttp import web
 
 from .config import (
-    GUILD_ID,
     SPOTIFY_CLIENT_ID,
     SPOTIFY_CLIENT_SECRET,
     SPOTIFY_REDIRECT_URI,
     SPOTIFY_ALLOWED_USER_ID,
 )
-from .database import consume_state, upsert_mapping, spotify_upsert_tokens, spotify_set_runtime
-from .twitch import twitch_authorize_url, twitch_exchange_code, twitch_get_user, try_set_nick
+from .database import consume_state, spotify_upsert_tokens, spotify_set_runtime
 from .spotify import spotify_authorize_url, spotify_exchange_code
 
 
@@ -19,57 +17,7 @@ def make_web_app(bot_instance) -> web.Application:
     async def health(_: web.Request):
         return web.Response(text="ok", content_type="text/plain")
 
-    # ---- Twitch verification ----
-    @routes.get("/verify/start")
-    async def verify_start(request: web.Request):
-        state = request.query.get("state")
-        if not state:
-            raise web.HTTPBadRequest(text="Missing state")
-        return web.HTTPFound(twitch_authorize_url(state))
-
-    @routes.get("/twitch/callback")
-    async def twitch_callback(request: web.Request):
-        if request.query.get("error"):
-            desc = request.query.get("error_description") or "Cancelled."
-            return web.Response(text=f"Verification cancelled: {desc}", content_type="text/plain")
-
-        code = request.query.get("code")
-        state = request.query.get("state")
-        if not code or not state:
-            raise web.HTTPBadRequest(text="Missing code/state")
-
-        discord_user_id = consume_state(state)
-        if not discord_user_id:
-            return web.Response(text="This verify link is invalid or expired. Please try again.", content_type="text/plain")
-
-        session = bot_instance.http_session
-        if session is None:
-            raise web.HTTPServiceUnavailable(text="Bot not ready")
-
-        token_js = await twitch_exchange_code(session, code)
-        access_token = token_js["access_token"]
-
-        user = await twitch_get_user(session, access_token)
-        twitch_id = user["id"]
-        twitch_login = user["login"]
-        twitch_display = user["display_name"]
-
-        upsert_mapping(discord_user_id, twitch_display, twitch_login, twitch_id)
-
-        guild = bot_instance.get_guild(GUILD_ID) or await bot_instance.fetch_guild(GUILD_ID)
-        member = guild.get_member(discord_user_id) or await guild.fetch_member(discord_user_id)
-
-        ok, why = await try_set_nick(member, twitch_display)
-        if ok:
-            return web.Response(text=f"\u2705 Verified! Nickname set to: {twitch_display}\nYou can close this window.", content_type="text/plain")
-
-        return web.Response(
-            text=f"Verified as {twitch_display}, but couldn't set nickname.\nReason: {why}\n"
-                 f"(If you're server owner/admin, Discord blocks bots from renaming you.)",
-            content_type="text/plain",
-        )
-
-    # ---- Spotify OAuth (for YOU) ----
+    # ---- Spotify OAuth ----
     @routes.get("/spotify/start")
     async def spotify_start(request: web.Request):
         state = request.query.get("state")

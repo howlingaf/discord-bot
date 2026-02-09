@@ -12,15 +12,6 @@ def _db():
 def db_init():
     with _db() as conn:
         conn.execute("""
-        CREATE TABLE IF NOT EXISTS twitch_map (
-          discord_user_id INTEGER PRIMARY KEY,
-          twitch_display_name TEXT NOT NULL,
-          twitch_login TEXT,
-          twitch_user_id TEXT,
-          updated_at INTEGER NOT NULL
-        )
-        """)
-        conn.execute("""
         CREATE TABLE IF NOT EXISTS verify_state (
           state TEXT PRIMARY KEY,
           discord_user_id INTEGER NOT NULL,
@@ -68,31 +59,7 @@ def db_init():
         conn.commit()
 
 
-# ---- Twitch / verify helpers ----
-
-def has_mapping(discord_user_id: int) -> bool:
-    with _db() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM twitch_map WHERE discord_user_id=?",
-            (discord_user_id,),
-        ).fetchone()
-        return row is not None
-
-
-def upsert_mapping(discord_user_id: int, display_name: str, login: str, twitch_user_id: str):
-    now = int(time.time())
-    with _db() as conn:
-        conn.execute("""
-        INSERT INTO twitch_map(discord_user_id, twitch_display_name, twitch_login, twitch_user_id, updated_at)
-        VALUES(?,?,?,?,?)
-        ON CONFLICT(discord_user_id) DO UPDATE SET
-          twitch_display_name=excluded.twitch_display_name,
-          twitch_login=excluded.twitch_login,
-          twitch_user_id=excluded.twitch_user_id,
-          updated_at=excluded.updated_at
-        """, (discord_user_id, display_name, login, twitch_user_id, now))
-        conn.commit()
-
+# ---- OAuth state helpers (used by Spotify) ----
 
 def create_state(discord_user_id: int, ttl_sec: int = 15 * 60) -> str:
     state = secrets.token_urlsafe(24)

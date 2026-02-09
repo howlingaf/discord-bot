@@ -23,10 +23,7 @@ class MyBot(discord.Client):
 
     async def setup_hook(self):
         missing = []
-        required = [
-            "DISCORD_TOKEN", "GUILD_ID", "VERIFIED_ROLE_ID", "PUBLIC_BASE_URL",
-            "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "TWITCH_REDIRECT_URI",
-        ]
+        required = ["DISCORD_TOKEN", "GUILD_ID", "PUBLIC_BASE_URL"]
         for k in required:
             if not os.getenv(k):
                 missing.append(k)

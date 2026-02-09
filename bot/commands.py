@@ -1,51 +1,15 @@
-import urllib.parse
-
 import discord
 from discord import app_commands
 
 from .config import (
-    PUBLIC_BASE_URL,
     SPOTIFY_CLIENT_ID,
     SPOTIFY_CLIENT_SECRET,
     SPOTIFY_REDIRECT_URI,
     SPOTIFY_ALLOWED_USER_ID,
 )
-from .database import has_mapping, create_state
-from .twitch import try_set_nick
 from .spotify import dm_spotify_link
 from .leetcode import post_leetcode_daily, post_leetcode_contest
 from .client import bot
-
-
-@bot.tree.command(name="settwitch", description="Set your server nickname to your Twitch display name.")
-@app_commands.describe(display_name="Your Twitch display name (e.g., hairyrug_)")
-async def settwitch(interaction: discord.Interaction, display_name: str):
-    member = interaction.user
-    if not isinstance(member, discord.Member):
-        await interaction.response.send_message("Run this command inside the server.", ephemeral=True)
-        return
-
-    ok, why = await try_set_nick(member, display_name)
-    if ok:
-        await interaction.response.send_message(f"\u2705 Set your nickname to **{display_name}**", ephemeral=True)
-        return
-
-    await interaction.response.send_message(
-        "\u274c I can't change your nickname.\n"
-        f"Reason: {why}",
-        ephemeral=True
-    )
-
-
-@bot.tree.command(name="verify", description="Get the Twitch verify link (fallback if you didn't receive a DM).")
-async def verify(interaction: discord.Interaction):
-    if has_mapping(interaction.user.id):
-        await interaction.response.send_message("\u2705 You're already verified.", ephemeral=True)
-        return
-
-    state = create_state(interaction.user.id)
-    url = f"{PUBLIC_BASE_URL}/verify/start?state={urllib.parse.quote(state)}"
-    await interaction.response.send_message(f"Click to verify your Twitch name:\n{url}", ephemeral=True)
 
 
 @bot.tree.command(name="spotifylink", description="(Owner) DM yourself the Spotify link so the bot can auto pause/resume.")
