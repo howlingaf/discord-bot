@@ -13,8 +13,18 @@ from .config import (
     LEETCODE_DAILY_POLL_SECONDS,
     LEETCODE_MAX_ACTIVE_THREADS,
     MAX_EXAMPLES,
+    LEETCODE_WEEKLY_CHANNEL_ID,
+    LEETCODE_BIWEEKLY_CHANNEL_ID,
+    LEETCODE_CONTEST_URL,
+    LEETCODE_CONTEST_POLL_SECONDS,
+    LEETCODE_CONTEST_MAX_ACTIVE_THREADS,
 )
-from .database import leetcode_get_daily_state, leetcode_set_daily_state
+from .database import (
+    leetcode_get_daily_state,
+    leetcode_set_daily_state,
+    leetcode_get_contest_state,
+    leetcode_set_contest_state,
+)
 
 
 # ---------------- Thread cap helper ----------------
@@ -286,3 +296,137 @@ async def leetcode_daily_poller(bot):
             print("[DAILY] error:", repr(e))
 
         await asyncio.sleep(max(60, LEETCODE_DAILY_POLL_SECONDS))
+
+
+# ------------------------------------------------------------------ #
+#  LeetCode Contest (weekly / biweekly)                               #
+# ------------------------------------------------------------------ #
+
+CONTEST_COLOR = 0xFFA116  # LeetCode orange
+
+CONTEST_CHANNEL_MAP: dict[str, int] = {
+    "weekly": LEETCODE_WEEKLY_CHANNEL_ID,
+    "biweekly": LEETCODE_BIWEEKLY_CHANNEL_ID,
+}
+
+
+async def fetch_leetcode_contests(session: ClientSession) -> list[dict]:
+    async with session.get(LEETCODE_CONTEST_URL) as resp:
+        js = await resp.json()
+        if resp.status != 200:
+            raise RuntimeError(f"LeetCode contest API failed: {resp.status} {js}")
+        return js.get("topTwoContests") or []
+
+
+def _classify_contest(title_slug: str) -> str | None:
+    if title_slug.startswith("weekly-contest"):
+        return "weekly"
+    if title_slug.startswith("biweekly-contest"):
+        return "biweekly"
+    return None
+
+
+def build_contest_embed(contest: dict) -> discord.Embed:
+    title = contest.get("title") or "LeetCode Contest"
+    slug = contest.get("titleSlug") or ""
+    start_ts = contest.get("startTime") or 0
+    duration = contest.get("duration") or 5400
+
+    url = f"{LEETCODE_BASE}/contest/{slug}" if slug else LEETCODE_BASE
+    dur_min = duration // 60
+
+    desc_lines: list[str] = []
+    if start_ts:
+        desc_lines.append(f"\U0001f5d3\ufe0f **Start:** <t:{start_ts}:F> (<t:{start_ts}:R>)")
+    desc_lines.append(f"\u23f1\ufe0f **Duration:** {dur_min} minutes")
+
+    embed = discord.Embed(
+        title=title,
+        url=url,
+        description="\n".join(desc_lines),
+        color=CONTEST_COLOR,
+    )
+    return embed
+
+
+async def post_leetcode_contest(
+    bot,
+    contest_type: str,
+    *,
+    force: bool = False,
+    contests: list[dict] | None = None,
+) -> tuple[bool, str]:
+    if not bot.http_session:
+        return False, "http session not ready"
+
+    if contests is None:
+        contests = await fetch_leetcode_contests(bot.http_session)
+
+    contest = None
+    for c in contests:
+        if _classify_contest(c.get("titleSlug") or "") == contest_type:
+            contest = c
+            break
+
+    if not contest:
+        return False, f"no {contest_type} contest found in API response"
+
+    slug = contest.get("titleSlug") or ""
+
+    if not force:
+        last_slug = leetcode_get_contest_state(contest_type)
+        if last_slug == slug:
+            return False, f"already posted {contest_type} slug={slug}"
+
+    channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
+    if not channel_id:
+        return False, f"no channel configured for {contest_type}"
+
+    channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        return False, f"{contest_type} channel must be a text channel"
+
+    embed = build_contest_embed(contest)
+    sent = await channel.send(embed=embed)
+
+    title = contest.get("title") or contest_type.title()
+    thread_name = title[:100]
+    try:
+        await channel.create_thread(
+            name=thread_name,
+            message=sent,
+            auto_archive_duration=1440,
+            reason=f"{contest_type.title()} contest discussion thread",
+        )
+        await enforce_active_thread_cap(
+            channel,
+            limit=LEETCODE_CONTEST_MAX_ACTIVE_THREADS,
+            lock=True,
+            reason=f"Keep only {LEETCODE_CONTEST_MAX_ACTIVE_THREADS} active {contest_type} threads",
+        )
+    except Exception as e:
+        print(f"[CONTEST/{contest_type.upper()}] thread create failed:", repr(e))
+
+    leetcode_set_contest_state(contest_type, slug)
+    return True, f"posted {contest_type} slug={slug}"
+
+
+async def leetcode_contest_poller(bot):
+    await bot.wait_until_ready()
+    await asyncio.sleep(5)
+    print(f"\u2705 LeetCode contest poller started (every {LEETCODE_CONTEST_POLL_SECONDS}s)")
+    while not bot.is_closed():
+        try:
+            contests = await fetch_leetcode_contests(bot.http_session)
+            for ctype in ("weekly", "biweekly"):
+                try:
+                    posted, msg = await post_leetcode_contest(
+                        bot, ctype, force=False, contests=contests,
+                    )
+                    print(f"[CONTEST/{ctype.upper()}] posted={posted} {msg}")
+                except Exception as e:
+                    print(f"[CONTEST/{ctype.upper()}] error:", repr(e))
+        except Exception as e:
+            print("[CONTEST] fetch error:", repr(e))
+
+        await asyncio.sleep(max(60, LEETCODE_CONTEST_POLL_SECONDS))

@@ -57,6 +57,14 @@ def db_init():
         """)
         conn.execute("INSERT OR IGNORE INTO leetcode_daily_state(id, last_date, last_title_slug, updated_at) VALUES(1, NULL, NULL, 0)")
 
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS leetcode_contest_state (
+          contest_type TEXT PRIMARY KEY,
+          last_title_slug TEXT,
+          updated_at INTEGER NOT NULL
+        )
+        """)
+
         conn.commit()
 
 
@@ -178,5 +186,32 @@ def leetcode_set_daily_state(*, last_date: str | None, last_title_slug: str | No
         conn.execute(
             "UPDATE leetcode_daily_state SET last_date=?, last_title_slug=?, updated_at=? WHERE id=1",
             (last_date, last_title_slug, now),
+        )
+        conn.commit()
+
+
+# ---- LeetCode Contest DB helpers ----
+
+def leetcode_get_contest_state(contest_type: str) -> str | None:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT last_title_slug FROM leetcode_contest_state WHERE contest_type=?",
+            (contest_type,),
+        ).fetchone()
+        if not row:
+            return None
+        return row[0]
+
+
+def leetcode_set_contest_state(contest_type: str, last_title_slug: str):
+    now = int(time.time())
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO leetcode_contest_state(contest_type, last_title_slug, updated_at)
+               VALUES(?,?,?)
+               ON CONFLICT(contest_type) DO UPDATE SET
+                 last_title_slug=excluded.last_title_slug,
+                 updated_at=excluded.updated_at""",
+            (contest_type, last_title_slug, now),
         )
         conn.commit()

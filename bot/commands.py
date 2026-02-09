@@ -13,7 +13,7 @@ from .config import (
 from .database import has_mapping, create_state
 from .twitch import try_set_nick
 from .spotify import dm_spotify_link
-from .leetcode import post_leetcode_daily
+from .leetcode import post_leetcode_daily, post_leetcode_contest
 from .client import bot
 
 
@@ -76,6 +76,28 @@ async def daily(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
         posted, msg = await post_leetcode_daily(bot, force=force)
+        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="weekly", description="Post the current LeetCode weekly contest (manual trigger).")
+@app_commands.describe(force="If true, post even if it was already posted.")
+async def weekly(interaction: discord.Interaction, force: bool = True):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        posted, msg = await post_leetcode_contest(bot, "weekly", force=force)
+        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="biweekly", description="Post the current LeetCode biweekly contest (manual trigger).")
+@app_commands.describe(force="If true, post even if it was already posted.")
+async def biweekly(interaction: discord.Interaction, force: bool = True):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        posted, msg = await post_leetcode_contest(bot, "biweekly", force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)

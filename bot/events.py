@@ -12,7 +12,7 @@ from .config import (
 from .database import has_mapping, create_state
 from .twitch import dm_verify_link
 from .spotify import count_humans_in_channel, handle_spotify_auto_pause
-from .leetcode import leetcode_daily_poller
+from .leetcode import leetcode_daily_poller, leetcode_contest_poller
 from .client import bot
 
 
@@ -20,10 +20,14 @@ from .client import bot
 async def on_ready():
     print(f"\u2705 Logged in as {bot.user} (id={bot.user.id})")
 
-    # start LeetCode poller once
+    # start LeetCode pollers once
     if not getattr(bot, "_daily_task_started", False):
         bot._daily_task_started = True
         bot.loop.create_task(leetcode_daily_poller(bot))
+
+    if not getattr(bot, "_contest_task_started", False):
+        bot._contest_task_started = True
+        bot.loop.create_task(leetcode_contest_poller(bot))
 
 
 @bot.event
