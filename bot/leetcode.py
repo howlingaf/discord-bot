@@ -18,7 +18,6 @@ from .config import (
     LEETCODE_BIWEEKLY_CHANNEL_ID,
     LEETCODE_CONTEST_URL,
     LEETCODE_CONTEST_POLL_SECONDS,
-    LEETCODE_CONTEST_MAX_ACTIVE_THREADS,
     GUILD_ID,
 )
 from .database import (
@@ -31,39 +30,27 @@ from .database import (
 )
 
 
-# ---------------- Thread cap helper ----------------
-async def enforce_active_thread_cap(
+# ---------------- Thread helpers ----------------
+async def archive_all_threads(
     channel: discord.TextChannel,
     *,
-    limit: int = 5,
     lock: bool = True,
-    reason: str = "Thread cap enforcement",
+    reason: str = "Archiving old threads",
 ):
     threads: list[discord.Thread] = []
-
     try:
         threads = list(await channel.active_threads())
     except Exception:
         threads = list(getattr(channel, "threads", []))
 
-    active = [
-        t for t in threads
-        if isinstance(t, discord.Thread) and not t.archived
-    ]
-
-    if len(active) <= limit:
-        return
-
-    active.sort(key=lambda t: t.created_at or discord.utils.snowflake_time(t.id))
-    to_close = active[: max(0, len(active) - limit)]
-
-    for t in to_close:
-        try:
-            await t.edit(archived=True, locked=lock, reason=reason)
-        except discord.Forbidden:
-            print(f"[THREAD CAP] Forbidden archiving thread {t.id} ({t.name})")
-        except discord.HTTPException as e:
-            print(f"[THREAD CAP] HTTPException archiving thread {t.id} ({t.name}): {e}")
+    for t in threads:
+        if isinstance(t, discord.Thread) and not t.archived:
+            try:
+                await t.edit(archived=True, locked=lock, reason=reason)
+            except discord.Forbidden:
+                print(f"[ARCHIVE] Forbidden archiving thread {t.id} ({t.name})")
+            except discord.HTTPException as e:
+                print(f"[ARCHIVE] HTTPException archiving thread {t.id} ({t.name}): {e}")
 
 
 # ---------------- Formatting helpers ----------------
@@ -462,7 +449,7 @@ def build_contest_embed(contest: dict) -> discord.Embed:
 
     desc_lines: list[str] = []
     if start_ts:
-        desc_lines.append(f"\U0001f5d3\ufe0f **Start:** <t:{start_ts}:F> (<t:{start_ts}:R>)")
+        desc_lines.append(f"\U0001f5d3\ufe0f **Start:** <t:{start_ts}:F>")
     desc_lines.append(f"\u23f1\ufe0f **Duration:** {dur_min} minutes")
 
     embed = discord.Embed(
@@ -472,6 +459,9 @@ def build_contest_embed(contest: dict) -> discord.Embed:
         color=CONTEST_COLOR,
     )
     return embed
+
+
+CONTEST_LEAD_SECONDS = 2 * 60 * 60  # 2 hours before start
 
 
 async def post_leetcode_contest(
@@ -497,11 +487,17 @@ async def post_leetcode_contest(
         return False, f"no {contest_type} contest found in API response"
 
     slug = contest.get("titleSlug") or ""
+    start_ts = contest.get("startTime") or 0
 
     if not force:
         last_slug = leetcode_get_contest_state(contest_type)
         if last_slug == slug:
             return False, f"already posted {contest_type} slug={slug}"
+
+        # Only post within 2 hours of start
+        now = int(datetime.now().timestamp())
+        if start_ts and now < start_ts - CONTEST_LEAD_SECONDS:
+            return False, f"{contest_type} starts <t:{start_ts}:R>, too early to post"
 
     channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
     if not channel_id:
@@ -510,6 +506,13 @@ async def post_leetcode_contest(
     channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
     if not isinstance(channel, discord.TextChannel):
         return False, f"{contest_type} channel must be a text channel"
+
+    # Archive all existing threads before creating the new one
+    await archive_all_threads(
+        channel,
+        lock=True,
+        reason=f"New {contest_type} contest starting",
+    )
 
     embed = build_contest_embed(contest)
     sent = await channel.send(embed=embed)
@@ -520,14 +523,8 @@ async def post_leetcode_contest(
         await channel.create_thread(
             name=thread_name,
             message=sent,
-            auto_archive_duration=1440,
+            auto_archive_duration=10080,
             reason=f"{contest_type.title()} contest discussion thread",
-        )
-        await enforce_active_thread_cap(
-            channel,
-            limit=LEETCODE_CONTEST_MAX_ACTIVE_THREADS,
-            lock=True,
-            reason=f"Keep only {LEETCODE_CONTEST_MAX_ACTIVE_THREADS} active {contest_type} threads",
         )
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] thread create failed:", repr(e))
@@ -548,7 +545,10 @@ async def leetcode_contest_poller(bot):
                     posted, msg = await post_leetcode_contest(
                         bot, ctype, force=False, contests=contests,
                     )
-                    print(f"[CONTEST/{ctype.upper()}] posted={posted} {msg}")
+                    if posted:
+                        print(f"[CONTEST/{ctype.upper()}] {msg}")
+                    else:
+                        print(f"[CONTEST/{ctype.upper()}] skipped: {msg}")
                 except Exception as e:
                     print(f"[CONTEST/{ctype.upper()}] error:", repr(e))
         except Exception as e:
