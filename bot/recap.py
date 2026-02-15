@@ -156,13 +156,9 @@ async def process_recap(bot, payload: dict):
 
         sub = entries["streamer"]
         if sub:
-            lang = sub.get("lang") or ""
             sub_id = sub.get("id") or ""
             sub_url = f"{LEETCODE_BASE}/problems/{slug}/submissions/{sub_id}/" if sub_id else ""
-            if lang:
-                line = f"**{STREAMER_NAME}** solved this problem in {lang.title()}!"
-            else:
-                line = f"**{STREAMER_NAME}** solved this problem!"
+            line = f"**{STREAMER_NAME}** submitted a solution!"
             if sub_url:
                 line += f"\n<{sub_url}>"
             lines.append(line)
