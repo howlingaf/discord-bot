@@ -1,7 +1,7 @@
 import asyncio
 import html
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import discord
 from aiohttp import ClientSession
@@ -10,14 +10,12 @@ from .config import (
     LEETCODE_DAILY_URL,
     LEETCODE_PROBLEM_URL,
     LEETCODE_BASE,
-    LEETCODE_DAILY_POLL_SECONDS,
     LEETCODE_PROBLEMS_CHANNEL_ID,
     LEETCODE_DAILY_NOTIF_CHANNEL_ID,
     MAX_EXAMPLES,
     LEETCODE_WEEKLY_CHANNEL_ID,
     LEETCODE_BIWEEKLY_CHANNEL_ID,
     LEETCODE_CONTEST_URL,
-    LEETCODE_CONTEST_POLL_SECONDS,
     GUILD_ID,
 )
 from .database import (
@@ -396,10 +394,17 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
     return True, f"posted {date=} {title_slug=}"
 
 
-async def leetcode_daily_poller(bot):
+def _seconds_until_utc_midnight() -> float:
+    """Seconds from now until the next UTC midnight."""
+    now = datetime.utcnow()
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (tomorrow - now).total_seconds()
+
+
+async def leetcode_daily_scheduler(bot):
     await bot.wait_until_ready()
     await asyncio.sleep(3)
-    print(f"\u2705 LeetCode daily poller started (every {LEETCODE_DAILY_POLL_SECONDS}s)")
+    print("\u2705 LeetCode daily scheduler started")
     while not bot.is_closed():
         try:
             posted, msg = await post_leetcode_problem(bot, force=False)
@@ -407,7 +412,10 @@ async def leetcode_daily_poller(bot):
         except Exception as e:
             print("[DAILY] error:", repr(e))
 
-        await asyncio.sleep(max(60, LEETCODE_DAILY_POLL_SECONDS))
+        # Sleep until next UTC midnight + small buffer for API to update
+        wait = _seconds_until_utc_midnight() + 60
+        print(f"[DAILY] sleeping {wait:.0f}s until next UTC midnight")
+        await asyncio.sleep(wait)
 
 
 # ------------------------------------------------------------------ #
@@ -533,13 +541,15 @@ async def post_leetcode_contest(
     return True, f"posted {contest_type} slug={slug}"
 
 
-async def leetcode_contest_poller(bot):
+async def leetcode_contest_scheduler(bot):
     await bot.wait_until_ready()
     await asyncio.sleep(5)
-    print(f"\u2705 LeetCode contest poller started (every {LEETCODE_CONTEST_POLL_SECONDS}s)")
+    print("\u2705 LeetCode contest scheduler started")
     while not bot.is_closed():
         try:
             contests = await fetch_leetcode_contests(bot.http_session)
+
+            # Try to post any contest that's within the 2hr window now
             for ctype in ("weekly", "biweekly"):
                 try:
                     posted, msg = await post_leetcode_contest(
@@ -547,11 +557,27 @@ async def leetcode_contest_poller(bot):
                     )
                     if posted:
                         print(f"[CONTEST/{ctype.upper()}] {msg}")
-                    else:
-                        print(f"[CONTEST/{ctype.upper()}] skipped: {msg}")
                 except Exception as e:
                     print(f"[CONTEST/{ctype.upper()}] error:", repr(e))
-        except Exception as e:
-            print("[CONTEST] fetch error:", repr(e))
 
-        await asyncio.sleep(max(60, LEETCODE_CONTEST_POLL_SECONDS))
+            # Find the next contest post time (start - 2hrs) to sleep until
+            now = int(datetime.now().timestamp())
+            next_post_times = []
+            for c in contests:
+                start_ts = c.get("startTime") or 0
+                post_at = start_ts - CONTEST_LEAD_SECONDS
+                if post_at > now:
+                    next_post_times.append(post_at)
+
+            if next_post_times:
+                wait = min(next_post_times) - now
+                print(f"[CONTEST] sleeping {wait}s until next contest post time")
+                await asyncio.sleep(wait)
+            else:
+                # No upcoming contests found, check again in 6 hours
+                print("[CONTEST] no upcoming contests, rechecking in 6h")
+                await asyncio.sleep(6 * 60 * 60)
+
+        except Exception as e:
+            print("[CONTEST] error:", repr(e))
+            await asyncio.sleep(60 * 60)  # retry in 1 hour on error

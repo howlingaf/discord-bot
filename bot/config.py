@@ -26,9 +26,7 @@ SPOTIFY_DEBOUNCE_SECONDS = int(os.getenv("SPOTIFY_DEBOUNCE_SECONDS", "0"))
 
 SPOTIFY_SCOPES = "user-read-playback-state user-modify-playback-state"
 
-# ---------------- LeetCode Daily ----------------
-LEETCODE_DAILY_POLL_SECONDS = int(os.getenv("LEETCODE_DAILY_POLL_SECONDS", "600"))
-
+# ---------------- LeetCode ----------------
 LEETCODE_DAILY_URL = "https://leetcode-api-pied.vercel.app/daily"
 LEETCODE_PROBLEM_URL = "https://leetcode-api-pied.vercel.app/problem/{qid}"
 LEETCODE_BASE = "https://leetcode.com"
@@ -43,4 +41,3 @@ LEETCODE_DAILY_NOTIF_CHANNEL_ID = 1472396200409043086
 LEETCODE_WEEKLY_CHANNEL_ID = 1470261383701594153
 LEETCODE_BIWEEKLY_CHANNEL_ID = 1470261431483105535
 LEETCODE_CONTEST_URL = "https://leetcode-api-pied.vercel.app/contests"
-LEETCODE_CONTEST_POLL_SECONDS = int(os.getenv("LEETCODE_CONTEST_POLL_SECONDS", "1800"))
