@@ -85,7 +85,15 @@ def make_web_app(bot_instance) -> web.Application:
         except Exception:
             raise web.HTTPBadRequest(text="Invalid JSON")
 
-        asyncio.create_task(process_recap(bot_instance, payload))
+        async def _run_recap():
+            try:
+                await process_recap(bot_instance, payload)
+            except Exception as e:
+                print(f"[RECAP] process_recap failed: {e!r}")
+                import traceback
+                traceback.print_exc()
+
+        asyncio.create_task(_run_recap())
         return web.json_response({"status": "accepted"})
 
     app = web.Application()
