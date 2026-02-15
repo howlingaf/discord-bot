@@ -92,18 +92,35 @@ async def process_recap(bot, payload: dict):
     # slug -> {"streamer": [...], "chatters": [...]}
     by_slug: dict[str, dict] = {}
 
+    # Group streamer subs by slug, keep only the best one per problem:
+    # prefer last accepted, otherwise last submission
+    streamer_by_slug: dict[str, dict] = {}
     for sub in streamer_subs:
         slug = sub.get("titleSlug") or ""
         if not slug:
             continue
-        by_slug.setdefault(slug, {"streamer": [], "chatters": []})
-        by_slug[slug]["streamer"].append(sub)
+        existing = streamer_by_slug.get(slug)
+        if not existing:
+            streamer_by_slug[slug] = sub
+        else:
+            # Prefer accepted over non-accepted; among same status, prefer later
+            sub_accepted = (sub.get("statusDisplay") or "").lower() == "accepted"
+            existing_accepted = (existing.get("statusDisplay") or "").lower() == "accepted"
+            if sub_accepted and not existing_accepted:
+                streamer_by_slug[slug] = sub
+            elif sub_accepted == existing_accepted:
+                if int(sub.get("timestamp") or 0) > int(existing.get("timestamp") or 0):
+                    streamer_by_slug[slug] = sub
+
+    for slug, sub in streamer_by_slug.items():
+        by_slug.setdefault(slug, {"streamer": None, "chatters": []})
+        by_slug[slug]["streamer"] = sub
 
     for cs in chatter_submissions:
         slug = cs.get("slug") or ""
         if not slug:
             continue
-        by_slug.setdefault(slug, {"streamer": [], "chatters": []})
+        by_slug.setdefault(slug, {"streamer": None, "chatters": []})
         by_slug[slug]["chatters"].append(cs)
 
     if not by_slug:
@@ -134,10 +151,11 @@ async def process_recap(bot, payload: dict):
                 print(f"[RECAP] Could not fetch thread {thread_id}: {e}")
                 continue
 
-        # Build reply content
+        # Build reply content — use <url> to suppress embed previews
         lines = []
 
-        for sub in entries["streamer"]:
+        sub = entries["streamer"]
+        if sub:
             lang = sub.get("lang") or ""
             status = sub.get("statusDisplay") or ""
             sub_id = sub.get("id") or ""
@@ -147,7 +165,7 @@ async def process_recap(bot, payload: dict):
                 parts = [p for p in [lang, status] if p]
                 line += f" | {' | '.join(parts)}"
             if sub_url:
-                line += f"\n[View Submission]({sub_url})"
+                line += f"\n<{sub_url}>"
             lines.append(line)
 
         for cs in entries["chatters"]:
@@ -155,12 +173,11 @@ async def process_recap(bot, payload: dict):
             url = cs.get("url") or ""
             line = f"**{twitch_user}** (Twitch) submitted a solution!"
             if url:
-                line += f"\n[View Submission]({url})"
+                line += f"\n<{url}>"
             lines.append(line)
 
         if lines:
             content = "\n\n".join(lines)
-            # Discord message limit is 2000 chars
             if len(content) > 2000:
                 content = content[:1997] + "..."
             try:
@@ -171,20 +188,11 @@ async def process_recap(bot, payload: dict):
 
         # Collect for recap message
         problem_name = slug.replace("-", " ").title()
-        solvers = []
-        if entries["streamer"]:
-            solvers.append(STREAMER_NAME)
-        for cs in entries["chatters"]:
-            name = cs.get("twitch_user") or "anonymous"
-            if name not in solvers:
-                solvers.append(name)
-
         recap_entries.append({
             "slug": slug,
             "problem_name": problem_name,
             "question_id": question_id,
             "thread_id": thread_id,
-            "solvers": solvers,
         })
 
     # 5. Post recap embed
@@ -205,11 +213,8 @@ async def _post_recap_message(bot, entries: list[dict]):
     desc_lines = []
     for entry in entries:
         thread_url = f"https://discord.com/channels/{GUILD_ID}/{entry['thread_id']}"
-        solvers_str = ", ".join(f"**{s}**" for s in entry["solvers"])
         desc_lines.append(
-            f"**{entry['question_id']}. {entry['problem_name']}** — "
-            f"[View Post]({thread_url})\n"
-            f"Solved by: {solvers_str}"
+            f"[{entry['question_id']}. {entry['problem_name']}]({thread_url})"
         )
 
     embed = discord.Embed(
