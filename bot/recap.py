@@ -49,7 +49,7 @@ async def resolve_slug_to_question_id(
 
     # Fallback: fetch from API using the /problem/{slug} endpoint
     # The API also accepts slugs and returns questionFrontendId
-    url = f"https://leetcode-api-pied.vercel.app/slug/{slug}"
+    url = f"https://leetcode-api-pied.vercel.app/problem/{slug}"
     try:
         async with session.get(url) as resp:
             if resp.status != 200:
