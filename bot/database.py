@@ -160,6 +160,17 @@ def leetcode_get_problem(question_id: str) -> dict | None:
         return {"question_id": row[0], "title_slug": row[1], "title": row[2], "thread_id": row[3]}
 
 
+def leetcode_get_problem_by_slug(title_slug: str) -> dict | None:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT question_id, title_slug, title, thread_id FROM leetcode_problems WHERE title_slug=?",
+            (title_slug,),
+        ).fetchone()
+        if not row:
+            return None
+        return {"question_id": row[0], "title_slug": row[1], "title": row[2], "thread_id": row[3]}
+
+
 def leetcode_save_problem(*, question_id: str, title_slug: str, title: str, thread_id: int):
     with _db() as conn:
         conn.execute(

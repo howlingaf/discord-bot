@@ -33,6 +33,9 @@ LEETCODE_BASE = "https://leetcode.com"
 
 MAX_EXAMPLES = int(os.getenv("LEETCODE_MAX_EXAMPLES", "3"))
 
+LEETCODE_SUBMISSIONS_URL = "https://leetcode-api-pied.vercel.app/user/howlingfantods_/submissions"
+STREAMER_NAME = "howlingfantods_"
+
 # ---------------- LeetCode Problems Forum ----------------
 LEETCODE_PROBLEMS_CHANNEL_ID = 1472231552607064144
 LEETCODE_DAILY_NOTIF_CHANNEL_ID = 1472396200409043086
@@ -41,3 +44,7 @@ LEETCODE_DAILY_NOTIF_CHANNEL_ID = 1472396200409043086
 LEETCODE_WEEKLY_CHANNEL_ID = 1470261383701594153
 LEETCODE_BIWEEKLY_CHANNEL_ID = 1470261431483105535
 LEETCODE_CONTEST_URL = "https://leetcode-api-pied.vercel.app/contests"
+
+# ---------------- Recap ----------------
+RECAP_SECRET = os.getenv("RECAP_SECRET", "")
+LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490

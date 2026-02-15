@@ -1,3 +1,5 @@
+import asyncio
+
 from aiohttp import web
 
 from .config import (
@@ -5,8 +7,10 @@ from .config import (
     SPOTIFY_CLIENT_SECRET,
     SPOTIFY_REDIRECT_URI,
     SPOTIFY_ALLOWED_USER_ID,
+    RECAP_SECRET,
 )
 from .database import consume_state, spotify_upsert_tokens, spotify_set_runtime
+from .recap import process_recap
 from .spotify import spotify_authorize_url, spotify_exchange_code
 
 
@@ -68,6 +72,21 @@ def make_web_app(bot_instance) -> web.Application:
             text="\u2705 Spotify linked! Auto pause/resume can now work.\nYou can close this window.",
             content_type="text/plain",
         )
+
+    # ---- Recap ----
+    @routes.post("/recap")
+    async def recap(request: web.Request):
+        auth = request.headers.get("Authorization", "")
+        if not RECAP_SECRET or auth != f"Bearer {RECAP_SECRET}":
+            raise web.HTTPUnauthorized(text="Invalid or missing auth token")
+
+        try:
+            payload = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(text="Invalid JSON")
+
+        asyncio.create_task(process_recap(bot_instance, payload))
+        return web.json_response({"status": "accepted"})
 
     app = web.Application()
     app.add_routes(routes)
