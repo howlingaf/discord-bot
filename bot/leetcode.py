@@ -9,17 +9,20 @@ from aiohttp import ClientSession
 from .config import (
     LEETCODE_DAILY_URL,
     LEETCODE_BASE,
-    LEETCODE_DAILY_CHANNEL_ID,
     LEETCODE_DAILY_POLL_SECONDS,
-    LEETCODE_MAX_ACTIVE_THREADS,
+    LEETCODE_PROBLEMS_CHANNEL_ID,
+    LEETCODE_DAILY_NOTIF_CHANNEL_ID,
     MAX_EXAMPLES,
     LEETCODE_WEEKLY_CHANNEL_ID,
     LEETCODE_BIWEEKLY_CHANNEL_ID,
     LEETCODE_CONTEST_URL,
     LEETCODE_CONTEST_POLL_SECONDS,
     LEETCODE_CONTEST_MAX_ACTIVE_THREADS,
+    GUILD_ID,
 )
 from .database import (
+    leetcode_get_problem,
+    leetcode_save_problem,
     leetcode_get_daily_state,
     leetcode_set_daily_state,
     leetcode_get_contest_state,
@@ -161,11 +164,10 @@ DIFF_EMOJI = {"Easy": "\U0001f7e2", "Medium": "\U0001f7e1", "Hard": "\U0001f534"
 
 
 def build_daily_embeds(daily: dict) -> list[discord.Embed]:
-    date = daily.get("date") or ""
-    pretty = format_leetcode_date(date) if date else ""
     link = daily.get("link") or ""
     q = daily.get("question") or {}
-    title = q.get("title") or "LeetCode Daily"
+    qid = q.get("questionFrontendId") or q.get("questionId") or ""
+    title = f"{qid}. {q.get('title') or 'LeetCode Daily'}" if qid else (q.get("title") or "LeetCode Daily")
     difficulty = q.get("difficulty") or "Unknown"
     url = f"{LEETCODE_BASE}{link}" if link.startswith("/") else (link or LEETCODE_BASE)
 
@@ -185,8 +187,6 @@ def build_daily_embeds(daily: dict) -> list[discord.Embed]:
     embeds: list[discord.Embed] = []
 
     header_line = f"{diff_emoji} **{difficulty}**"
-    if pretty:
-        header_line += f"  \u2022  \U0001f5d3\ufe0f {pretty}"
 
     desc_parts = [header_line, ""]
 
@@ -238,49 +238,107 @@ async def fetch_leetcode_daily(session: ClientSession) -> dict:
         return js
 
 
-async def post_leetcode_daily(bot, *, force: bool = False) -> tuple[bool, str]:
+async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]:
     if not bot.http_session:
         return False, "http session not ready"
 
     daily = await fetch_leetcode_daily(bot.http_session)
-    date = daily.get("date")
+    date = daily.get("date") or ""
     q = (daily.get("question") or {})
     title_slug = q.get("titleSlug") or ""
+    qid = q.get("questionFrontendId") or q.get("questionId") or ""
+    qtitle = q.get("title") or "LeetCode Daily"
 
-    last_date, last_slug = leetcode_get_daily_state()
+    # Convert date string to unix timestamp
+    date_ts = 0
+    if date:
+        try:
+            date_ts = int(datetime.strptime(date, "%Y-%m-%d").timestamp())
+        except ValueError:
+            pass
+
+    # Check if we already sent the notification for today's daily
     if not force:
-        if date and last_date == date:
+        state = leetcode_get_daily_state()
+        if state and state["date"] == date_ts:
             return False, f"already posted for date={date}"
-        if (not date) and title_slug and last_slug == title_slug:
-            return False, f"already posted for slug={title_slug}"
 
-    channel = bot.get_channel(LEETCODE_DAILY_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_DAILY_CHANNEL_ID)
-    if not isinstance(channel, discord.TextChannel):
-        return False, "LEETCODE_DAILY_CHANNEL_ID must be a text channel"
+    # --- Forum post (look up DB, then create if needed) ---
+    forum = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
+    if not isinstance(forum, discord.ForumChannel):
+        return False, "LEETCODE_PROBLEMS_CHANNEL_ID must be a forum channel"
 
-    embeds = build_daily_embeds(daily)
+    thread_name = f"{qid}. {qtitle}".strip(". ")[:100] if qid else qtitle[:100]
 
-    sent = await channel.send(embeds=embeds)
+    existing = leetcode_get_problem(qid)
+    thread_id = existing["thread_id"] if existing else None
 
-    thread_name = f"{date or ''} \u2014 {q.get('title') or 'Daily'}".strip(" \u2014")[:100] or "LeetCode Daily"
+    if thread_id is None:
+        embeds = build_daily_embeds(daily)
+        try:
+            result = await forum.create_thread(
+                name=thread_name,
+                embeds=embeds,
+                reason="Daily LeetCode discussion post",
+            )
+            thread = result.thread if hasattr(result, "thread") else result
+            thread_id = thread.id
+            leetcode_save_problem(
+                question_id=qid,
+                title_slug=title_slug,
+                title=qtitle,
+                thread_id=thread_id,
+            )
+        except Exception as e:
+            print("[PROBLEM] forum post create failed:", repr(e))
+
+    # --- Notification card in text channel ---
     try:
-        await channel.create_thread(
-            name=thread_name,
-            message=sent,
-            auto_archive_duration=1440,
-            reason="Daily LeetCode discussion thread",
+        notif_channel = bot.get_channel(LEETCODE_DAILY_NOTIF_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_DAILY_NOTIF_CHANNEL_ID)
+
+        difficulty = q.get("difficulty") or "Unknown"
+        diff_emoji = DIFF_EMOJI.get(difficulty, "\u26aa")
+        color = DIFF_COLORS.get(difficulty, 0x808080)
+        pretty_date = format_leetcode_date(date) if date else ""
+        url = f"{LEETCODE_BASE}/problems/{title_slug}/" if title_slug else LEETCODE_BASE
+
+        notif_title = f"{qid}. {qtitle}" if qid else qtitle
+
+        desc_lines = [f"{diff_emoji} **{difficulty}**"]
+
+        # Problem statement
+        content_html = q.get("content") or ""
+        statement_html = re.sub(r"<pre[\s\S]*?</pre>", "", content_html, flags=re.IGNORECASE)
+        plain = html_to_text_preserve_newlines(statement_html)
+        statement, _ = split_statement_and_constraints(plain)
+        statement = re.sub(r"Example\s+\d+:\s*", "", statement).strip()
+        if statement:
+            trimmed = statement[:1500]
+            if len(statement) > 1500:
+                trimmed += "\n*(...continued)*"
+            desc_lines.append(f"\n{trimmed}")
+
+        if thread_id:
+            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
+            desc_lines.append(f"\n\U0001f449 [View Post]({thread_url})")
+
+        notif_embed = discord.Embed(
+            title=notif_title,
+            url=url,
+            description="\n".join(desc_lines),
+            color=color,
         )
 
-        await enforce_active_thread_cap(
-            channel,
-            limit=LEETCODE_MAX_ACTIVE_THREADS,
-            lock=True,
-            reason=f"Keep only {LEETCODE_MAX_ACTIVE_THREADS} active daily threads",
-        )
+        await notif_channel.send(embed=notif_embed)
     except Exception as e:
-        print("[DAILY] thread create failed:", repr(e))
+        print("[PROBLEM] notification send failed:", repr(e))
 
-    leetcode_set_daily_state(last_date=date, last_title_slug=title_slug)
+    leetcode_set_daily_state(
+        question_id=qid,
+        title_slug=title_slug,
+        title=qtitle,
+        date=date_ts,
+    )
     return True, f"posted {date=} {title_slug=}"
 
 
@@ -290,7 +348,7 @@ async def leetcode_daily_poller(bot):
     print(f"\u2705 LeetCode daily poller started (every {LEETCODE_DAILY_POLL_SECONDS}s)")
     while not bot.is_closed():
         try:
-            posted, msg = await post_leetcode_daily(bot, force=False)
+            posted, msg = await post_leetcode_problem(bot, force=False)
             print(f"[DAILY] posted={posted} {msg}")
         except Exception as e:
             print("[DAILY] error:", repr(e))

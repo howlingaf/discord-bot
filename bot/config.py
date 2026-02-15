@@ -27,14 +27,16 @@ SPOTIFY_DEBOUNCE_SECONDS = int(os.getenv("SPOTIFY_DEBOUNCE_SECONDS", "0"))
 SPOTIFY_SCOPES = "user-read-playback-state user-modify-playback-state"
 
 # ---------------- LeetCode Daily ----------------
-LEETCODE_DAILY_CHANNEL_ID = 1469550906587611260
 LEETCODE_DAILY_POLL_SECONDS = int(os.getenv("LEETCODE_DAILY_POLL_SECONDS", "600"))
 
 LEETCODE_DAILY_URL = "https://leetcode-api-pied.vercel.app/daily"
 LEETCODE_BASE = "https://leetcode.com"
 
 MAX_EXAMPLES = int(os.getenv("LEETCODE_MAX_EXAMPLES", "3"))
-LEETCODE_MAX_ACTIVE_THREADS = int(os.getenv("LEETCODE_MAX_ACTIVE_THREADS", "2"))
+
+# ---------------- LeetCode Problems Forum ----------------
+LEETCODE_PROBLEMS_CHANNEL_ID = 1472231552607064144
+LEETCODE_DAILY_NOTIF_CHANNEL_ID = 1472396200409043086
 
 # ---------------- LeetCode Contests ----------------
 LEETCODE_WEEKLY_CHANNEL_ID = 1470261383701594153

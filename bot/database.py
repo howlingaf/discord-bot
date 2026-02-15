@@ -39,14 +39,24 @@ def db_init():
         conn.execute("INSERT OR IGNORE INTO spotify_runtime(id, paused_by_bot, last_action_at, last_member_count) VALUES(1,0,0,-1)")
 
         conn.execute("""
-        CREATE TABLE IF NOT EXISTS leetcode_daily_state (
-          id INTEGER PRIMARY KEY CHECK (id = 1),
-          last_date TEXT,
-          last_title_slug TEXT,
-          updated_at INTEGER NOT NULL
+        CREATE TABLE IF NOT EXISTS leetcode_problems (
+          question_id TEXT PRIMARY KEY,
+          title_slug TEXT NOT NULL,
+          title TEXT NOT NULL,
+          thread_id INTEGER NOT NULL
         )
         """)
-        conn.execute("INSERT OR IGNORE INTO leetcode_daily_state(id, last_date, last_title_slug, updated_at) VALUES(1, NULL, NULL, 0)")
+
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS leetcode_daily_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          question_id TEXT,
+          title_slug TEXT,
+          title TEXT,
+          date INTEGER
+        )
+        """)
+        conn.execute("INSERT OR IGNORE INTO leetcode_daily_state(id) VALUES(1)")
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS leetcode_contest_state (
@@ -137,22 +147,46 @@ def spotify_set_runtime(*, paused_by_bot: bool | None = None, last_action_at: in
         conn.commit()
 
 
-# ---- LeetCode DB helpers ----
+# ---- LeetCode Problem helpers ----
 
-def leetcode_get_daily_state() -> tuple[str | None, str | None]:
+def leetcode_get_problem(question_id: str) -> dict | None:
     with _db() as conn:
-        row = conn.execute("SELECT last_date, last_title_slug FROM leetcode_daily_state WHERE id=1").fetchone()
+        row = conn.execute(
+            "SELECT question_id, title_slug, title, thread_id FROM leetcode_problems WHERE question_id=?",
+            (question_id,),
+        ).fetchone()
         if not row:
-            return None, None
-        return row[0], row[1]
+            return None
+        return {"question_id": row[0], "title_slug": row[1], "title": row[2], "thread_id": row[3]}
 
 
-def leetcode_set_daily_state(*, last_date: str | None, last_title_slug: str | None):
-    now = int(time.time())
+def leetcode_save_problem(*, question_id: str, title_slug: str, title: str, thread_id: int):
     with _db() as conn:
         conn.execute(
-            "UPDATE leetcode_daily_state SET last_date=?, last_title_slug=?, updated_at=? WHERE id=1",
-            (last_date, last_title_slug, now),
+            """INSERT INTO leetcode_problems(question_id, title_slug, title, thread_id)
+               VALUES(?,?,?,?)
+               ON CONFLICT(question_id) DO UPDATE SET
+                 thread_id=excluded.thread_id""",
+            (question_id, title_slug, title, thread_id),
+        )
+        conn.commit()
+
+
+# ---- LeetCode Daily state helpers ----
+
+def leetcode_get_daily_state() -> dict | None:
+    with _db() as conn:
+        row = conn.execute("SELECT question_id, title_slug, title, date FROM leetcode_daily_state WHERE id=1").fetchone()
+        if not row or not row[0]:
+            return None
+        return {"question_id": row[0], "title_slug": row[1], "title": row[2], "date": row[3]}
+
+
+def leetcode_set_daily_state(*, question_id: str, title_slug: str, title: str, date: int):
+    with _db() as conn:
+        conn.execute(
+            "UPDATE leetcode_daily_state SET question_id=?, title_slug=?, title=?, date=? WHERE id=1",
+            (question_id, title_slug, title, date),
         )
         conn.commit()
 
