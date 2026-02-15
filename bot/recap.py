@@ -8,7 +8,7 @@ from .config import (
     LEETCODE_RECAP_CHANNEL_ID,
     STREAMER_NAME,
 )
-from .database import leetcode_get_problem_by_slug
+from .database import leetcode_get_problem_by_slug, leetcode_save_problem
 from .leetcode import (
     DIFF_COLORS,
     DIFF_EMOJI,
@@ -56,7 +56,10 @@ async def resolve_slug_to_question_id(
                 print(f"[RECAP] Failed to resolve slug '{slug}': HTTP {resp.status}")
                 return None
             data = await resp.json()
-            return str(data.get("questionFrontendId") or data.get("questionId") or "")
+            qid = str(data.get("questionFrontendId") or data.get("questionId") or "")
+            if not qid:
+                return None
+            return qid
     except Exception as e:
         print(f"[RECAP] Error resolving slug '{slug}': {e}")
         return None
