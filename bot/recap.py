@@ -171,7 +171,7 @@ async def process_recap(bot, payload: dict):
         for cs in entries["chatters"]:
             twitch_user = cs.get("twitch_user") or "anonymous"
             url = cs.get("url") or ""
-            line = f"**{twitch_user}** (Twitch) submitted a solution!"
+            line = f"**{twitch_user}** submitted a solution!"
             if url:
                 line += f"\n<{url}>"
             lines.append(line)
