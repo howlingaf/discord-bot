@@ -30,6 +30,7 @@ SPOTIFY_SCOPES = "user-read-playback-state user-modify-playback-state"
 LEETCODE_DAILY_POLL_SECONDS = int(os.getenv("LEETCODE_DAILY_POLL_SECONDS", "600"))
 
 LEETCODE_DAILY_URL = "https://leetcode-api-pied.vercel.app/daily"
+LEETCODE_PROBLEM_URL = "https://leetcode-api-pied.vercel.app/problem/{qid}"
 LEETCODE_BASE = "https://leetcode.com"
 
 MAX_EXAMPLES = int(os.getenv("LEETCODE_MAX_EXAMPLES", "3"))

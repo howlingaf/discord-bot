@@ -1,3 +1,5 @@
+import asyncio
+
 import discord
 from discord import app_commands
 
@@ -8,7 +10,9 @@ from .config import (
     SPOTIFY_ALLOWED_USER_ID,
 )
 from .spotify import dm_spotify_link
-from .leetcode import post_leetcode_contest
+from .config import GUILD_ID
+from .leetcode import post_leetcode_contest, get_or_create_problem_post
+from .database import leetcode_delete_problem
 from .client import bot
 
 
@@ -33,6 +37,54 @@ async def spotifylink(interaction: discord.Interaction):
     except discord.Forbidden:
         await interaction.response.send_message("\u274c I can't DM you.", ephemeral=True)
 
+
+
+@bot.tree.command(name="problem", description="Look up or create a forum post for a LeetCode problem by ID.")
+@app_commands.describe(question_id="The LeetCode problem number (e.g. 67)")
+async def problem(interaction: discord.Interaction, question_id: int):
+    if question_id < 1:
+        await interaction.response.send_message("\u274c Invalid problem ID.", delete_after=5)
+        return
+
+    await interaction.response.defer()
+    try:
+        thread_id, err = await get_or_create_problem_post(bot, str(question_id))
+        if thread_id:
+            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
+            msg = await interaction.followup.send(thread_url)
+            await asyncio.sleep(5)
+            await msg.delete()
+        else:
+            msg = await interaction.followup.send(f"\u274c {err}")
+            await asyncio.sleep(5)
+            await msg.delete()
+    except Exception as e:
+        msg = await interaction.followup.send(f"\u274c Invalid problem ID.")
+        await asyncio.sleep(5)
+        await msg.delete()
+
+
+@bot.tree.command(name="delete", description="(Admin) Delete a problem post by LeetCode ID.")
+@app_commands.describe(question_id="The LeetCode problem number to delete (e.g. 67)")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def delete_problem(interaction: discord.Interaction, question_id: int):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        deleted = leetcode_delete_problem(str(question_id))
+        if not deleted:
+            await interaction.followup.send(f"\u274c Problem #{question_id} not found.", ephemeral=True)
+            return
+
+        # Delete the forum post
+        try:
+            thread = bot.get_channel(deleted["thread_id"]) or await bot.fetch_channel(deleted["thread_id"])
+            await thread.delete()
+        except Exception:
+            pass
+
+        await interaction.followup.send(f"\u2705 Deleted problem #{question_id} ({deleted['title']}).", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
 @bot.tree.command(name="weekly", description="Post the current LeetCode weekly contest (manual trigger).")

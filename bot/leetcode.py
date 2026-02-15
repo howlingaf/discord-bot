@@ -8,6 +8,7 @@ from aiohttp import ClientSession
 
 from .config import (
     LEETCODE_DAILY_URL,
+    LEETCODE_PROBLEM_URL,
     LEETCODE_BASE,
     LEETCODE_DAILY_POLL_SECONDS,
     LEETCODE_PROBLEMS_CHANNEL_ID,
@@ -236,6 +237,72 @@ async def fetch_leetcode_daily(session: ClientSession) -> dict:
         if resp.status != 200:
             raise RuntimeError(f"LeetCode daily API failed: {resp.status} {js}")
         return js
+
+
+async def fetch_leetcode_problem(session: ClientSession, question_id: str) -> dict:
+    """Fetch full problem details by frontend ID."""
+    url = LEETCODE_PROBLEM_URL.format(qid=question_id)
+    async with session.get(url) as resp:
+        js = await resp.json()
+        if resp.status != 200:
+            raise RuntimeError(f"LeetCode problem API failed: {resp.status} {js}")
+        return {
+            "question": {
+                "questionFrontendId": js.get("questionFrontendId") or js.get("questionId") or "",
+                "title": js.get("title") or "",
+                "titleSlug": js.get("titleSlug") or "",
+                "difficulty": js.get("difficulty") or "Unknown",
+                "content": js.get("content") or "",
+            },
+            "link": f"/problems/{js.get('titleSlug') or ''}/",
+        }
+
+
+async def get_or_create_problem_post(bot, question_id: str) -> tuple[int | None, str]:
+    """Look up or create a forum post for the given question ID.
+
+    Returns (thread_id, error_message). thread_id is None on failure.
+    """
+    if not bot.http_session:
+        return None, "http session not ready"
+
+    # Check DB first
+    existing = leetcode_get_problem(question_id)
+    if existing:
+        return existing["thread_id"], ""
+
+    # Fetch problem details
+    data = await fetch_leetcode_problem(bot.http_session, question_id)
+    q = data["question"]
+    qid = q["questionFrontendId"]
+    qtitle = q["title"]
+    title_slug = q["titleSlug"]
+
+    if not qtitle:
+        return None, f"could not find LeetCode problem #{question_id}"
+
+    # Create forum post
+    forum = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
+    if not isinstance(forum, discord.ForumChannel):
+        return None, "problems channel is not a forum channel"
+
+    thread_name = f"{qid}. {qtitle}".strip(". ")[:100] if qid else qtitle[:100]
+    embeds = build_daily_embeds(data)
+
+    result = await forum.create_thread(
+        name=thread_name,
+        embeds=embeds,
+        reason=f"Problem post for #{qid}",
+    )
+    thread = result.thread if hasattr(result, "thread") else result
+
+    leetcode_save_problem(
+        question_id=qid,
+        title_slug=title_slug,
+        title=qtitle,
+        thread_id=thread.id,
+    )
+    return thread.id, ""
 
 
 async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]:
