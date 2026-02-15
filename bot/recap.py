@@ -76,6 +76,7 @@ async def process_recap(bot, payload: dict):
     """
     stream_start = int(payload.get("stream_start") or 0)
     stream_end = int(payload.get("stream_end") or 0)
+    stream_problems = payload.get("stream_problems") or []
     chatter_submissions = payload.get("chatter_submissions") or []
 
     if not bot.http_session:
@@ -84,26 +85,35 @@ async def process_recap(bot, payload: dict):
 
     session: ClientSession = bot.http_session
 
-    # 1. Fetch streamer submissions
+    # Only recap problems that were worked on stream (from !lt commands)
+    # Plus any problems chatters submitted for
+    problem_slugs: list[str] = list(stream_problems)
+    for cs in chatter_submissions:
+        slug = cs.get("slug") or ""
+        if slug and slug not in problem_slugs:
+            problem_slugs.append(slug)
+
+    if not problem_slugs:
+        print("[RECAP] No stream problems to recap")
+        return
+
+    print(f"[RECAP] Problems to recap: {problem_slugs}")
+
+    # Fetch streamer submissions, filter to stream window and relevant problems
     streamer_subs = await fetch_streamer_submissions(session, stream_start, stream_end)
     print(f"[RECAP] Found {len(streamer_subs)} streamer submissions in window")
 
-    # 2. Group everything by slug
-    # slug -> {"streamer": [...], "chatters": [...]}
-    by_slug: dict[str, dict] = {}
-
-    # Group streamer subs by slug, keep only the best one per problem:
+    # Pick best streamer submission per problem:
     # prefer last accepted, otherwise last submission
     streamer_by_slug: dict[str, dict] = {}
     for sub in streamer_subs:
         slug = sub.get("titleSlug") or ""
-        if not slug:
+        if not slug or slug not in problem_slugs:
             continue
         existing = streamer_by_slug.get(slug)
         if not existing:
             streamer_by_slug[slug] = sub
         else:
-            # Prefer accepted over non-accepted; among same status, prefer later
             sub_accepted = (sub.get("statusDisplay") or "").lower() == "accepted"
             existing_accepted = (existing.get("statusDisplay") or "").lower() == "accepted"
             if sub_accepted and not existing_accepted:
@@ -112,20 +122,15 @@ async def process_recap(bot, payload: dict):
                 if int(sub.get("timestamp") or 0) > int(existing.get("timestamp") or 0):
                     streamer_by_slug[slug] = sub
 
-    for slug, sub in streamer_by_slug.items():
-        by_slug.setdefault(slug, {"streamer": None, "chatters": []})
-        by_slug[slug]["streamer"] = sub
+    # Group by slug
+    by_slug: dict[str, dict] = {}
+    for slug in problem_slugs:
+        by_slug[slug] = {"streamer": streamer_by_slug.get(slug), "chatters": []}
 
     for cs in chatter_submissions:
         slug = cs.get("slug") or ""
-        if not slug:
-            continue
-        by_slug.setdefault(slug, {"streamer": None, "chatters": []})
-        by_slug[slug]["chatters"].append(cs)
-
-    if not by_slug:
-        print("[RECAP] No submissions to recap")
-        return
+        if slug in by_slug:
+            by_slug[slug]["chatters"].append(cs)
 
     # 3 & 4. For each problem, get/create forum post and reply
     recap_entries = []  # for the recap message
