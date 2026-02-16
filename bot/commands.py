@@ -11,7 +11,7 @@ from .config import (
 )
 from .spotify import dm_spotify_link
 from .config import GUILD_ID
-from .leetcode import post_leetcode_contest, get_or_create_problem_post
+from .leetcode import post_leetcode_contest, post_leetcode_problem, get_or_create_problem_post
 from .database import leetcode_delete_problem
 from .client import bot
 
@@ -83,6 +83,17 @@ async def delete_problem(interaction: discord.Interaction, question_id: int):
             pass
 
         await interaction.followup.send(f"\u2705 Deleted problem #{question_id} ({deleted['title']}).", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="daily", description="Post today's LeetCode daily problem (manual trigger).")
+@app_commands.describe(force="If true, post even if it was already posted.")
+async def daily(interaction: discord.Interaction, force: bool = True):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        posted, msg = await post_leetcode_problem(bot, force=force)
+        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
