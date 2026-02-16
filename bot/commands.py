@@ -87,8 +87,9 @@ async def delete_problem(interaction: discord.Interaction, question_id: int):
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
-@bot.tree.command(name="daily", description="Post today's LeetCode daily problem (manual trigger).")
+@bot.tree.command(name="daily", description="(Admin) Post today's LeetCode daily problem (manual trigger).")
 @app_commands.describe(force="If true, post even if it was already posted.")
+@app_commands.checks.has_permissions(manage_messages=True)
 async def daily(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
@@ -98,8 +99,9 @@ async def daily(interaction: discord.Interaction, force: bool = True):
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
-@bot.tree.command(name="weekly", description="Post the current LeetCode weekly contest (manual trigger).")
+@bot.tree.command(name="weekly", description="(Admin) Post the current LeetCode weekly contest (manual trigger).")
 @app_commands.describe(force="If true, post even if it was already posted.")
+@app_commands.checks.has_permissions(manage_messages=True)
 async def weekly(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
@@ -109,8 +111,9 @@ async def weekly(interaction: discord.Interaction, force: bool = True):
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
-@bot.tree.command(name="biweekly", description="Post the current LeetCode biweekly contest (manual trigger).")
+@bot.tree.command(name="biweekly", description="(Admin) Post the current LeetCode biweekly contest (manual trigger).")
 @app_commands.describe(force="If true, post even if it was already posted.")
+@app_commands.checks.has_permissions(manage_messages=True)
 async def biweekly(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:

@@ -92,6 +92,22 @@ def extract_pre_blocks(content_html: str) -> list[str]:
     return out
 
 
+def extract_example_blocks(content_html: str) -> list[str]:
+    """Extract examples from <div class="example-block"> sections."""
+    blocks = re.findall(r'<div\s+class="example-block"[\s\S]*?</div>', content_html or "", flags=re.IGNORECASE)
+    out: list[str] = []
+    for b in blocks:
+        b = re.sub(r"<table[\s\S]*?</table>", "", b, flags=re.IGNORECASE)
+        b = re.sub(r"<[^>]+>", "", b)
+        b = html.unescape(b)
+        b = _clean_zw(b)
+        b = b.replace("\r\n", "\n").replace("\r", "\n")
+        b = re.sub(r"\n{2,}", "\n", b).strip()
+        if b:
+            out.append(b)
+    return out
+
+
 def split_statement_and_constraints(plain_text: str) -> tuple[str, str]:
     m = re.search(r"\bConstraints\s*:\s*", plain_text, flags=re.IGNORECASE)
     if not m:
@@ -160,12 +176,16 @@ def build_daily_embeds(daily: dict) -> list[discord.Embed]:
     content_html = q.get("content") or ""
 
     examples = extract_pre_blocks(content_html)[:max(0, MAX_EXAMPLES)]
+    if not examples:
+        examples = extract_example_blocks(content_html)[:max(0, MAX_EXAMPLES)]
 
     statement_html = re.sub(r"<pre[\s\S]*?</pre>", "", content_html, flags=re.IGNORECASE)
+    statement_html = re.sub(r'<div\s+class="example-block"[\s\S]*?</div>', "", statement_html, flags=re.IGNORECASE)
     plain = html_to_text_preserve_newlines(statement_html)
     statement, constraints = split_statement_and_constraints(plain)
 
     statement = re.sub(r"Example\s+\d+:\s*", "", statement).strip()
+    statement = re.sub(r"Follow\s+up:[\s\S]*", "", statement, flags=re.IGNORECASE).strip()
 
     diff_emoji = DIFF_EMOJI.get(difficulty, "\u26aa")
     color = DIFF_COLORS.get(difficulty, 0x808080)
@@ -358,12 +378,14 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
 
         desc_lines = [f"{diff_emoji} **{difficulty}**"]
 
-        # Problem statement
+        # Problem statement – strip examples, constraints, follow-up
         content_html = q.get("content") or ""
         statement_html = re.sub(r"<pre[\s\S]*?</pre>", "", content_html, flags=re.IGNORECASE)
+        statement_html = re.sub(r"<div\s+class=\"example-block\"[\s\S]*?</div>", "", statement_html, flags=re.IGNORECASE)
         plain = html_to_text_preserve_newlines(statement_html)
         statement, _ = split_statement_and_constraints(plain)
         statement = re.sub(r"Example\s+\d+:\s*", "", statement).strip()
+        statement = re.sub(r"Follow\s+up:[\s\S]*", "", statement, flags=re.IGNORECASE).strip()
         if statement:
             trimmed = statement[:1500]
             if len(statement) > 1500:
