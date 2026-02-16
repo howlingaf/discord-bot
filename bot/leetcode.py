@@ -251,15 +251,21 @@ async def fetch_leetcode_problem(session: ClientSession, question_id: str) -> di
         js = await resp.json()
         if resp.status != 200:
             raise RuntimeError(f"LeetCode problem API failed: {resp.status} {js}")
+        # The /problem endpoint doesn't return titleSlug directly,
+        # but provides a full url like "https://leetcode.com/problems/reverse-bits/"
+        problem_url = js.get("url") or ""
+        slug_match = re.search(r"/problems/([^/]+)", problem_url)
+        title_slug = slug_match.group(1) if slug_match else ""
+
         return {
             "question": {
                 "questionFrontendId": js.get("questionFrontendId") or js.get("questionId") or "",
                 "title": js.get("title") or "",
-                "titleSlug": js.get("titleSlug") or "",
+                "titleSlug": title_slug,
                 "difficulty": js.get("difficulty") or "Unknown",
                 "content": js.get("content") or "",
             },
-            "link": f"/problems/{js.get('titleSlug') or ''}/",
+            "link": f"/problems/{title_slug}/" if title_slug else "",
         }
 
 
