@@ -406,11 +406,23 @@ async def leetcode_daily_scheduler(bot):
     await asyncio.sleep(3)
     print("\u2705 LeetCode daily scheduler started")
     while not bot.is_closed():
-        try:
-            posted, msg = await post_leetcode_problem(bot, force=False)
-            print(f"[DAILY] posted={posted} {msg}")
-        except Exception as e:
-            print("[DAILY] error:", repr(e))
+        posted = False
+        # Retry up to 10 times (every 2 min) in case the API is slow to update
+        for attempt in range(10):
+            try:
+                posted, msg = await post_leetcode_problem(bot, force=False)
+                print(f"[DAILY] attempt={attempt+1} posted={posted} {msg}")
+            except Exception as e:
+                print(f"[DAILY] attempt={attempt+1} error:", repr(e))
+
+            if posted:
+                break
+
+            # Wait 2 minutes before retrying
+            await asyncio.sleep(120)
+
+        if not posted:
+            print("[DAILY] giving up after 10 attempts, waiting for next midnight")
 
         # Sleep until next UTC midnight + small buffer for API to update
         wait = _seconds_until_utc_midnight() + 60
