@@ -58,6 +58,14 @@ def db_init():
         """)
         conn.execute("INSERT OR IGNORE INTO leetcode_daily_state(id) VALUES(1)")
 
+        # Migrate: add columns that may be missing from older schema
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(leetcode_daily_state)")}
+        for col in ("question_id TEXT", "title_slug TEXT", "title TEXT", "date INTEGER"):
+            name = col.split()[0]
+            if name not in existing_cols:
+                conn.execute(f"ALTER TABLE leetcode_daily_state ADD COLUMN {col}")
+                print(f"[DB] Added missing column '{name}' to leetcode_daily_state")
+
         conn.execute("""
         CREATE TABLE IF NOT EXISTS leetcode_contest_state (
           contest_type TEXT PRIMARY KEY,
