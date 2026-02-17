@@ -186,14 +186,15 @@ async def process_recap(bot, payload: dict):
             except Exception as e:
                 print(f"[RECAP] Failed to send to thread {thread_id}: {e}")
 
-        # Collect for recap message
-        problem_name = slug.replace("-", " ").title()
-        recap_entries.append({
-            "slug": slug,
-            "problem_name": problem_name,
-            "question_id": question_id,
-            "thread_id": thread_id,
-        })
+        # Only include streamer's problems in the recap embed
+        if slug in stream_problems:
+            problem_name = slug.replace("-", " ").title()
+            recap_entries.append({
+                "slug": slug,
+                "problem_name": problem_name,
+                "question_id": question_id,
+                "thread_id": thread_id,
+            })
 
     # 5. Post recap embed
     if recap_entries:
