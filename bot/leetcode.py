@@ -1,7 +1,7 @@
 import asyncio
 import html
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import discord
 from aiohttp import ClientSession
@@ -421,12 +421,6 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
     )
     return True, f"posted {date=} {title_slug=}"
 
-
-def _seconds_until_utc_midnight() -> float:
-    """Seconds from now until the next UTC midnight."""
-    now = datetime.utcnow()
-    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    return (tomorrow - now).total_seconds()
 
 
 async def leetcode_daily_scheduler(bot):
