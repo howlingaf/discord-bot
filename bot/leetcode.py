@@ -165,6 +165,22 @@ DIFF_COLORS = {"Easy": 0x00b8a3, "Medium": 0xffc01e, "Hard": 0xff375f}
 DIFF_EMOJI = {"Easy": "\U0001f7e2", "Medium": "\U0001f7e1", "Hard": "\U0001f534"}
 
 
+def _find_forum_tags(forum: discord.ForumChannel, names: list[str]) -> list[discord.ForumTag]:
+    name_set = {n.lower() for n in names}
+    return [t for t in forum.available_tags if t.name.lower() in name_set]
+
+
+async def _get_or_create_forum_tag(forum: discord.ForumChannel, name: str) -> discord.ForumTag:
+    for tag in forum.available_tags:
+        if tag.name == name:
+            return tag
+    updated = await forum.edit(available_tags=list(forum.available_tags) + [discord.ForumTag(name=name)])
+    for tag in updated.available_tags:
+        if tag.name == name:
+            return tag
+    raise RuntimeError(f"Could not create forum tag '{name}'")
+
+
 def build_daily_embeds(daily: dict) -> list[discord.Embed]:
     link = daily.get("link") or ""
     q = daily.get("question") or {}
@@ -263,6 +279,7 @@ async def fetch_leetcode_problem(session: ClientSession, question_id: str) -> di
                 "title": js.get("title") or "",
                 "titleSlug": title_slug,
                 "difficulty": js.get("difficulty") or "Unknown",
+                "isPaidOnly": bool(js.get("isPaidOnly") or js.get("paidOnly")),
                 "content": js.get("content") or "",
             },
             "link": f"/problems/{title_slug}/" if title_slug else "",
@@ -300,9 +317,15 @@ async def get_or_create_problem_post(bot, question_id: str) -> tuple[int | None,
     thread_name = f"{qid}. {qtitle}".strip(". ")[:100] if qid else qtitle[:100]
     embeds = build_daily_embeds(data)
 
+    tag_names = [q.get("difficulty") or ""]
+    if q.get("isPaidOnly"):
+        tag_names.append("Premium")
+    tags = _find_forum_tags(forum, tag_names)
+
     result = await forum.create_thread(
         name=thread_name,
         embeds=embeds,
+        applied_tags=tags,
         reason=f"Problem post for #{qid}",
     )
     thread = result.thread if hasattr(result, "thread") else result
@@ -312,6 +335,7 @@ async def get_or_create_problem_post(bot, question_id: str) -> tuple[int | None,
         title_slug=title_slug,
         title=qtitle,
         thread_id=thread.id,
+        difficulty=q.get("difficulty"),
     )
     return thread.id, ""
 
@@ -335,6 +359,14 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
         except ValueError:
             pass
 
+    # Capture old daily's thread_id for tag swap later
+    old_daily = leetcode_get_daily_state()
+    old_thread_id: int | None = None
+    if old_daily and old_daily.get("question_id") != qid:
+        old_problem = leetcode_get_problem(old_daily["question_id"])
+        if old_problem:
+            old_thread_id = old_problem["thread_id"]
+
     # Check if we already sent the notification for today's daily
     if not force:
         state = leetcode_get_daily_state()
@@ -346,6 +378,12 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
     if not isinstance(forum, discord.ForumChannel):
         return False, "LEETCODE_PROBLEMS_CHANNEL_ID must be a forum channel"
 
+    daily_tag: discord.ForumTag | None = None
+    try:
+        daily_tag = await _get_or_create_forum_tag(forum, "Daily")
+    except Exception as e:
+        print(f"[DAILY TAG] Could not get/create tag: {e}")
+
     thread_name = f"{qid}. {qtitle}".strip(". ")[:100] if qid else qtitle[:100]
 
     existing = leetcode_get_problem(qid)
@@ -354,9 +392,16 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
     if thread_id is None:
         embeds = build_daily_embeds(daily)
         try:
+            tag_names = [q.get("difficulty") or ""]
+            if q.get("isPaidOnly"):
+                tag_names.append("Premium")
+            tags = _find_forum_tags(forum, tag_names)
+            if daily_tag:
+                tags = [t for t in tags if t.id != daily_tag.id] + [daily_tag]
             result = await forum.create_thread(
                 name=thread_name,
                 embeds=embeds,
+                applied_tags=tags,
                 reason="Daily LeetCode discussion post",
             )
             thread = result.thread if hasattr(result, "thread") else result
@@ -366,9 +411,29 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
                 title_slug=title_slug,
                 title=qtitle,
                 thread_id=thread_id,
+                difficulty=q.get("difficulty"),
             )
         except Exception as e:
             print("[PROBLEM] forum post create failed:", repr(e))
+    elif daily_tag and thread_id:
+        # Thread already exists — apply the Daily tag if not already present
+        try:
+            existing_thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
+            if isinstance(existing_thread, discord.Thread):
+                if not any(t.id == daily_tag.id for t in existing_thread.applied_tags):
+                    await existing_thread.edit(applied_tags=list(existing_thread.applied_tags) + [daily_tag])
+        except Exception as e:
+            print(f"[DAILY TAG] Failed to apply tag to thread {thread_id}: {e}")
+
+    # Remove Daily tag from previous daily's thread
+    if daily_tag and old_thread_id and old_thread_id != thread_id:
+        try:
+            old_thread = bot.get_channel(old_thread_id) or await bot.fetch_channel(old_thread_id)
+            if isinstance(old_thread, discord.Thread):
+                new_applied = [t for t in old_thread.applied_tags if t.id != daily_tag.id]
+                await old_thread.edit(applied_tags=new_applied)
+        except Exception as e:
+            print(f"[DAILY TAG] Failed to remove tag from old thread {old_thread_id}: {e}")
 
     # --- Notification card in text channel ---
     try:

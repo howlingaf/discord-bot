@@ -43,7 +43,8 @@ def db_init():
           question_id TEXT PRIMARY KEY,
           title_slug TEXT NOT NULL,
           title TEXT NOT NULL,
-          thread_id INTEGER NOT NULL
+          thread_id INTEGER NOT NULL,
+          difficulty TEXT
         )
         """)
 
@@ -65,6 +66,11 @@ def db_init():
             if name not in existing_cols:
                 conn.execute(f"ALTER TABLE leetcode_daily_state ADD COLUMN {col}")
                 print(f"[DB] Added missing column '{name}' to leetcode_daily_state")
+
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(leetcode_problems)")}
+        if "difficulty" not in existing_cols:
+            conn.execute("ALTER TABLE leetcode_problems ADD COLUMN difficulty TEXT")
+            print("[DB] Added missing column 'difficulty' to leetcode_problems")
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS leetcode_contest_state (
@@ -160,33 +166,34 @@ def spotify_set_runtime(*, paused_by_bot: bool | None = None, last_action_at: in
 def leetcode_get_problem(question_id: str) -> dict | None:
     with _db() as conn:
         row = conn.execute(
-            "SELECT question_id, title_slug, title, thread_id FROM leetcode_problems WHERE question_id=?",
+            "SELECT question_id, title_slug, title, thread_id, difficulty FROM leetcode_problems WHERE question_id=?",
             (question_id,),
         ).fetchone()
         if not row:
             return None
-        return {"question_id": row[0], "title_slug": row[1], "title": row[2], "thread_id": row[3]}
+        return {"question_id": row[0], "title_slug": row[1], "title": row[2], "thread_id": row[3], "difficulty": row[4]}
 
 
 def leetcode_get_problem_by_slug(title_slug: str) -> dict | None:
     with _db() as conn:
         row = conn.execute(
-            "SELECT question_id, title_slug, title, thread_id FROM leetcode_problems WHERE title_slug=?",
+            "SELECT question_id, title_slug, title, thread_id, difficulty FROM leetcode_problems WHERE title_slug=?",
             (title_slug,),
         ).fetchone()
         if not row:
             return None
-        return {"question_id": row[0], "title_slug": row[1], "title": row[2], "thread_id": row[3]}
+        return {"question_id": row[0], "title_slug": row[1], "title": row[2], "thread_id": row[3], "difficulty": row[4]}
 
 
-def leetcode_save_problem(*, question_id: str, title_slug: str, title: str, thread_id: int):
+def leetcode_save_problem(*, question_id: str, title_slug: str, title: str, thread_id: int, difficulty: str | None = None):
     with _db() as conn:
         conn.execute(
-            """INSERT INTO leetcode_problems(question_id, title_slug, title, thread_id)
-               VALUES(?,?,?,?)
+            """INSERT INTO leetcode_problems(question_id, title_slug, title, thread_id, difficulty)
+               VALUES(?,?,?,?,?)
                ON CONFLICT(question_id) DO UPDATE SET
-                 thread_id=excluded.thread_id""",
-            (question_id, title_slug, title, thread_id),
+                 thread_id=excluded.thread_id,
+                 difficulty=COALESCE(excluded.difficulty, difficulty)""",
+            (question_id, title_slug, title, thread_id, difficulty),
         )
         conn.commit()
 
