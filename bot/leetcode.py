@@ -166,8 +166,8 @@ DIFF_EMOJI = {"Easy": "\U0001f7e2", "Medium": "\U0001f7e1", "Hard": "\U0001f534"
 
 
 def _find_forum_tags(forum: discord.ForumChannel, names: list[str]) -> list[discord.ForumTag]:
-    name_set = {n.lower() for n in names}
-    return [t for t in forum.available_tags if t.name.lower() in name_set]
+    tag_map = {t.name.lower(): t for t in forum.available_tags}
+    return [tag_map[n.lower()] for n in names if n.lower() in tag_map]
 
 
 async def _get_or_create_forum_tag(forum: discord.ForumChannel, name: str) -> discord.ForumTag:
