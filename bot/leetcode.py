@@ -568,7 +568,7 @@ def build_contest_recap_embed(
             thread_id = (question_thread_ids or {}).get(q_slug)
             if thread_id:
                 q_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-                desc_lines.append(f"{q_id}. [{q_title}]({q_url})")
+                desc_lines.append(f"[{q_id}. {q_title}]({q_url})")
             else:
                 desc_lines.append(f"{q_id}. {q_title}")
     else:
@@ -652,12 +652,9 @@ def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
         embed.description = "No linked users participated in this contest."
         return embed
 
-    # Mentions in description — pings everyone and lets them match their row number
-    embed.description = "\n".join(f"{i}. <@{r['discord_id']}>" for i, r in enumerate(rankings, 1))
-
-    rank_lines, solved_lines, rating_lines = [], [], []
+    member_lines, solved_lines, rating_lines = [], [], []
     for i, r in enumerate(rankings, 1):
-        rank_lines.append(str(i))
+        member_lines.append(f"{i}. <@{r['discord_id']}>")
         solved_lines.append(f"{r['solved']}/{r['total']} ({r['time']})")
 
         rating = f"{r['rating']:.0f}"
@@ -666,9 +663,9 @@ def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
             rating += f" ({sign}{r['delta']:.0f})"
         rating_lines.append(rating)
 
-    embed.add_field(name="#", value="\n".join(rank_lines), inline=True)
-    embed.add_field(name="Solved", value="\n".join(solved_lines), inline=True)
-    embed.add_field(name="Rating", value="\n".join(rating_lines), inline=True)
+    embed.add_field(name="Participant", value="\n\n".join(member_lines), inline=True)
+    embed.add_field(name="Solved", value="\n\n".join(solved_lines), inline=True)
+    embed.add_field(name="Rating", value="\n\n".join(rating_lines), inline=True)
     return embed
 
 
