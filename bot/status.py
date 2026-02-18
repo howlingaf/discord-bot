@@ -11,12 +11,10 @@ from .database import leetcode_status_get, leetcode_status_set
 
 # statusClass -> (emoji, color, label)
 STATUS_MAP = {
-    "success": ("✅", 0x00b8a3, "Operational"),
+    "success": ("🟢", 0x00b8a3, "Operational"),
     "warning": ("🟡", 0xffc01e, "Degraded"),
     "danger":  ("🔴", 0xff375f, "Outage"),
 }
-
-CHANNEL_BASE = "lc-status"
 
 
 def _overall_status(monitors: list[dict]) -> str:
@@ -45,12 +43,12 @@ def build_status_embed(monitors: list[dict], checked_at: int) -> discord.Embed:
         m_emoji, _, m_label = STATUS_MAP.get(m["statusClass"], ("⚪", 0x808080, "Unknown"))
         lines.append(f"{m_emoji} **{m['name']}** — {m_label}")
 
-    lines.append(f"\n🕐 Last checked: <t:{checked_at}:R>")
+    lines.append(f"🕐 Last checked: <t:{checked_at}:R>")
 
     embed = discord.Embed(
         title=f"{emoji} LeetCode — {label}",
         url="https://status.leetcode.com",
-        description="\n".join(lines),
+        description="\n\n".join(lines),
         color=color,
     )
     return embed
@@ -86,8 +84,8 @@ async def _run_status_check(bot):
     message_id, last_status = leetcode_status_get()
 
     # Update channel name if it doesn't match expected
-    emoji, _, _ = STATUS_MAP.get(overall, ("⚪", 0x808080, "Unknown"))
-    new_channel_name = f"{emoji}・{CHANNEL_BASE}"
+    emoji, _, label = STATUS_MAP.get(overall, ("⚪", 0x808080, "Unknown"))
+    new_channel_name = f"{emoji}・status-{label.lower()}"
     if channel.name != new_channel_name:
         try:
             await channel.edit(name=new_channel_name)
