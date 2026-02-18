@@ -81,6 +81,13 @@ def db_init():
         """)
 
         conn.execute("""
+        CREATE TABLE IF NOT EXISTS linked_users (
+          discord_user_id INTEGER PRIMARY KEY,
+          leetcode_username TEXT NOT NULL UNIQUE
+        )
+        """)
+
+        conn.execute("""
         CREATE TABLE IF NOT EXISTS leetcode_status_state (
           id INTEGER PRIMARY KEY CHECK (id = 1),
           message_id INTEGER,
@@ -265,6 +272,56 @@ def leetcode_set_contest_state(contest_type: str, last_title_slug: str):
             (contest_type, last_title_slug, now),
         )
         conn.commit()
+
+
+# ---- Linked users helpers ----
+
+def linked_users_get(discord_user_id: int) -> str | None:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT leetcode_username FROM linked_users WHERE discord_user_id=?",
+            (discord_user_id,),
+        ).fetchone()
+        return row[0] if row else None
+
+
+def linked_users_get_by_username(leetcode_username: str) -> int | None:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT discord_user_id FROM linked_users WHERE leetcode_username=?",
+            (leetcode_username,),
+        ).fetchone()
+        return row[0] if row else None
+
+
+def linked_users_set(discord_user_id: int, leetcode_username: str):
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO linked_users(discord_user_id, leetcode_username)
+               VALUES(?,?)
+               ON CONFLICT(discord_user_id) DO UPDATE SET
+                 leetcode_username=excluded.leetcode_username""",
+            (discord_user_id, leetcode_username),
+        )
+        conn.commit()
+
+
+def linked_users_delete(discord_user_id: int) -> bool:
+    with _db() as conn:
+        cur = conn.execute(
+            "DELETE FROM linked_users WHERE discord_user_id=?",
+            (discord_user_id,),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def linked_users_all() -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT discord_user_id, leetcode_username FROM linked_users"
+        ).fetchall()
+        return [{"discord_user_id": r[0], "leetcode_username": r[1]} for r in rows]
 
 
 # ---- LeetCode Status helpers ----

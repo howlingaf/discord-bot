@@ -12,7 +12,7 @@ from .config import (
 from .spotify import dm_spotify_link
 from .config import GUILD_ID
 from .leetcode import post_leetcode_contest, post_leetcode_problem, get_or_create_problem_post
-from .database import leetcode_delete_problem
+from .database import leetcode_delete_problem, linked_users_get, linked_users_get_by_username, linked_users_set, linked_users_delete
 from .client import bot
 
 
@@ -121,3 +121,40 @@ async def biweekly(interaction: discord.Interaction, force: bool = True):
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="link", description="Link your Discord account to your LeetCode profile.")
+@app_commands.describe(username="Your LeetCode username")
+async def link(interaction: discord.Interaction, username: str):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        # Check if this LeetCode username is already claimed by someone else
+        existing_owner = linked_users_get_by_username(username)
+        if existing_owner and existing_owner != interaction.user.id:
+            await interaction.followup.send("\u274c That LeetCode username is already linked to another user.", ephemeral=True)
+            return
+
+        # Verify the username exists on LeetCode
+        async with bot.http_session.get(f"https://leetcode-api-pied.vercel.app/user/{username}") as resp:
+            if resp.status != 200:
+                await interaction.followup.send("\u274c Could not find that LeetCode username.", ephemeral=True)
+                return
+            data = await resp.json()
+            if not data.get("username"):
+                await interaction.followup.send("\u274c Could not find that LeetCode username.", ephemeral=True)
+                return
+
+        linked_users_set(interaction.user.id, username)
+        await interaction.followup.send(f"\u2705 Linked to **{username}**.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="unlink", description="Unlink your LeetCode profile from your Discord account.")
+async def unlink(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    removed = linked_users_delete(interaction.user.id)
+    if removed:
+        await interaction.followup.send("\u2705 Your LeetCode account has been unlinked.", ephemeral=True)
+    else:
+        await interaction.followup.send("\u2139\ufe0f You don't have a linked LeetCode account.", ephemeral=True)
