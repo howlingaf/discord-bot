@@ -653,7 +653,10 @@ def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
         embed.description = "No linked users participated in this contest."
         return embed
 
-    pings = " ".join(f"<@{r['discord_id']}>" for r in rankings)
+    pings = "\n".join(
+        f"{i}. <@{r['discord_id']}> · [{r['username']}](https://leetcode.com/{r['username']}/)"
+        for i, r in enumerate(rankings, 1)
+    )
 
     # Build fixed-width columns
     rows = []
