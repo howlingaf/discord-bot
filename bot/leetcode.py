@@ -667,7 +667,7 @@ def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
             delta_str = f"{sign}{r['delta']:.0f}"
         rows.append((str(i), r["username"], f"{r['solved']}/{r['total']}", r["time"], f"{r['rating']:.0f}", delta_str))
 
-    headers = ("#", "Username", "Solved", "Time", "Rating", "+/-")
+    headers = ("Rank", "Username", "Solved", "Time", "Rating", "+/-")
     col_widths = [max(len(h), max(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
 
     def fmt_row(cells):
