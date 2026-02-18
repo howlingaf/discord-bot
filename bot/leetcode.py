@@ -641,28 +641,21 @@ def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
         embed.description = "No linked users participated in this contest."
         return embed
 
-    member_lines, solved_lines, time_lines, rating_lines, delta_lines = [], [], [], [], []
+    member_lines, solved_lines, rating_lines = [], [], []
 
     for i, r in enumerate(rankings, 1):
         member_lines.append(f"{i}. <@{r['discord_id']}>")
-        solved_lines.append(f"{r['solved']}/{r['total']}")
-        time_lines.append(r["time"])
-        rating_lines.append(f"{r['rating']:.0f}")
+        solved_lines.append(f"{r['solved']}/{r['total']} ({r['time']})")
 
+        rating = f"{r['rating']:.0f}"
         if r["delta"] is not None:
             sign = "+" if r["delta"] >= 0 else ""
-            delta_lines.append(f"{sign}{r['delta']:.0f}")
-        else:
-            delta_lines.append("—")
+            rating += f" ({sign}{r['delta']:.0f})"
+        rating_lines.append(rating)
 
-    # Row 1: Member | Solved | Time
     embed.add_field(name="Participant", value="\n".join(member_lines), inline=True)
     embed.add_field(name="Solved", value="\n".join(solved_lines), inline=True)
-    embed.add_field(name="Time", value="\n".join(time_lines), inline=True)
-    # Row 2: Rating | +/- | blank spacer
     embed.add_field(name="Rating", value="\n".join(rating_lines), inline=True)
-    embed.add_field(name="+/-", value="\n".join(delta_lines), inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True)
     return embed
 
 
