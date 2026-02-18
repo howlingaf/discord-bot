@@ -38,17 +38,21 @@ def build_status_embed(monitors: list[dict], checked_at: int) -> discord.Embed:
     overall = _overall_status(monitors)
     emoji, color, label = STATUS_MAP.get(overall, ("⚪", 0x808080, "Unknown"))
 
-    lines = []
+    service_lines = []
     for m in monitors:
         m_emoji, _, m_label = STATUS_MAP.get(m["statusClass"], ("⚪", 0x808080, "Unknown"))
-        lines.append(f"{m_emoji} **{m['name']}** — {m_label}")
+        service_lines.append(f"{m_emoji} **{m['name']}** — {m_label}")
 
-    lines.append(f"🕐 Last checked: <t:{checked_at}:R>")
+    description = (
+        f"## {emoji} {label}\n\n"
+        + "\n\n".join(service_lines)
+        + f"\n\n🕐 Last checked: <t:{checked_at}:R>"
+    )
 
     embed = discord.Embed(
-        title=f"{emoji} LeetCode — {label}",
+        title="LeetCode Status",
         url="https://status.leetcode.com",
-        description="\n\n".join(lines),
+        description=description,
         color=color,
     )
     return embed
