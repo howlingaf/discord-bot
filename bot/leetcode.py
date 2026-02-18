@@ -733,33 +733,31 @@ async def post_leetcode_contest(
         except Exception as e:
             print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
-    # Post recap embed
-    embed = build_contest_recap_embed(contest, questions, question_thread_ids)
-    sent = await channel.send(embed=embed)
-
-    # Create thread on the recap message
+    # Fetch rankings before sending so both embeds go in one message
     title = contest.get("title") or contest_type.title()
-    recap_thread_id: int | None = None
-    recap_thread: discord.Thread | None = None
+    rankings_embed: discord.Embed | None = None
     try:
-        recap_thread = await channel.create_thread(
+        rankings = await _build_contest_rankings(bot, title)
+        rankings_embed = build_rankings_embed(rankings)
+    except Exception as e:
+        print(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
+
+    recap_embed = build_contest_recap_embed(contest, questions, question_thread_ids)
+    embeds = [recap_embed, rankings_embed] if rankings_embed else [recap_embed]
+    sent = await channel.send(embeds=embeds)
+
+    # Create thread on the message — starts empty
+    recap_thread_id: int | None = None
+    try:
+        thread = await channel.create_thread(
             name=title[:100],
             message=sent,
             auto_archive_duration=10080,
             reason=f"{contest_type.title()} contest recap thread",
         )
-        recap_thread_id = recap_thread.id
+        recap_thread_id = thread.id
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] thread create failed: {e}")
-
-    # Post rankings table in the thread
-    if recap_thread:
-        try:
-            rankings = await _build_contest_rankings(bot, title)
-            rankings_embed = build_rankings_embed(rankings)
-            await recap_thread.send(embed=rankings_embed)
-        except Exception as e:
-            print(f"[CONTEST/{contest_type.upper()}] rankings post failed: {e}")
 
     leetcode_set_contest_state(contest_type, slug, thread_id=recap_thread_id)
     return True, f"posted {contest_type} slug={slug}"
