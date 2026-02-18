@@ -541,7 +541,11 @@ async def fetch_contest_questions(session: ClientSession, contest_slug: str) -> 
         return (js.get("data") or {}).get("contestQuestionList") or []
 
 
-def build_contest_recap_embed(contest: dict, questions: list[dict]) -> discord.Embed:
+def build_contest_recap_embed(
+    contest: dict,
+    questions: list[dict],
+    question_thread_ids: dict[str, int] | None = None,
+) -> discord.Embed:
     title = contest.get("title") or "LeetCode Contest"
     slug = contest.get("titleSlug") or ""
     start_ts = contest.get("startTime") or 0
@@ -558,7 +562,11 @@ def build_contest_recap_embed(contest: dict, questions: list[dict]) -> discord.E
         for i, q in enumerate(questions, 1):
             q_title = q.get("title") or f"Problem {i}"
             q_slug = q.get("titleSlug") or ""
-            if q_slug:
+            thread_id = (question_thread_ids or {}).get(q_slug)
+            if thread_id:
+                q_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
+                desc_lines.append(f"{i}. [{q_title}]({q_url})")
+            elif q_slug:
                 q_url = f"{LEETCODE_BASE}/problems/{q_slug}/"
                 desc_lines.append(f"{i}. [{q_title}]({q_url})")
             else:
@@ -627,25 +635,31 @@ async def post_leetcode_contest(
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
 
-    # Create forum posts for each contest question
+    # Create forum posts for each contest question and collect thread IDs
+    question_thread_ids: dict[str, int] = {}
     for q in questions:
         q_slug = q.get("titleSlug") or ""
         q_id = q.get("questionId") or ""
         if not q_id and not q_slug:
             continue
-        # Prefer DB lookup by slug to avoid redundant API calls
-        if q_slug and leetcode_get_problem_by_slug(q_slug):
-            continue
+        # Check DB by slug first to avoid redundant API calls
+        if q_slug:
+            existing = leetcode_get_problem_by_slug(q_slug)
+            if existing:
+                question_thread_ids[q_slug] = existing["thread_id"]
+                continue
         if q_id:
             try:
-                _, err = await get_or_create_problem_post(bot, str(q_id))
-                if err:
+                thread_id, err = await get_or_create_problem_post(bot, str(q_id))
+                if thread_id and q_slug:
+                    question_thread_ids[q_slug] = thread_id
+                elif err:
                     print(f"[CONTEST/{contest_type.upper()}] forum post #{q_id}: {err}")
             except Exception as e:
                 print(f"[CONTEST/{contest_type.upper()}] forum post #{q_id} failed: {e}")
 
     # Post recap embed
-    embed = build_contest_recap_embed(contest, questions)
+    embed = build_contest_recap_embed(contest, questions, question_thread_ids)
     sent = await channel.send(embed=embed)
 
     # Create thread on the recap message
