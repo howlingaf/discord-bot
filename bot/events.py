@@ -6,6 +6,7 @@ from .config import (
 )
 from .spotify import count_humans_in_channel, handle_spotify_auto_pause
 from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler
+from .status import leetcode_status_scheduler
 from .client import bot
 
 
@@ -21,6 +22,10 @@ async def on_ready():
     if not getattr(bot, "_contest_task_started", False):
         bot._contest_task_started = True
         bot.loop.create_task(leetcode_contest_scheduler(bot))
+
+    if not getattr(bot, "_status_task_started", False):
+        bot._status_task_started = True
+        bot.loop.create_task(leetcode_status_scheduler(bot))
 
 
 @bot.event
