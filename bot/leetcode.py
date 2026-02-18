@@ -725,7 +725,7 @@ async def post_leetcode_contest(
         # Wait for at least one linked user's rating to be available
         # (LeetCode processes ratings 30-60 min after contest ends)
         # After 4 hours, post regardless in case no linked users participated
-        if linked_users_all() and now < end_ts + 2 * 3600:
+        if linked_users_all() and now < end_ts + 20 * 60:
             if not await _ratings_ready(bot.http_session, contest.get("title") or ""):
                 return False, f"{contest_type} ratings not yet available, will retry"
 
@@ -834,8 +834,8 @@ async def leetcode_contest_scheduler(bot):
                     next_end_times.append(end_ts)
 
             if any_pending:
-                print("[CONTEST] waiting for ratings, rechecking in 5 min")
-                await asyncio.sleep(300)
+                print("[CONTEST] waiting for ratings, rechecking in 2.5 min")
+                await asyncio.sleep(150)
             elif next_end_times:
                 wait = min(next_end_times) - now
                 print(f"[CONTEST] sleeping {wait}s until next contest ends")
