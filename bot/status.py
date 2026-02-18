@@ -44,13 +44,13 @@ def build_status_embed(monitors: list[dict], checked_at: int) -> discord.Embed:
         service_lines.append(f"{m_emoji} **{m['name']}** — {m_label}")
 
     description = (
-        f"## {emoji} {label}\n\n"
+        "-# Services\n\n"
         + "\n\n".join(service_lines)
         + f"\n\n🕐 Last checked: <t:{checked_at}:R>"
     )
 
     embed = discord.Embed(
-        title="LeetCode Status",
+        title=f"{emoji} LeetCode — {label}",
         url="https://status.leetcode.com",
         description=description,
         color=color,
