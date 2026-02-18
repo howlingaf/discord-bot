@@ -646,16 +646,18 @@ async def _build_contest_rankings(bot, contest_title: str) -> list[dict]:
 
 
 def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
-    embed = discord.Embed(title="Rankings", color=CONTEST_COLOR)
+    embed = discord.Embed(title="Rankings", color=CONTEST_RECAP_COLOR)
 
     if not rankings:
         embed.description = "No linked users participated in this contest."
         return embed
 
-    member_lines, solved_lines, rating_lines = [], [], []
+    # Mentions in description — pings everyone and lets them match their row number
+    embed.description = "\n".join(f"{i}. <@{r['discord_id']}>" for i, r in enumerate(rankings, 1))
 
+    rank_lines, solved_lines, rating_lines = [], [], []
     for i, r in enumerate(rankings, 1):
-        member_lines.append(f"{i}. <@{r['discord_id']}>")
+        rank_lines.append(str(i))
         solved_lines.append(f"{r['solved']}/{r['total']} ({r['time']})")
 
         rating = f"{r['rating']:.0f}"
@@ -664,7 +666,7 @@ def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
             rating += f" ({sign}{r['delta']:.0f})"
         rating_lines.append(rating)
 
-    embed.add_field(name="Participant", value="\n".join(member_lines), inline=True)
+    embed.add_field(name="#", value="\n".join(rank_lines), inline=True)
     embed.add_field(name="Solved", value="\n".join(solved_lines), inline=True)
     embed.add_field(name="Rating", value="\n".join(rating_lines), inline=True)
     return embed
