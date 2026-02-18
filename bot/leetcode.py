@@ -632,6 +632,15 @@ async def _build_contest_rankings(bot, contest_title: str) -> list[dict]:
         except Exception as e:
             print(f"[RANKINGS] Error fetching {username}: {e}")
 
+    # TEST DATA — remove after confirming layout
+    rankings.extend([
+        {"discord_id": 111111111111111111, "solved": 4, "total": 4, "time": "0:44:51", "rating": 1923.0, "delta": 87.0},
+        {"discord_id": 222222222222222222, "solved": 3, "total": 4, "time": "1:12:05", "rating": 1710.0, "delta": -15.0},
+        {"discord_id": 333333333333333333, "solved": 2, "total": 4, "time": "1:29:44", "rating": 1634.0, "delta": 8.0},
+        {"discord_id": 444444444444444444, "solved": 1, "total": 4, "time": "55:20",   "rating": 1401.0, "delta": -41.0},
+    ])
+    # END TEST DATA
+
     rankings.sort(key=lambda r: r["rating"], reverse=True)
     return rankings
 
