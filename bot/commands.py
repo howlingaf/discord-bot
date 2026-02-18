@@ -1,5 +1,3 @@
-import asyncio
-
 import discord
 from discord import app_commands
 
@@ -43,25 +41,19 @@ async def spotifylink(interaction: discord.Interaction):
 @app_commands.describe(question_id="The LeetCode problem number (e.g. 67)")
 async def problem(interaction: discord.Interaction, question_id: int):
     if question_id < 1:
-        await interaction.response.send_message("\u274c Invalid problem ID.", delete_after=5)
+        await interaction.response.send_message("\u274c Invalid problem ID.", ephemeral=True)
         return
 
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=True)
     try:
         thread_id, err = await get_or_create_problem_post(bot, str(question_id))
         if thread_id:
             thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-            msg = await interaction.followup.send(thread_url)
-            await asyncio.sleep(5)
-            await msg.delete()
+            await interaction.followup.send(thread_url, ephemeral=True)
         else:
-            msg = await interaction.followup.send(f"\u274c {err}")
-            await asyncio.sleep(5)
-            await msg.delete()
+            await interaction.followup.send(f"\u274c {err}", ephemeral=True)
     except Exception as e:
-        msg = await interaction.followup.send(f"\u274c Invalid problem ID.")
-        await asyncio.sleep(5)
-        await msg.delete()
+        await interaction.followup.send(f"\u274c Invalid problem ID.", ephemeral=True)
 
 
 @bot.tree.command(name="delete", description="(Admin) Delete a problem post by LeetCode ID.")
