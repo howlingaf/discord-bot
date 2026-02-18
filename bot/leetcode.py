@@ -20,35 +20,13 @@ from .config import (
 )
 from .database import (
     leetcode_get_problem,
+    leetcode_get_problem_by_slug,
     leetcode_save_problem,
     leetcode_get_daily_state,
     leetcode_set_daily_state,
     leetcode_get_contest_state,
     leetcode_set_contest_state,
 )
-
-
-# ---------------- Thread helpers ----------------
-async def archive_all_threads(
-    channel: discord.TextChannel,
-    *,
-    lock: bool = True,
-    reason: str = "Archiving old threads",
-):
-    threads: list[discord.Thread] = []
-    try:
-        threads = list(await channel.active_threads())
-    except Exception:
-        threads = list(getattr(channel, "threads", []))
-
-    for t in threads:
-        if isinstance(t, discord.Thread) and not t.archived:
-            try:
-                await t.edit(archived=True, locked=lock, reason=reason)
-            except discord.Forbidden:
-                print(f"[ARCHIVE] Forbidden archiving thread {t.id} ({t.name})")
-            except discord.HTTPException as e:
-                print(f"[ARCHIVE] HTTPException archiving thread {t.id} ({t.name}): {e}")
 
 
 # ---------------- Formatting helpers ----------------
@@ -531,30 +509,70 @@ def _classify_contest(title_slug: str) -> str | None:
     return None
 
 
-def build_contest_embed(contest: dict) -> discord.Embed:
+async def fetch_leetcode_csrf(session: ClientSession) -> str:
+    async with session.get("https://leetcode.com", allow_redirects=True) as resp:
+        csrf = resp.cookies.get("csrftoken")
+        if csrf:
+            return csrf.value
+    cookie = session.cookie_jar.filter_cookies("https://leetcode.com").get("csrftoken")
+    return cookie.value if cookie else ""
+
+
+async def fetch_contest_questions(session: ClientSession, contest_slug: str) -> list[dict]:
+    csrf = await fetch_leetcode_csrf(session)
+    query = """
+    query contestQuestions($slug: String!) {
+        contestQuestionList(contestSlug: $slug) {
+            questionId
+            title
+            titleSlug
+            credit
+        }
+    }
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Referer": f"https://leetcode.com/contest/{contest_slug}/",
+        "x-csrftoken": csrf,
+    }
+    payload = {"query": query.strip(), "variables": {"slug": contest_slug}}
+    async with session.post("https://leetcode.com/graphql", json=payload, headers=headers) as resp:
+        js = await resp.json(content_type=None)
+        return (js.get("data") or {}).get("contestQuestionList") or []
+
+
+def build_contest_recap_embed(contest: dict, questions: list[dict]) -> discord.Embed:
     title = contest.get("title") or "LeetCode Contest"
     slug = contest.get("titleSlug") or ""
     start_ts = contest.get("startTime") or 0
-    duration = contest.get("duration") or 5400
 
-    url = f"{LEETCODE_BASE}/contest/{slug}" if slug else LEETCODE_BASE
-    dur_min = duration // 60
+    url = f"{LEETCODE_BASE}/contest/{slug}/" if slug else LEETCODE_BASE
 
     desc_lines: list[str] = []
     if start_ts:
-        desc_lines.append(f"\U0001f5d3\ufe0f **Start:** <t:{start_ts}:F>")
-    desc_lines.append(f"\u23f1\ufe0f **Duration:** {dur_min} minutes")
+        desc_lines.append(f"\U0001f5d3\ufe0f <t:{start_ts}:D>")
 
-    embed = discord.Embed(
+    if questions:
+        desc_lines.append("")
+        desc_lines.append("**Problems**")
+        for i, q in enumerate(questions, 1):
+            q_title = q.get("title") or f"Problem {i}"
+            q_slug = q.get("titleSlug") or ""
+            if q_slug:
+                q_url = f"{LEETCODE_BASE}/problems/{q_slug}/"
+                desc_lines.append(f"{i}. [{q_title}]({q_url})")
+            else:
+                desc_lines.append(f"{i}. {q_title}")
+    else:
+        desc_lines.append("")
+        desc_lines.append("*Problems not yet available*")
+
+    return discord.Embed(
         title=title,
         url=url,
         description="\n".join(desc_lines),
         color=CONTEST_COLOR,
     )
-    return embed
-
-
-CONTEST_LEAD_SECONDS = 2 * 60 * 60  # 2 hours before start
 
 
 async def post_leetcode_contest(
@@ -581,16 +599,18 @@ async def post_leetcode_contest(
 
     slug = contest.get("titleSlug") or ""
     start_ts = contest.get("startTime") or 0
+    duration = contest.get("duration") or 5400
+    end_ts = start_ts + duration
 
     if not force:
         last_slug = leetcode_get_contest_state(contest_type)
         if last_slug == slug:
             return False, f"already posted {contest_type} slug={slug}"
 
-        # Only post within 2 hours of start
+        # Only post after contest ends
         now = int(datetime.now().timestamp())
-        if start_ts and now < start_ts - CONTEST_LEAD_SECONDS:
-            return False, f"{contest_type} starts <t:{start_ts}:R>, too early to post"
+        if start_ts and now < end_ts:
+            return False, f"{contest_type} ends <t:{end_ts}:R>, too early to post recap"
 
     channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
     if not channel_id:
@@ -600,29 +620,49 @@ async def post_leetcode_contest(
     if not isinstance(channel, discord.TextChannel):
         return False, f"{contest_type} channel must be a text channel"
 
-    # Archive all existing threads before creating the new one
-    await archive_all_threads(
-        channel,
-        lock=True,
-        reason=f"New {contest_type} contest starting",
-    )
+    # Fetch contest questions via GraphQL
+    questions: list[dict] = []
+    try:
+        questions = await fetch_contest_questions(bot.http_session, slug)
+    except Exception as e:
+        print(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
 
-    embed = build_contest_embed(contest)
+    # Create forum posts for each contest question
+    for q in questions:
+        q_slug = q.get("titleSlug") or ""
+        q_id = q.get("questionId") or ""
+        if not q_id and not q_slug:
+            continue
+        # Prefer DB lookup by slug to avoid redundant API calls
+        if q_slug and leetcode_get_problem_by_slug(q_slug):
+            continue
+        if q_id:
+            try:
+                _, err = await get_or_create_problem_post(bot, str(q_id))
+                if err:
+                    print(f"[CONTEST/{contest_type.upper()}] forum post #{q_id}: {err}")
+            except Exception as e:
+                print(f"[CONTEST/{contest_type.upper()}] forum post #{q_id} failed: {e}")
+
+    # Post recap embed
+    embed = build_contest_recap_embed(contest, questions)
     sent = await channel.send(embed=embed)
 
+    # Create thread on the recap message
     title = contest.get("title") or contest_type.title()
-    thread_name = title[:100]
+    recap_thread_id: int | None = None
     try:
-        await channel.create_thread(
-            name=thread_name,
+        thread = await channel.create_thread(
+            name=title[:100],
             message=sent,
             auto_archive_duration=10080,
-            reason=f"{contest_type.title()} contest discussion thread",
+            reason=f"{contest_type.title()} contest recap thread",
         )
+        recap_thread_id = thread.id
     except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] thread create failed:", repr(e))
+        print(f"[CONTEST/{contest_type.upper()}] thread create failed: {e}")
 
-    leetcode_set_contest_state(contest_type, slug)
+    leetcode_set_contest_state(contest_type, slug, thread_id=recap_thread_id)
     return True, f"posted {contest_type} slug={slug}"
 
 
@@ -634,7 +674,7 @@ async def leetcode_contest_scheduler(bot):
         try:
             contests = await fetch_leetcode_contests(bot.http_session)
 
-            # Try to post any contest that's within the 2hr window now
+            # Post recap for any contest that has ended and not yet recapped
             for ctype in ("weekly", "biweekly"):
                 try:
                     posted, msg = await post_leetcode_contest(
@@ -645,21 +685,20 @@ async def leetcode_contest_scheduler(bot):
                 except Exception as e:
                     print(f"[CONTEST/{ctype.upper()}] error:", repr(e))
 
-            # Find the next contest post time (start - 2hrs) to sleep until
+            # Sleep until the next contest ends
             now = int(datetime.now().timestamp())
-            next_post_times = []
+            next_end_times = []
             for c in contests:
                 start_ts = c.get("startTime") or 0
-                post_at = start_ts - CONTEST_LEAD_SECONDS
-                if post_at > now:
-                    next_post_times.append(post_at)
+                end_ts = start_ts + (c.get("duration") or 5400)
+                if end_ts > now:
+                    next_end_times.append(end_ts)
 
-            if next_post_times:
-                wait = min(next_post_times) - now
-                print(f"[CONTEST] sleeping {wait}s until next contest post time")
-                await asyncio.sleep(wait)
+            if next_end_times:
+                wait = min(next_end_times) - now
+                print(f"[CONTEST] sleeping {wait}s until next contest ends")
+                await asyncio.sleep(max(wait, 60))
             else:
-                # No upcoming contests found, check again in 6 hours
                 print("[CONTEST] no upcoming contests, rechecking in 6h")
                 await asyncio.sleep(6 * 60 * 60)
 

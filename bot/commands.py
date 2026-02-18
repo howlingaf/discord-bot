@@ -11,7 +11,7 @@ from .config import (
 )
 from .spotify import dm_spotify_link
 from .config import GUILD_ID
-from .leetcode import post_leetcode_contest, post_leetcode_problem, get_or_create_problem_post
+from .leetcode import post_leetcode_contest, post_leetcode_problem, get_or_create_problem_post, _classify_contest
 from .database import leetcode_delete_problem, linked_users_get, linked_users_get_by_username, linked_users_set, linked_users_delete
 from .client import bot
 
@@ -158,3 +158,25 @@ async def unlink(interaction: discord.Interaction):
         await interaction.followup.send("\u2705 Your LeetCode account has been unlinked.", ephemeral=True)
     else:
         await interaction.followup.send("\u2139\ufe0f You don't have a linked LeetCode account.", ephemeral=True)
+
+
+@bot.tree.command(name="contest-recap", description="(Admin) Post a recap for any contest by slug.")
+@app_commands.describe(slug="The contest slug (e.g. weekly-contest-488)")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def contest_recap(interaction: discord.Interaction, slug: str):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        contest_type = _classify_contest(slug)
+        if not contest_type:
+            await interaction.followup.send("\u274c Slug must start with 'weekly-contest-' or 'biweekly-contest-'.", ephemeral=True)
+            return
+
+        title = slug.replace("-", " ").title()
+        mock_contest = {"title": title, "titleSlug": slug, "startTime": 0, "duration": 5400}
+
+        posted, msg = await post_leetcode_contest(
+            bot, contest_type, force=True, contests=[mock_contest],
+        )
+        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)

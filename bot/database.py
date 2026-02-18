@@ -76,9 +76,15 @@ def db_init():
         CREATE TABLE IF NOT EXISTS leetcode_contest_state (
           contest_type TEXT PRIMARY KEY,
           last_title_slug TEXT,
-          updated_at INTEGER NOT NULL
+          updated_at INTEGER NOT NULL,
+          thread_id INTEGER
         )
         """)
+
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(leetcode_contest_state)")}
+        if "thread_id" not in existing_cols:
+            conn.execute("ALTER TABLE leetcode_contest_state ADD COLUMN thread_id INTEGER")
+            print("[DB] Added missing column 'thread_id' to leetcode_contest_state")
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS linked_users (
@@ -260,16 +266,17 @@ def leetcode_get_contest_state(contest_type: str) -> str | None:
         return row[0]
 
 
-def leetcode_set_contest_state(contest_type: str, last_title_slug: str):
+def leetcode_set_contest_state(contest_type: str, last_title_slug: str, *, thread_id: int | None = None):
     now = int(time.time())
     with _db() as conn:
         conn.execute(
-            """INSERT INTO leetcode_contest_state(contest_type, last_title_slug, updated_at)
-               VALUES(?,?,?)
+            """INSERT INTO leetcode_contest_state(contest_type, last_title_slug, updated_at, thread_id)
+               VALUES(?,?,?,?)
                ON CONFLICT(contest_type) DO UPDATE SET
                  last_title_slug=excluded.last_title_slug,
-                 updated_at=excluded.updated_at""",
-            (contest_type, last_title_slug, now),
+                 updated_at=excluded.updated_at,
+                 thread_id=excluded.thread_id""",
+            (contest_type, last_title_slug, now, thread_id),
         )
         conn.commit()
 
