@@ -566,9 +566,6 @@ def build_contest_recap_embed(
             if thread_id:
                 q_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
                 desc_lines.append(f"{i}. [{q_title}]({q_url})")
-            elif q_slug:
-                q_url = f"{LEETCODE_BASE}/problems/{q_slug}/"
-                desc_lines.append(f"{i}. [{q_title}]({q_url})")
             else:
                 desc_lines.append(f"{i}. {q_title}")
     else:
