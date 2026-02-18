@@ -486,7 +486,8 @@ async def leetcode_daily_scheduler(bot):
 #  LeetCode Contest (weekly / biweekly)                               #
 # ------------------------------------------------------------------ #
 
-CONTEST_COLOR = 0xFFA116  # LeetCode orange
+CONTEST_COLOR = 0xFFA116   # LeetCode orange
+CONTEST_RECAP_COLOR = 0x9B59B6  # purple
 
 CONTEST_CHANNEL_MAP: dict[str, int] = {
     "weekly": LEETCODE_WEEKLY_CHANNEL_ID,
@@ -563,12 +564,13 @@ def build_contest_recap_embed(
         for i, q in enumerate(questions, 1):
             q_title = q.get("title") or f"Problem {i}"
             q_slug = q.get("titleSlug") or ""
+            q_id = q.get("questionId") or i
             thread_id = (question_thread_ids or {}).get(q_slug)
             if thread_id:
                 q_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-                desc_lines.append(f"{i}. [{q_title}]({q_url})")
+                desc_lines.append(f"{q_id}. [{q_title}]({q_url})")
             else:
-                desc_lines.append(f"{i}. {q_title}")
+                desc_lines.append(f"{q_id}. {q_title}")
     else:
         desc_lines.append("")
         desc_lines.append("*Problems not yet available*")
@@ -577,7 +579,7 @@ def build_contest_recap_embed(
         title=title,
         url=url,
         description="\n".join(desc_lines),
-        color=CONTEST_COLOR,
+        color=CONTEST_RECAP_COLOR,
     )
 
 
