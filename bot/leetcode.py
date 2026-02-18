@@ -26,6 +26,7 @@ from .database import (
     leetcode_set_daily_state,
     leetcode_get_contest_state,
     leetcode_set_contest_state,
+    linked_users_all,
 )
 
 
@@ -580,6 +581,84 @@ def build_contest_recap_embed(
     )
 
 
+def _format_finish_time(seconds: int) -> str:
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+async def fetch_user_contest_history(session: ClientSession, username: str) -> dict:
+    async with session.get(f"https://leetcode-api-pied.vercel.app/user/{username}/contests") as resp:
+        if resp.status != 200:
+            return {}
+        return await resp.json()
+
+
+async def _build_contest_rankings(bot, contest_title: str) -> list[dict]:
+    users = linked_users_all()
+    rankings = []
+
+    for user in users:
+        discord_id = user["discord_user_id"]
+        username = user["leetcode_username"]
+        try:
+            data = await fetch_user_contest_history(bot.http_session, username)
+            history = [h for h in (data.get("userContestRankingHistory") or []) if h.get("attended")]
+
+            entry = next((h for h in history if h.get("contest", {}).get("title") == contest_title), None)
+            if not entry:
+                continue
+
+            # Compute delta from previous contest entry (sorted oldest→newest)
+            sorted_history = sorted(history, key=lambda h: h.get("contest", {}).get("startTime", 0))
+            idx = next((i for i, h in enumerate(sorted_history) if h.get("contest", {}).get("title") == contest_title), None)
+            delta = None
+            if idx is not None and idx > 0:
+                delta = entry["rating"] - sorted_history[idx - 1]["rating"]
+
+            rankings.append({
+                "discord_id": discord_id,
+                "solved": entry["problemsSolved"],
+                "total": entry["totalProblems"],
+                "time": _format_finish_time(entry["finishTimeInSeconds"]),
+                "rating": entry["rating"],
+                "delta": delta,
+            })
+        except Exception as e:
+            print(f"[RANKINGS] Error fetching {username}: {e}")
+
+    rankings.sort(key=lambda r: r["rating"], reverse=True)
+    return rankings
+
+
+def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
+    embed = discord.Embed(title="Rankings", color=CONTEST_COLOR)
+
+    if not rankings:
+        embed.description = "No linked users participated in this contest."
+        return embed
+
+    member_lines, stats_lines, rating_lines = [], [], []
+
+    for i, r in enumerate(rankings, 1):
+        member_lines.append(f"{i}. <@{r['discord_id']}>")
+        stats_lines.append(f"{r['solved']}/{r['total']} · {r['time']}")
+
+        if r["delta"] is not None:
+            sign = "+" if r["delta"] >= 0 else ""
+            rating_lines.append(f"{r['rating']:.0f} ({sign}{r['delta']:.0f})")
+        else:
+            rating_lines.append(f"{r['rating']:.0f}")
+
+    embed.add_field(name="Member", value="\n".join(member_lines), inline=True)
+    embed.add_field(name="Solved · Time", value="\n".join(stats_lines), inline=True)
+    embed.add_field(name="Rating · +/-", value="\n".join(rating_lines), inline=True)
+    return embed
+
+
 async def post_leetcode_contest(
     bot,
     contest_type: str,
@@ -661,16 +740,26 @@ async def post_leetcode_contest(
     # Create thread on the recap message
     title = contest.get("title") or contest_type.title()
     recap_thread_id: int | None = None
+    recap_thread: discord.Thread | None = None
     try:
-        thread = await channel.create_thread(
+        recap_thread = await channel.create_thread(
             name=title[:100],
             message=sent,
             auto_archive_duration=10080,
             reason=f"{contest_type.title()} contest recap thread",
         )
-        recap_thread_id = thread.id
+        recap_thread_id = recap_thread.id
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] thread create failed: {e}")
+
+    # Post rankings table in the thread
+    if recap_thread:
+        try:
+            rankings = await _build_contest_rankings(bot, title)
+            rankings_embed = build_rankings_embed(rankings)
+            await recap_thread.send(embed=rankings_embed)
+        except Exception as e:
+            print(f"[CONTEST/{contest_type.upper()}] rankings post failed: {e}")
 
     leetcode_set_contest_state(contest_type, slug, thread_id=recap_thread_id)
     return True, f"posted {contest_type} slug={slug}"
