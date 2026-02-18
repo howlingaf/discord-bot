@@ -652,20 +652,15 @@ def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
         embed.description = "No linked users participated in this contest."
         return embed
 
-    member_lines, solved_lines, rating_lines = [], [], []
+    lines = []
     for i, r in enumerate(rankings, 1):
-        member_lines.append(f"{i}. <@{r['discord_id']}>")
-        solved_lines.append(f"{r['solved']}/{r['total']} ({r['time']})")
-
         rating = f"{r['rating']:.0f}"
         if r["delta"] is not None:
             sign = "+" if r["delta"] >= 0 else ""
             rating += f" ({sign}{r['delta']:.0f})"
-        rating_lines.append(rating)
+        lines.append(f"{i}. <@{r['discord_id']}> — {r['solved']}/{r['total']} ({r['time']}) — {rating}")
 
-    embed.add_field(name="Participant", value="\n\n".join(member_lines), inline=True)
-    embed.add_field(name="Solved", value="\n\n".join(solved_lines), inline=True)
-    embed.add_field(name="Rating", value="\n\n".join(rating_lines), inline=True)
+    embed.description = "\n".join(lines)
     return embed
 
 
