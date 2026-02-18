@@ -85,14 +85,16 @@ async def _run_status_check(bot):
 
     message_id, last_status = leetcode_status_get()
 
-    # Update channel name if status changed
+    # Update channel name if it doesn't match expected
     emoji, _, _ = STATUS_MAP.get(overall, ("⚪", 0x808080, "Unknown"))
     new_channel_name = f"{emoji}・{CHANNEL_BASE}"
-    if overall != last_status:
+    if channel.name != new_channel_name:
         try:
             await channel.edit(name=new_channel_name)
+            print(f"[STATUS] channel renamed to {new_channel_name}")
         except Exception as e:
             print(f"[STATUS] channel rename failed: {e}")
+    if overall != last_status:
         leetcode_status_set(last_status=overall)
 
     # Edit existing message or post a new one
