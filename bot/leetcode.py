@@ -623,6 +623,7 @@ async def _build_contest_rankings(bot, contest_title: str) -> list[dict]:
 
             rankings.append({
                 "discord_id": discord_id,
+                "username": username,
                 "solved": entry["problemsSolved"],
                 "total": entry["totalProblems"],
                 "time": _format_finish_time(entry["finishTimeInSeconds"]),
@@ -634,10 +635,10 @@ async def _build_contest_rankings(bot, contest_title: str) -> list[dict]:
 
     # TEST DATA — remove after confirming layout
     rankings.extend([
-        {"discord_id": 111111111111111111, "solved": 4, "total": 4, "time": "0:44:51", "rating": 1923.0, "delta": 87.0},
-        {"discord_id": 222222222222222222, "solved": 3, "total": 4, "time": "1:12:05", "rating": 1710.0, "delta": -15.0},
-        {"discord_id": 333333333333333333, "solved": 2, "total": 4, "time": "1:29:44", "rating": 1634.0, "delta": 8.0},
-        {"discord_id": 444444444444444444, "solved": 1, "total": 4, "time": "55:20",   "rating": 1401.0, "delta": -41.0},
+        {"discord_id": 111111111111111111, "username": "testuser_one",   "solved": 4, "total": 4, "time": "0:44:51", "rating": 1923.0, "delta": 87.0},
+        {"discord_id": 222222222222222222, "username": "testuser_two",   "solved": 3, "total": 4, "time": "1:12:05", "rating": 1710.0, "delta": -15.0},
+        {"discord_id": 333333333333333333, "username": "testuser_three", "solved": 2, "total": 4, "time": "1:29:44", "rating": 1634.0, "delta": 8.0},
+        {"discord_id": 444444444444444444, "username": "testuser_four",  "solved": 1, "total": 4, "time": "55:20",   "rating": 1401.0, "delta": -41.0},
     ])
     # END TEST DATA
 
@@ -652,15 +653,27 @@ def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
         embed.description = "No linked users participated in this contest."
         return embed
 
-    lines = []
+    pings = " ".join(f"<@{r['discord_id']}>" for r in rankings)
+
+    # Build fixed-width columns
+    rows = []
     for i, r in enumerate(rankings, 1):
-        rating = f"{r['rating']:.0f}"
+        delta_str = ""
         if r["delta"] is not None:
             sign = "+" if r["delta"] >= 0 else ""
-            rating += f" ({sign}{r['delta']:.0f})"
-        lines.append(f"{i}. <@{r['discord_id']}> — {r['solved']}/{r['total']} ({r['time']}) — {rating}")
+            delta_str = f"{sign}{r['delta']:.0f}"
+        rows.append((str(i), r["username"], f"{r['solved']}/{r['total']}", r["time"], f"{r['rating']:.0f}", delta_str))
 
-    embed.description = "\n".join(lines)
+    headers = ("#", "Username", "Solved", "Time", "Rating", "+/-")
+    col_widths = [max(len(h), max(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
+
+    def fmt_row(cells):
+        return "  ".join(c.ljust(w) for c, w in zip(cells, col_widths)).rstrip()
+
+    table_lines = [fmt_row(headers), "─" * sum(col_widths + [2] * (len(col_widths) - 1))]
+    table_lines.extend(fmt_row(row) for row in rows)
+
+    embed.description = f"{pings}\n```\n" + "\n".join(table_lines) + "\n```"
     return embed
 
 
