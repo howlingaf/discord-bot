@@ -599,6 +599,20 @@ async def fetch_user_contest_history(session: ClientSession, username: str) -> d
         return await resp.json()
 
 
+async def _ratings_ready(session: ClientSession, contest_title: str) -> bool:
+    """Returns True if at least one linked user has their rating for this contest."""
+    users = linked_users_all()
+    for user in users:
+        try:
+            data = await fetch_user_contest_history(session, user["leetcode_username"])
+            history = [h for h in (data.get("userContestRankingHistory") or []) if h.get("attended")]
+            if any(h.get("contest", {}).get("title") == contest_title for h in history):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def _build_contest_rankings(bot, contest_title: str) -> list[dict]:
     users = linked_users_all()
     rankings = []
@@ -708,6 +722,13 @@ async def post_leetcode_contest(
         if start_ts and now < end_ts:
             return False, f"{contest_type} ends <t:{end_ts}:R>, too early to post recap"
 
+        # Wait for at least one linked user's rating to be available
+        # (LeetCode processes ratings 30-60 min after contest ends)
+        # After 4 hours, post regardless in case no linked users participated
+        if linked_users_all() and now < end_ts + 4 * 3600:
+            if not await _ratings_ready(bot.http_session, contest.get("title") or ""):
+                return False, f"{contest_type} ratings not yet available, will retry"
+
     channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
     if not channel_id:
         return False, f"no channel configured for {contest_type}"
@@ -750,7 +771,8 @@ async def post_leetcode_contest(
     rankings_embed: discord.Embed | None = None
     try:
         rankings = await _build_contest_rankings(bot, title)
-        rankings_embed = build_rankings_embed(rankings)
+        if rankings:
+            rankings_embed = build_rankings_embed(rankings)
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
 
@@ -794,16 +816,27 @@ async def leetcode_contest_scheduler(bot):
                 except Exception as e:
                     print(f"[CONTEST/{ctype.upper()}] error:", repr(e))
 
-            # Sleep until the next contest ends
+            # If any contest has ended but not yet been posted, poll every 5 min
             now = int(datetime.now().timestamp())
+            any_pending = False
             next_end_times = []
             for c in contests:
+                slug = c.get("titleSlug") or ""
+                ctype = _classify_contest(slug)
+                if not ctype:
+                    continue
                 start_ts = c.get("startTime") or 0
                 end_ts = start_ts + (c.get("duration") or 5400)
-                if end_ts > now:
+                if end_ts <= now:
+                    if leetcode_get_contest_state(ctype) != slug:
+                        any_pending = True
+                elif end_ts > now:
                     next_end_times.append(end_ts)
 
-            if next_end_times:
+            if any_pending:
+                print("[CONTEST] waiting for ratings, rechecking in 5 min")
+                await asyncio.sleep(300)
+            elif next_end_times:
                 wait = min(next_end_times) - now
                 print(f"[CONTEST] sleeping {wait}s until next contest ends")
                 await asyncio.sleep(max(wait, 60))
