@@ -639,24 +639,23 @@ async def post_leetcode_contest(
     question_thread_ids: dict[str, int] = {}
     for q in questions:
         q_slug = q.get("titleSlug") or ""
-        q_id = q.get("questionId") or ""
-        if not q_id and not q_slug:
+        if not q_slug:
             continue
         # Check DB by slug first to avoid redundant API calls
-        if q_slug:
-            existing = leetcode_get_problem_by_slug(q_slug)
-            if existing:
-                question_thread_ids[q_slug] = existing["thread_id"]
-                continue
-        if q_id:
-            try:
-                thread_id, err = await get_or_create_problem_post(bot, str(q_id))
-                if thread_id and q_slug:
-                    question_thread_ids[q_slug] = thread_id
-                elif err:
-                    print(f"[CONTEST/{contest_type.upper()}] forum post #{q_id}: {err}")
-            except Exception as e:
-                print(f"[CONTEST/{contest_type.upper()}] forum post #{q_id} failed: {e}")
+        existing = leetcode_get_problem_by_slug(q_slug)
+        if existing:
+            question_thread_ids[q_slug] = existing["thread_id"]
+            continue
+        # Use titleSlug as the identifier — the API accepts slugs and is more
+        # reliable than the questionId field returned by GraphQL
+        try:
+            thread_id, err = await get_or_create_problem_post(bot, q_slug)
+            if thread_id:
+                question_thread_ids[q_slug] = thread_id
+            elif err:
+                print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
+        except Exception as e:
+            print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
     # Post recap embed
     embed = build_contest_recap_embed(contest, questions, question_thread_ids)
