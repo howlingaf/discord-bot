@@ -3,6 +3,7 @@ import discord
 from .config import (
     GUILD_ID,
     SPOTIFY_VOICE_CHANNEL_ID,
+    COMMAND_LOG_CHANNEL_ID,
 )
 from .spotify import count_humans_in_channel, handle_spotify_auto_pause
 from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler, leetcode_premium_weekly_scheduler
@@ -54,3 +55,39 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     member_count = count_humans_in_channel(channel)
     if bot.http_session:
         await handle_spotify_auto_pause(bot.http_session, member_count)
+
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    if not COMMAND_LOG_CHANNEL_ID:
+        return
+    if interaction.type != discord.InteractionType.application_command:
+        return
+
+    # Skip logging for admins/mods
+    if isinstance(interaction.user, discord.Member):
+        perms = interaction.user.guild_permissions
+        if perms.administrator or perms.manage_messages:
+            return
+
+    cmd_data = interaction.data or {}
+    cmd_name = cmd_data.get("name", "unknown")
+
+    options = cmd_data.get("options") or []
+    options_str = "\n".join(f"`{o['name']}`: {o.get('value', '')}" for o in options) if options else None
+
+    channel_mention = interaction.channel.mention if interaction.channel else "unknown"
+
+    embed = discord.Embed(color=0x5865F2, timestamp=discord.utils.utcnow())
+    embed.add_field(name="User", value=f"{interaction.user.mention} (`{interaction.user}`)", inline=True)
+    embed.add_field(name="Command", value=f"`/{cmd_name}`", inline=True)
+    embed.add_field(name="Channel", value=channel_mention, inline=True)
+    if options_str:
+        embed.add_field(name="Options", value=options_str, inline=False)
+    embed.set_footer(text=f"User ID: {interaction.user.id}")
+
+    try:
+        log_channel = bot.get_channel(COMMAND_LOG_CHANNEL_ID) or await bot.fetch_channel(COMMAND_LOG_CHANNEL_ID)
+        await log_channel.send(embed=embed)
+    except Exception as e:
+        print(f"[COMMAND LOG] {e}")

@@ -49,6 +49,9 @@ LEETCODE_CONTEST_URL = "https://leetcode-api-pied.vercel.app/contests"
 RECAP_SECRET = os.getenv("RECAP_SECRET", "")
 LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490
 
+# ---------------- Command Logging ----------------
+COMMAND_LOG_CHANNEL_ID = int(os.getenv("COMMAND_LOG_CHANNEL_ID", "0"))
+
 # ---------------- LeetCode Premium Weekly ----------------
 LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID = 1473828703334174894
 
