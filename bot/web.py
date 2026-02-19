@@ -77,7 +77,9 @@ def make_web_app(bot_instance) -> web.Application:
     @routes.post("/recap")
     async def recap(request: web.Request):
         auth = request.headers.get("Authorization", "")
-        if not RECAP_SECRET or auth != f"Bearer {RECAP_SECRET}":
+        expected = f"Bearer {RECAP_SECRET}"
+        print(f"[RECAP AUTH] received={auth!r} expected={expected!r} match={auth == expected} secret_set={bool(RECAP_SECRET)}")
+        if not RECAP_SECRET or auth != expected:
             raise web.HTTPUnauthorized(text="Invalid or missing auth token")
 
         try:
