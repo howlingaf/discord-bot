@@ -909,10 +909,12 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
 
         desc_lines = [f"{diff_emoji} **{difficulty}** · \U0001f512 Premium"]
         if date_ts:
+            desc_lines.append("")
             desc_lines.append(f"\U0001f4c5 Week of <t:{date_ts}:D>")
         if thread_id:
             thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-            desc_lines.append(f"\n\U0001f449 [View Post]({thread_url})")
+            desc_lines.append("")
+            desc_lines.append(f"\U0001f449 [View Post]({thread_url})")
 
         notif_embed = discord.Embed(
             title=notif_title,
