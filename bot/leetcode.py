@@ -837,6 +837,8 @@ async def fetch_weekly_premium(session: ClientSession) -> dict | None:
         try:
             async with session.post("https://leetcode.com/graphql", json=payload, headers=headers) as resp:
                 js = await resp.json(content_type=None)
+                print(f"[PREMIUM WEEKLY DEBUG] {year}-{month:02d} raw keys: {list((js.get('data') or {}).keys())}")
+                print(f"[PREMIUM WEEKLY DEBUG] full response: {js}")
                 weekly = ((js.get("data") or {}).get("dailyCodingChallengeList") or {}).get("weeklyQuestions") or []
                 for entry in weekly:
                     d = entry.get("date") or ""
