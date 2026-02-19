@@ -872,10 +872,25 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
     if not title_slug:
         return False, "weekly premium entry missing titleSlug"
 
+    # Capture old thread for tag swap
+    old_state = leetcode_get_premium_weekly_state()
+    old_thread_id: int | None = None
+    if old_state and old_state.get("title_slug") and old_state["title_slug"] != title_slug:
+        old_problem = leetcode_get_problem_by_slug(old_state["title_slug"])
+        if old_problem:
+            old_thread_id = old_problem["thread_id"]
+
     if not force:
-        state = leetcode_get_premium_weekly_state()
-        if state and state["date"] == date:
+        if old_state and old_state["date"] == date:
             return False, f"already posted for week of {date}"
+
+    forum = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
+
+    weekly_premium_tag: discord.ForumTag | None = None
+    try:
+        weekly_premium_tag = await _get_or_create_forum_tag(forum, "Weekly Premium")
+    except Exception as e:
+        print(f"[PREMIUM WEEKLY] Could not get/create tag: {e}")
 
     # Ensure a forum post exists for this problem
     thread_id: int | None = None
@@ -889,6 +904,26 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
                 print(f"[PREMIUM WEEKLY] forum post failed: {err}")
         except Exception as e:
             print(f"[PREMIUM WEEKLY] forum post error: {e}")
+
+    # Apply "Weekly Premium" tag to new thread
+    if weekly_premium_tag and thread_id:
+        try:
+            new_thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
+            if isinstance(new_thread, discord.Thread):
+                if not any(t.id == weekly_premium_tag.id for t in new_thread.applied_tags):
+                    await new_thread.edit(applied_tags=list(new_thread.applied_tags) + [weekly_premium_tag])
+        except Exception as e:
+            print(f"[PREMIUM WEEKLY] Failed to apply tag to thread {thread_id}: {e}")
+
+    # Remove "Weekly Premium" tag from previous week's thread
+    if weekly_premium_tag and old_thread_id and old_thread_id != thread_id:
+        try:
+            old_thread = bot.get_channel(old_thread_id) or await bot.fetch_channel(old_thread_id)
+            if isinstance(old_thread, discord.Thread):
+                new_applied = [t for t in old_thread.applied_tags if t.id != weekly_premium_tag.id]
+                await old_thread.edit(applied_tags=new_applied)
+        except Exception as e:
+            print(f"[PREMIUM WEEKLY] Failed to remove tag from old thread {old_thread_id}: {e}")
 
     # Look up stored problem for difficulty
     problem = leetcode_get_problem_by_slug(title_slug)
