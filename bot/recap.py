@@ -99,9 +99,13 @@ async def process_recap(bot, payload: dict):
 
     print(f"[RECAP] Problems to recap: {problem_slugs}")
 
-    # Fetch streamer submissions, filter to stream window and relevant problems
-    streamer_subs = await fetch_streamer_submissions(session, stream_start, stream_end)
-    print(f"[RECAP] Found {len(streamer_subs)} streamer submissions in window")
+    # Use explicit streamer_submissions if provided, otherwise fetch from API
+    if "streamer_submissions" in payload:
+        streamer_subs = payload["streamer_submissions"] or []
+        print(f"[RECAP] Using {len(streamer_subs)} explicit streamer submissions")
+    else:
+        streamer_subs = await fetch_streamer_submissions(session, stream_start, stream_end)
+        print(f"[RECAP] Found {len(streamer_subs)} streamer submissions in window")
 
     # Pick best streamer submission per problem:
     # prefer last accepted, otherwise last submission
