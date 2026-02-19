@@ -638,9 +638,14 @@ async def _build_contest_rankings(bot, contest_title: str) -> list[dict]:
             if idx is not None and idx > 0:
                 delta = entry["rating"] - sorted_history[idx - 1]["rating"]
 
+            guild = bot.get_guild(GUILD_ID)
+            member = guild.get_member(discord_id) if guild else None
+            discord_handle = member.display_name if member else username
+
             rankings.append({
                 "discord_id": discord_id,
                 "username": username,
+                "discord_handle": discord_handle,
                 "solved": entry["problemsSolved"],
                 "total": entry["totalProblems"],
                 "time": _format_finish_time(entry["finishTimeInSeconds"]),
@@ -673,7 +678,7 @@ def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
         if r["delta"] is not None:
             sign = "+" if r["delta"] >= 0 else ""
             delta_str = f"{sign}{r['delta']:.0f}"
-        rows.append((str(i), r["username"], f"{r['solved']}/{r['total']}", r["time"], f"{r['rating']:.0f}", delta_str))
+        rows.append((str(i), r["discord_handle"], f"{r['solved']}/{r['total']}", r["time"], f"{r['rating']:.0f}", delta_str))
 
     headers = ("Rank", "Username", "Solved", "Time", "Rating", "+/-")
     col_widths = [max(len(h), max(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
