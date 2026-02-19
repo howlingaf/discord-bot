@@ -16,6 +16,7 @@ from .config import (
     LEETCODE_WEEKLY_CHANNEL_ID,
     LEETCODE_BIWEEKLY_CHANNEL_ID,
     LEETCODE_CONTEST_URL,
+    LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID,
     GUILD_ID,
 )
 from .database import (
@@ -26,6 +27,8 @@ from .database import (
     leetcode_set_daily_state,
     leetcode_get_contest_state,
     leetcode_set_contest_state,
+    leetcode_get_premium_weekly_state,
+    leetcode_set_premium_weekly_state,
     linked_users_all,
 )
 
@@ -795,6 +798,147 @@ async def post_leetcode_contest(
 
     leetcode_set_contest_state(contest_type, slug, thread_id=recap_thread_id)
     return True, f"posted {contest_type} slug={slug}"
+
+
+async def fetch_weekly_premium(session: ClientSession) -> dict | None:
+    """Return the current week's premium weekly problem, or None if unavailable."""
+    csrf = await fetch_leetcode_csrf(session)
+    today = datetime.utcnow().date()
+    today_str = str(today)
+
+    query = """
+    query($year: Int!, $month: Int!) {
+      dailyCodingChallengeList(year: $year, month: $month) {
+        weeklyQuestions {
+          questionFrontendId
+          questionTitle
+          questionTitleSlug
+          date
+        }
+      }
+    }
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Referer": "https://leetcode.com/",
+        "x-csrftoken": csrf,
+    }
+
+    # Check current month and previous month to handle month boundaries
+    months_to_check = [(today.year, today.month)]
+    if today.month == 1:
+        months_to_check.append((today.year - 1, 12))
+    else:
+        months_to_check.append((today.year, today.month - 1))
+
+    candidates = []
+    for year, month in months_to_check:
+        payload = {"query": query.strip(), "variables": {"year": year, "month": month}}
+        try:
+            async with session.post("https://leetcode.com/graphql", json=payload, headers=headers) as resp:
+                js = await resp.json(content_type=None)
+                weekly = ((js.get("data") or {}).get("dailyCodingChallengeList") or {}).get("weeklyQuestions") or []
+                for entry in weekly:
+                    d = entry.get("date") or ""
+                    if d and d <= today_str:
+                        candidates.append(entry)
+        except Exception as e:
+            print(f"[PREMIUM WEEKLY] fetch error for {year}-{month:02d}: {e}")
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda e: e.get("date") or "")
+
+
+async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[bool, str]:
+    if not bot.http_session:
+        return False, "http session not ready"
+
+    entry = await fetch_weekly_premium(bot.http_session)
+    if not entry:
+        return False, "no weekly premium problem found"
+
+    date = entry.get("date") or ""
+    title_slug = entry.get("questionTitleSlug") or ""
+    qtitle = entry.get("questionTitle") or "Weekly Premium"
+    qid = entry.get("questionFrontendId") or ""
+
+    if not title_slug:
+        return False, "weekly premium entry missing titleSlug"
+
+    if not force:
+        state = leetcode_get_premium_weekly_state()
+        if state and state["date"] == date:
+            return False, f"already posted for week of {date}"
+
+    # Ensure a forum post exists for this problem
+    thread_id: int | None = None
+    existing = leetcode_get_problem_by_slug(title_slug)
+    if existing:
+        thread_id = existing["thread_id"]
+    else:
+        try:
+            thread_id, err = await get_or_create_problem_post(bot, title_slug)
+            if not thread_id:
+                print(f"[PREMIUM WEEKLY] forum post failed: {err}")
+        except Exception as e:
+            print(f"[PREMIUM WEEKLY] forum post error: {e}")
+
+    # Look up stored problem for difficulty
+    problem = leetcode_get_problem_by_slug(title_slug)
+    difficulty = (problem.get("difficulty") or "Unknown") if problem else "Unknown"
+    stored_qid = problem["question_id"] if problem else (qid or title_slug)
+
+    # Convert date string to unix timestamp for Discord formatting
+    date_ts = 0
+    if date:
+        try:
+            date_ts = int(datetime.strptime(date, "%Y-%m-%d").timestamp())
+        except ValueError:
+            pass
+
+    # Notification card
+    try:
+        notif_channel = bot.get_channel(LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID)
+
+        diff_emoji = DIFF_EMOJI.get(difficulty, "\u26aa")
+        color = DIFF_COLORS.get(difficulty, 0x808080)
+        url = f"{LEETCODE_BASE}/problems/{title_slug}/"
+        notif_title = f"{qid}. {qtitle}" if qid else qtitle
+
+        desc_lines = [f"{diff_emoji} **{difficulty}** · \U0001f512 Premium"]
+        if date_ts:
+            desc_lines.append(f"\U0001f4c5 Week of <t:{date_ts}:D>")
+        if thread_id:
+            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
+            desc_lines.append(f"\n\U0001f449 [View Post]({thread_url})")
+
+        notif_embed = discord.Embed(
+            title=notif_title,
+            url=url,
+            description="\n".join(desc_lines),
+            color=color,
+        )
+        await notif_channel.send(embed=notif_embed)
+    except Exception as e:
+        print(f"[PREMIUM WEEKLY] notification send failed: {e}")
+
+    leetcode_set_premium_weekly_state(question_id=stored_qid, title_slug=title_slug, date=date)
+    return True, f"posted premium weekly {date=} {title_slug=}"
+
+
+async def leetcode_premium_weekly_scheduler(bot):
+    await bot.wait_until_ready()
+    await asyncio.sleep(4)
+    print("\u2705 LeetCode premium weekly scheduler started (polling every 5 min)")
+    while not bot.is_closed():
+        try:
+            posted, msg = await post_leetcode_weekly_premium(bot, force=False)
+            if posted:
+                print(f"[PREMIUM WEEKLY] {msg}")
+        except Exception as e:
+            print("[PREMIUM WEEKLY] error:", repr(e))
+        await asyncio.sleep(300)
 
 
 async def leetcode_contest_scheduler(bot):

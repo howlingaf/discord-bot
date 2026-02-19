@@ -102,6 +102,16 @@ def db_init():
         """)
         conn.execute("INSERT OR IGNORE INTO leetcode_status_state(id) VALUES(1)")
 
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS leetcode_premium_weekly_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          question_id TEXT,
+          title_slug TEXT,
+          date TEXT
+        )
+        """)
+        conn.execute("INSERT OR IGNORE INTO leetcode_premium_weekly_state(id) VALUES(1)")
+
         conn.commit()
 
 
@@ -347,4 +357,25 @@ def leetcode_status_set(*, message_id: int | None = None, last_status: str | Non
             conn.execute("UPDATE leetcode_status_state SET message_id=? WHERE id=1", (message_id,))
         if last_status is not None:
             conn.execute("UPDATE leetcode_status_state SET last_status=? WHERE id=1", (last_status,))
+        conn.commit()
+
+
+# ---- LeetCode Premium Weekly helpers ----
+
+def leetcode_get_premium_weekly_state() -> dict | None:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT question_id, title_slug, date FROM leetcode_premium_weekly_state WHERE id=1"
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        return {"question_id": row[0], "title_slug": row[1], "date": row[2]}
+
+
+def leetcode_set_premium_weekly_state(*, question_id: str, title_slug: str, date: str):
+    with _db() as conn:
+        conn.execute(
+            "UPDATE leetcode_premium_weekly_state SET question_id=?, title_slug=?, date=? WHERE id=1",
+            (question_id, title_slug, date),
+        )
         conn.commit()

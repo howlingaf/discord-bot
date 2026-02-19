@@ -9,7 +9,7 @@ from .config import (
 )
 from .spotify import dm_spotify_link
 from .config import GUILD_ID
-from .leetcode import post_leetcode_contest, post_leetcode_problem, get_or_create_problem_post, _classify_contest
+from .leetcode import post_leetcode_contest, post_leetcode_problem, post_leetcode_weekly_premium, get_or_create_problem_post, _classify_contest
 from .database import leetcode_delete_problem, linked_users_get, linked_users_get_by_username, linked_users_set, linked_users_delete
 from .client import bot
 
@@ -150,6 +150,18 @@ async def unlink(interaction: discord.Interaction):
         await interaction.followup.send("\u2705 Your LeetCode account has been unlinked.", ephemeral=True)
     else:
         await interaction.followup.send("\u2139\ufe0f You don't have a linked LeetCode account.", ephemeral=True)
+
+
+@bot.tree.command(name="premium-weekly", description="(Admin) Post this week's premium weekly problem (manual trigger).")
+@app_commands.describe(force="If true, post even if it was already posted.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def premium_weekly(interaction: discord.Interaction, force: bool = True):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        posted, msg = await post_leetcode_weekly_premium(bot, force=force)
+        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
 @bot.tree.command(name="contest-recap", description="(Admin) Post a recap for any contest by slug.")
