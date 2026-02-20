@@ -36,6 +36,9 @@ from .database import (
     leetcode_contest_post_set_rated,
     leetcode_contest_posts_get_unrated,
     linked_users_all,
+    zerotrac_cache_get_all,
+    zerotrac_cache_updated_at,
+    zerotrac_cache_upsert_all,
 )
 
 
@@ -612,6 +615,44 @@ async def fetch_zerotrac_ratings(session: ClientSession) -> dict[str, float]:
         return {}
 
 
+_ZEROTRAC_CACHE_TTL = 7 * 24 * 3600  # 1 week
+
+
+async def get_zerotrac_data(session: ClientSession) -> list[dict]:
+    """Return full zerotrac data list, using DB cache if fresh (< 1 week old).
+
+    Each entry: {title_slug, rating, contest_slug, problem_index}.
+    Falls back to DB cache on fetch failure.
+    """
+    import time as _time
+    age = _time.time() - zerotrac_cache_updated_at()
+    if age < _ZEROTRAC_CACHE_TTL:
+        cached = zerotrac_cache_get_all()
+        if cached:
+            return list(cached.values())
+
+    try:
+        async with session.get(
+            "https://raw.githubusercontent.com/zerotrac/leetcode_problem_rating/main/data.json"
+        ) as resp:
+            if resp.status != 200:
+                raise ValueError(f"HTTP {resp.status}")
+            raw = await resp.json(content_type=None)
+    except Exception as e:
+        print(f"[ZEROTRAC] Fetch failed, using cache: {e}")
+        cached = zerotrac_cache_get_all()
+        return list(cached.values())
+
+    entries = [
+        {"title_slug": p["TitleSlug"], "rating": p["Rating"],
+         "contest_slug": p["ContestSlug"], "problem_index": p["ProblemIndex"]}
+        for p in raw
+    ]
+    zerotrac_cache_upsert_all(entries)
+    print(f"[ZEROTRAC] Cache refreshed ({len(entries)} entries)")
+    return entries
+
+
 def build_contest_forum_embed(
     contest: dict,
     questions: list[dict],
@@ -1156,17 +1197,14 @@ async def check_and_update_contest_ratings(bot) -> int:
     if not unrated:
         return 0
 
-    try:
-        async with bot.http_session.get(
-            "https://raw.githubusercontent.com/zerotrac/leetcode_problem_rating/main/data.json"
-        ) as resp:
-            if resp.status != 200:
-                return 0
-            zerotrac_data = await resp.json(content_type=None)
-    except Exception as e:
-        print(f"[RATINGS UPDATE] Failed to fetch zerotrac: {e}")
+    zerotrac_entries = await get_zerotrac_data(bot.http_session)
+    if not zerotrac_entries:
+        print("[RATINGS UPDATE] No zerotrac data available")
         return 0
 
+    zerotrac_data = [{"TitleSlug": e["title_slug"], "Rating": e["rating"],
+                      "ContestSlug": e["contest_slug"], "ProblemIndex": e["problem_index"]}
+                     for e in zerotrac_entries]
     ratings_by_slug: dict[str, float] = {p["TitleSlug"]: p["Rating"] for p in zerotrac_data}
 
     from collections import defaultdict

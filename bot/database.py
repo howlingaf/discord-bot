@@ -130,6 +130,49 @@ def db_init():
                 conn.execute(f"ALTER TABLE leetcode_contest_posts ADD COLUMN {col}")
                 print(f"[DB] Added missing column '{name}' to leetcode_contest_posts")
 
+        # ---- Zerotrac cache ----
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS zerotrac_cache (
+          title_slug    TEXT PRIMARY KEY,
+          rating        REAL NOT NULL,
+          contest_slug  TEXT NOT NULL,
+          problem_index TEXT NOT NULL,
+          updated_at    INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+
+        # ---- Virtual rating system ----
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_virtual_stats (
+          discord_user_id   INTEGER PRIMARY KEY,
+          rating            REAL NOT NULL,
+          live_contest_count    INTEGER NOT NULL DEFAULT 0,
+          virtual_contest_count INTEGER NOT NULL DEFAULT 0,
+          updated_at        INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS virtual_contest_history (
+          discord_user_id INTEGER NOT NULL,
+          contest_slug    TEXT NOT NULL,
+          rating_before   REAL NOT NULL,
+          rating_after    REAL,
+          served_at       INTEGER NOT NULL DEFAULT 0,
+          done_at         INTEGER,
+          PRIMARY KEY (discord_user_id, contest_slug)
+        )
+        """)
+
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS virtual_problem_history (
+          discord_user_id INTEGER NOT NULL,
+          title_slug      TEXT NOT NULL,
+          served_at       INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (discord_user_id, title_slug)
+        )
+        """)
+
         conn.commit()
 
 
@@ -450,3 +493,175 @@ def leetcode_contest_posts_delete_by_type(contest_type: str) -> int:
         )
         conn.commit()
         return cur.rowcount
+
+
+# ---- Zerotrac cache helpers ----
+
+def zerotrac_cache_get_all() -> dict[str, dict]:
+    """Return all cached zerotrac entries keyed by title_slug."""
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT title_slug, rating, contest_slug, problem_index FROM zerotrac_cache"
+        ).fetchall()
+        return {r[0]: {"title_slug": r[0], "rating": r[1], "contest_slug": r[2], "problem_index": r[3]} for r in rows}
+
+
+def zerotrac_cache_updated_at() -> int:
+    """Return the most recent updated_at from the cache, or 0 if empty."""
+    with _db() as conn:
+        row = conn.execute("SELECT MAX(updated_at) FROM zerotrac_cache").fetchone()
+        return int(row[0]) if row and row[0] else 0
+
+
+def zerotrac_cache_upsert_all(entries: list[dict]):
+    """Bulk upsert zerotrac entries. Each entry: {title_slug, rating, contest_slug, problem_index}."""
+    now = int(time.time())
+    with _db() as conn:
+        conn.executemany(
+            """INSERT INTO zerotrac_cache(title_slug, rating, contest_slug, problem_index, updated_at)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(title_slug) DO UPDATE SET
+                 rating=excluded.rating,
+                 contest_slug=excluded.contest_slug,
+                 problem_index=excluded.problem_index,
+                 updated_at=excluded.updated_at""",
+            [(e["title_slug"], e["rating"], e["contest_slug"], e["problem_index"], now) for e in entries],
+        )
+        conn.commit()
+
+
+# ---- Virtual rating system helpers ----
+
+def virtual_stats_get(discord_user_id: int) -> dict | None:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT rating, live_contest_count, virtual_contest_count, updated_at FROM user_virtual_stats WHERE discord_user_id=?",
+            (discord_user_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return {"rating": row[0], "live_contest_count": row[1], "virtual_contest_count": row[2], "updated_at": row[3]}
+
+
+def virtual_stats_set(discord_user_id: int, *, rating: float, live_contest_count: int, virtual_contest_count: int):
+    now = int(time.time())
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO user_virtual_stats(discord_user_id, rating, live_contest_count, virtual_contest_count, updated_at)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(discord_user_id) DO UPDATE SET
+                 rating=excluded.rating,
+                 live_contest_count=excluded.live_contest_count,
+                 virtual_contest_count=excluded.virtual_contest_count,
+                 updated_at=excluded.updated_at""",
+            (discord_user_id, rating, live_contest_count, virtual_contest_count, now),
+        )
+        conn.commit()
+
+
+def virtual_stats_update_rating(discord_user_id: int, new_rating: float):
+    now = int(time.time())
+    with _db() as conn:
+        conn.execute(
+            "UPDATE user_virtual_stats SET rating=?, virtual_contest_count=virtual_contest_count+1, updated_at=? WHERE discord_user_id=?",
+            (new_rating, now, discord_user_id),
+        )
+        conn.commit()
+
+
+# ---- Virtual contest history helpers ----
+
+def virtual_contest_history_get(discord_user_id: int, contest_slug: str) -> dict | None:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT contest_slug, rating_before, rating_after, served_at, done_at FROM virtual_contest_history WHERE discord_user_id=? AND contest_slug=?",
+            (discord_user_id, contest_slug),
+        ).fetchone()
+        if not row:
+            return None
+        return {"contest_slug": row[0], "rating_before": row[1], "rating_after": row[2], "served_at": row[3], "done_at": row[4]}
+
+
+def virtual_contest_history_log(discord_user_id: int, contest_slug: str, rating_before: float):
+    now = int(time.time())
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO virtual_contest_history(discord_user_id, contest_slug, rating_before, rating_after, served_at)
+               VALUES(?,?,?,NULL,?)
+               ON CONFLICT(discord_user_id, contest_slug) DO NOTHING""",
+            (discord_user_id, contest_slug, rating_before, now),
+        )
+        conn.commit()
+
+
+def virtual_contest_history_complete(discord_user_id: int, contest_slug: str, rating_after: float):
+    now = int(time.time())
+    with _db() as conn:
+        conn.execute(
+            "UPDATE virtual_contest_history SET rating_after=?, done_at=? WHERE discord_user_id=? AND contest_slug=?",
+            (rating_after, now, discord_user_id, contest_slug),
+        )
+        conn.commit()
+
+
+def virtual_contest_history_done_slugs(discord_user_id: int) -> set[str]:
+    """Return all contest slugs ever served to this user (completed or not)."""
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT contest_slug FROM virtual_contest_history WHERE discord_user_id=?",
+            (discord_user_id,),
+        ).fetchall()
+        return {r[0] for r in rows}
+
+
+def virtual_contest_history_recent(discord_user_id: int, limit: int = 10) -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT contest_slug, rating_before, rating_after, served_at, done_at
+               FROM virtual_contest_history WHERE discord_user_id=?
+               ORDER BY served_at DESC LIMIT ?""",
+            (discord_user_id, limit),
+        ).fetchall()
+        return [{"contest_slug": r[0], "rating_before": r[1], "rating_after": r[2], "served_at": r[3], "done_at": r[4]} for r in rows]
+
+
+# ---- Virtual problem history helpers ----
+
+def virtual_problem_history_log(discord_user_id: int, title_slug: str):
+    now = int(time.time())
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO virtual_problem_history(discord_user_id, title_slug, served_at)
+               VALUES(?,?,?)
+               ON CONFLICT(discord_user_id, title_slug) DO NOTHING""",
+            (discord_user_id, title_slug, now),
+        )
+        conn.commit()
+
+
+def virtual_problem_history_done_slugs(discord_user_id: int) -> set[str]:
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT title_slug FROM virtual_problem_history WHERE discord_user_id=?",
+            (discord_user_id,),
+        ).fetchall()
+        return {r[0] for r in rows}
+
+
+def virtual_problem_history_recent(discord_user_id: int, limit: int = 10) -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT title_slug, served_at FROM virtual_problem_history WHERE discord_user_id=?
+               ORDER BY served_at DESC LIMIT ?""",
+            (discord_user_id, limit),
+        ).fetchall()
+        return [{"title_slug": r[0], "served_at": r[1]} for r in rows]
+
+
+def virtual_reset(discord_user_id: int):
+    """Wipe all virtual history and stats for a user."""
+    with _db() as conn:
+        conn.execute("DELETE FROM user_virtual_stats WHERE discord_user_id=?", (discord_user_id,))
+        conn.execute("DELETE FROM virtual_contest_history WHERE discord_user_id=?", (discord_user_id,))
+        conn.execute("DELETE FROM virtual_problem_history WHERE discord_user_id=?", (discord_user_id,))
+        conn.commit()
