@@ -850,40 +850,40 @@ async def post_setup_info(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ {e}", ephemeral=True)
 
 
-@bot.tree.command(name="archive-old-contests", description="(Admin) Archive all contest threads except the most recent in each forum.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def archive_old_contests(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-
-    results = []
+async def _run_archive_old_contests(log_channel):
     for ch_id in [LEETCODE_WEEKLY_FORUM_CHANNEL_ID, LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID]:
         try:
             ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
             if not isinstance(ch, discord.ForumChannel):
-                results.append(f"❌ <#{ch_id}> is not a forum channel")
+                await log_channel.send(f"❌ <#{ch_id}> is not a forum channel")
                 continue
 
-            # Active threads only — sort by ID descending (higher = newer)
             active = sorted(ch.threads, key=lambda t: t.id, reverse=True)
 
             if len(active) <= 1:
-                results.append(f"ℹ️ <#{ch_id}> — nothing to archive")
+                await log_channel.send(f"ℹ️ <#{ch_id}> — nothing to archive")
                 continue
 
             archived = 0
-            for thread in active[1:]:  # skip the most recent
+            for thread in active[1:]:
                 try:
                     await thread.edit(archived=True)
                     archived += 1
                     await asyncio.sleep(0.5)
                 except Exception as e:
-                    print(f"[ARCHIVE] failed to archive {thread.id}: {e}")
+                    print(f"[ARCHIVE CONTESTS] failed {thread.id}: {e}")
 
-            results.append(f"✅ <#{ch_id}> — archived {archived} thread(s), kept 1")
+            await log_channel.send(f"✅ <#{ch_id}> — archived {archived} thread(s), kept 1")
         except Exception as e:
-            results.append(f"❌ <#{ch_id}>: {e}")
+            await log_channel.send(f"❌ <#{ch_id}>: {e}")
 
-    await interaction.followup.send("\n".join(results), ephemeral=True)
+
+@bot.tree.command(name="archive-old-contests", description="(Admin) Archive all contest threads except the most recent in each forum.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def archive_old_contests(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    asyncio.create_task(_run_archive_old_contests(interaction.channel))
+    await interaction.followup.send("⏳ Archiving old contests in the background. Results will appear in this channel.", ephemeral=True)
 
 
 @bot.tree.command(name="archive-inactive-problems", description="(Admin) Archive all problem posts with no replies.")
