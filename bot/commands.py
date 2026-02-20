@@ -47,6 +47,7 @@ from .database import (
     virtual_problem_history_done_slugs,
     virtual_problem_history_recent,
     virtual_reset,
+    virtual_stats_set_last_contest,
 )
 from .client import bot
 
@@ -557,18 +558,8 @@ async def rating_cmd(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="contest", description="Get a contest to practice, or log your result.")
-@app_commands.describe(
-    contest_type="'weekly' or 'biweekly' — required when logging a result",
-    number="Contest number — required when logging a result",
-    new_rating="Your new rating from LeetCode after the virtual contest",
-)
-async def contest_cmd(
-    interaction: discord.Interaction,
-    contest_type: str | None = None,
-    number: int | None = None,
-    new_rating: float | None = None,
-):
+@bot.tree.command(name="get-contest", description="Get a virtual contest to practice at your current rating.")
+async def get_contest_cmd(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
     lc_username = linked_users_get(interaction.user.id)
@@ -580,48 +571,6 @@ async def contest_cmd(
     if not stats:
         stats = await _init_virtual_stats(interaction.user.id, lc_username, bot.http_session)
 
-    # --- Log result mode ---
-    if contest_type is not None or number is not None or new_rating is not None:
-        if contest_type not in ("weekly", "biweekly") or number is None or new_rating is None:
-            await interaction.followup.send(
-                "❌ To log a result: `/contest weekly|biweekly <number> <new_rating>`", ephemeral=True
-            )
-            return
-
-        slug = f"{contest_type}-contest-{number}"
-        entry = virtual_contest_history_get(interaction.user.id, slug)
-
-        if entry is None:
-            await interaction.followup.send(
-                f"❌ You weren't served `{slug}`. Run `/contest` first to get a contest.", ephemeral=True
-            )
-            return
-
-        if entry["rating_after"] is not None:
-            await interaction.followup.send(
-                f"ℹ️ You've already logged a result for `{slug}`. Your rating won't be updated.", ephemeral=True
-            )
-            return
-
-        import time as _time
-        if _time.time() - entry["served_at"] > 86400:
-            await interaction.followup.send(
-                f"⏰ The 24-hour window for `{slug}` has expired. Your rating won't be updated, "
-                f"but this contest is still marked as done.", ephemeral=True
-            )
-            return
-
-        virtual_contest_history_complete(interaction.user.id, slug, new_rating)
-        old_rating = stats["rating"]
-        virtual_stats_update_rating(interaction.user.id, new_rating)
-        delta = new_rating - old_rating
-        sign = "+" if delta >= 0 else ""
-        await interaction.followup.send(
-            f"✅ Logged `{slug}`: `{old_rating:.0f}` → `{new_rating:.0f}` ({sign}{delta:.0f})", ephemeral=True
-        )
-        return
-
-    # --- Serve contest mode ---
     zerotrac_entries = await get_zerotrac_data(bot.http_session)
     if not zerotrac_entries:
         await interaction.followup.send("❌ Could not load contest data.", ephemeral=True)
@@ -634,7 +583,6 @@ async def contest_cmd(
 
     done_slugs = virtual_contest_history_done_slugs(interaction.user.id)
     user_rating = stats["rating"]
-
     ratings_by_slug = {e["title_slug"]: e["rating"] for e in zerotrac_entries}
 
     # Build list of (slug, weighted_avg) for untaken contests
@@ -675,7 +623,6 @@ async def contest_cmd(
     if post:
         thread_url = f"https://discord.com/channels/{GUILD_ID}/{post['thread_id']}"
     else:
-        # Create the forum post on the fly
         contest_type_str = _classify_contest(best_slug)
         forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type_str, 0)
         try:
@@ -683,7 +630,6 @@ async def contest_cmd(
             problems = sorted(contests_map[best_slug], key=lambda p: p["problem_index"])
             questions = [{"questionId": "", "title": p["title_slug"].replace("-", " ").title(), "titleSlug": p["title_slug"]} for p in problems]
 
-            # Fetch proper titles from DB or API
             question_thread_ids: dict[str, int] = {}
             for p in problems:
                 thread_id, _ = await get_or_create_problem_post_archived(bot, p["title_slug"])
@@ -707,7 +653,8 @@ async def contest_cmd(
             await interaction.followup.send(f"❌ Could not create contest post: {e}", ephemeral=True)
             return
 
-    virtual_contest_history_log(interaction.user.id, best_slug, stats["rating"])
+    virtual_contest_history_log(interaction.user.id, best_slug, user_rating)
+    virtual_stats_set_last_contest(interaction.user.id, best_slug)
 
     contest_label = best_slug.replace("-", " ").title()
     embed = discord.Embed(
@@ -715,8 +662,57 @@ async def contest_cmd(
         description=f"Avg rating: ||{best_avg:.0f}|| | Your rating: `{user_rating:.0f}`\n\n👉 {thread_url}",
         color=0x9B59B6,
     )
-    embed.set_footer(text=f"Log your result with /contest {_classify_contest(best_slug)} {best_slug.rsplit('-', 1)[-1]} <new_rating>")
+    embed.set_footer(text="Log your result with /set-contest <new_rating>")
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="set-contest", description="Log your result for the last virtual contest you were served.")
+@app_commands.describe(new_rating="Your new rating shown by LeetCode after the virtual contest")
+async def set_contest_cmd(interaction: discord.Interaction, new_rating: float):
+    await interaction.response.defer(ephemeral=True)
+
+    lc_username = linked_users_get(interaction.user.id)
+    if not lc_username:
+        await interaction.followup.send("❌ You need to link your LeetCode account first. Use `/link`.", ephemeral=True)
+        return
+
+    stats = virtual_stats_get(interaction.user.id)
+    if not stats or not stats.get("last_contest_slug"):
+        await interaction.followup.send("❌ No contest to log. Run `/get-contest` first.", ephemeral=True)
+        return
+
+    slug = stats["last_contest_slug"]
+    entry = virtual_contest_history_get(interaction.user.id, slug)
+
+    if entry is None:
+        await interaction.followup.send("❌ No contest to log. Run `/get-contest` first.", ephemeral=True)
+        return
+
+    if entry["rating_after"] is not None:
+        await interaction.followup.send(
+            f"ℹ️ You've already logged a result for `{slug.replace('-', ' ').title()}`. Your rating won't be updated.",
+            ephemeral=True,
+        )
+        return
+
+    import time as _time
+    if _time.time() - entry["served_at"] > 86400:
+        await interaction.followup.send(
+            f"⏰ The 24-hour window for `{slug.replace('-', ' ').title()}` has expired. "
+            f"Your rating won't be updated, but this contest is still marked as done.",
+            ephemeral=True,
+        )
+        return
+
+    virtual_contest_history_complete(interaction.user.id, slug, new_rating)
+    old_rating = stats["rating"]
+    virtual_stats_update_rating(interaction.user.id, new_rating)
+    delta = new_rating - old_rating
+    sign = "+" if delta >= 0 else ""
+    await interaction.followup.send(
+        f"✅ `{slug.replace('-', ' ').title()}`: `{old_rating:.0f}` → `{new_rating:.0f}` ({sign}{delta:.0f})",
+        ephemeral=True,
+    )
 
 
 @bot.tree.command(name="practice", description="Get a problem to practice at your current rating level.")

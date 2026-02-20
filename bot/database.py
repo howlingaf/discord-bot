@@ -144,13 +144,19 @@ def db_init():
         # ---- Virtual rating system ----
         conn.execute("""
         CREATE TABLE IF NOT EXISTS user_virtual_stats (
-          discord_user_id   INTEGER PRIMARY KEY,
-          rating            REAL NOT NULL,
+          discord_user_id       INTEGER PRIMARY KEY,
+          rating                REAL NOT NULL,
           live_contest_count    INTEGER NOT NULL DEFAULT 0,
           virtual_contest_count INTEGER NOT NULL DEFAULT 0,
-          updated_at        INTEGER NOT NULL DEFAULT 0
+          last_contest_slug     TEXT,
+          updated_at            INTEGER NOT NULL DEFAULT 0
         )
         """)
+
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(user_virtual_stats)")}
+        if "last_contest_slug" not in existing_cols:
+            conn.execute("ALTER TABLE user_virtual_stats ADD COLUMN last_contest_slug TEXT")
+            print("[DB] Added missing column 'last_contest_slug' to user_virtual_stats")
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS virtual_contest_history (
@@ -535,12 +541,12 @@ def zerotrac_cache_upsert_all(entries: list[dict]):
 def virtual_stats_get(discord_user_id: int) -> dict | None:
     with _db() as conn:
         row = conn.execute(
-            "SELECT rating, live_contest_count, virtual_contest_count, updated_at FROM user_virtual_stats WHERE discord_user_id=?",
+            "SELECT rating, live_contest_count, virtual_contest_count, last_contest_slug, updated_at FROM user_virtual_stats WHERE discord_user_id=?",
             (discord_user_id,),
         ).fetchone()
         if not row:
             return None
-        return {"rating": row[0], "live_contest_count": row[1], "virtual_contest_count": row[2], "updated_at": row[3]}
+        return {"rating": row[0], "live_contest_count": row[1], "virtual_contest_count": row[2], "last_contest_slug": row[3], "updated_at": row[4]}
 
 
 def virtual_stats_set(discord_user_id: int, *, rating: float, live_contest_count: int, virtual_contest_count: int):
@@ -555,6 +561,15 @@ def virtual_stats_set(discord_user_id: int, *, rating: float, live_contest_count
                  virtual_contest_count=excluded.virtual_contest_count,
                  updated_at=excluded.updated_at""",
             (discord_user_id, rating, live_contest_count, virtual_contest_count, now),
+        )
+        conn.commit()
+
+
+def virtual_stats_set_last_contest(discord_user_id: int, contest_slug: str):
+    with _db() as conn:
+        conn.execute(
+            "UPDATE user_virtual_stats SET last_contest_slug=? WHERE discord_user_id=?",
+            (contest_slug, discord_user_id),
         )
         conn.commit()
 
