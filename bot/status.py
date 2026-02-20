@@ -88,7 +88,7 @@ async def _run_status_check(bot):
 
     # Update channel name if it doesn't match expected
     emoji, _, label = STATUS_MAP.get(overall, ("⚪", 0x808080, "Unknown"))
-    new_channel_name = f"{emoji}health"
+    new_channel_name = emoji
     if channel.name != new_channel_name:
         try:
             await channel.edit(name=new_channel_name)
