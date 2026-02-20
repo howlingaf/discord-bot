@@ -864,7 +864,7 @@ async def archive_old_contests(interaction: discord.Interaction):
                 continue
 
             # Active threads only — skip pinned, sort by ID descending (higher = newer)
-            active = [t for t in ch.threads if not t.pinned]
+            active = [t for t in ch.threads if not getattr(t.flags, "pinned", False)]
             active.sort(key=lambda t: t.id, reverse=True)
 
             if len(active) <= 1:
