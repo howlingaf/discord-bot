@@ -810,8 +810,8 @@ def _contest_difficulty_tag(questions: list[dict], ratings_by_slug: dict[str, fl
     """Compute a difficulty tag for a contest from zerotrac ratings.
 
     Uses the credit field (GraphQL) if available, else falls back to Q-index
-    weights (3/4/5/6). Returns 'Beginner', 'Intermediate', 'Advanced', or
-    'Unrated' if any problem is missing a rating.
+    weights (3/4/5/6). Returns 'Easy' (<1750), 'Medium' (1750-1950),
+    'Hard' (>=1950), or 'Unrated' if any problem is missing a rating.
     """
     if not questions:
         return "Unrated"
@@ -828,9 +828,9 @@ def _contest_difficulty_tag(questions: list[dict], ratings_by_slug: dict[str, fl
     if total_weight == 0:
         return "Unrated"
     avg = weighted_sum / total_weight
-    if avg < 1500:
+    if avg < 1750:
         return "Easy"
-    elif avg < 2000:
+    elif avg < 1950:
         return "Medium"
     return "Hard"
 
