@@ -1028,11 +1028,17 @@ async def _run_fix_problem_embeds(log_channel: discord.abc.Messageable):
             if not msg.embeds:
                 skipped += 1
                 continue
-            new_embed, changed = _fix_embed_superscripts(msg.embeds[0])
+            new_embeds = []
+            changed = False
+            for emb in msg.embeds:
+                fixed_emb, emb_changed = _fix_embed_superscripts(emb)
+                new_embeds.append(fixed_emb)
+                if emb_changed:
+                    changed = True
             if not changed:
                 skipped += 1
                 continue
-            await msg.edit(embed=new_embed)
+            await msg.edit(embeds=new_embeds)
             if was_archived:
                 await thread.edit(archived=True)
             fixed += 1
@@ -1062,12 +1068,18 @@ async def fix_problem_embeds(interaction: discord.Interaction, question_id: int 
             if not msg.embeds:
                 await interaction.followup.send("ℹ️ No embed found on that post.", ephemeral=True)
                 return
-            new_embed, changed = _fix_embed_superscripts(msg.embeds[0])
+            new_embeds = []
+            changed = False
+            for emb in msg.embeds:
+                fixed_emb, emb_changed = _fix_embed_superscripts(emb)
+                new_embeds.append(fixed_emb)
+                if emb_changed:
+                    changed = True
             if not changed:
                 await interaction.followup.send("ℹ️ No superscript issues found — embed looks fine.", ephemeral=True)
                 return
             was_archived = thread.archived
-            await msg.edit(embed=new_embed)
+            await msg.edit(embeds=new_embeds)
             if was_archived:
                 await thread.edit(archived=True)
             await interaction.followup.send(f"✅ Fixed problem #{question_id}.", ephemeral=True)
