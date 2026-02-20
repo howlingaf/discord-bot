@@ -117,9 +117,18 @@ def db_init():
           contest_slug TEXT PRIMARY KEY,
           contest_type TEXT NOT NULL,
           thread_id    INTEGER NOT NULL,
-          created_at   INTEGER NOT NULL DEFAULT 0
+          created_at   INTEGER NOT NULL DEFAULT 0,
+          start_time   INTEGER NOT NULL DEFAULT 0,
+          rated        INTEGER NOT NULL DEFAULT 0
         )
         """)
+
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(leetcode_contest_posts)")}
+        for col in ("start_time INTEGER NOT NULL DEFAULT 0", "rated INTEGER NOT NULL DEFAULT 0"):
+            name = col.split()[0]
+            if name not in existing_cols:
+                conn.execute(f"ALTER TABLE leetcode_contest_posts ADD COLUMN {col}")
+                print(f"[DB] Added missing column '{name}' to leetcode_contest_posts")
 
         conn.commit()
 
@@ -403,15 +412,31 @@ def leetcode_contest_post_get(contest_slug: str) -> dict | None:
         return {"contest_slug": row[0], "contest_type": row[1], "thread_id": row[2], "created_at": row[3]}
 
 
-def leetcode_contest_post_save(contest_slug: str, contest_type: str, thread_id: int):
+def leetcode_contest_post_save(contest_slug: str, contest_type: str, thread_id: int, *, start_time: int = 0, rated: int = 0):
     now = int(time.time())
     with _db() as conn:
         conn.execute(
-            """INSERT INTO leetcode_contest_posts(contest_slug, contest_type, thread_id, created_at)
-               VALUES(?,?,?,?)
+            """INSERT INTO leetcode_contest_posts(contest_slug, contest_type, thread_id, created_at, start_time, rated)
+               VALUES(?,?,?,?,?,?)
                ON CONFLICT(contest_slug) DO UPDATE SET
                  thread_id=excluded.thread_id,
-                 contest_type=excluded.contest_type""",
-            (contest_slug, contest_type, thread_id, now),
+                 contest_type=excluded.contest_type,
+                 start_time=excluded.start_time,
+                 rated=excluded.rated""",
+            (contest_slug, contest_type, thread_id, now, start_time, rated),
         )
         conn.commit()
+
+
+def leetcode_contest_post_set_rated(contest_slug: str):
+    with _db() as conn:
+        conn.execute("UPDATE leetcode_contest_posts SET rated=1 WHERE contest_slug=?", (contest_slug,))
+        conn.commit()
+
+
+def leetcode_contest_posts_get_unrated() -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT contest_slug, contest_type, thread_id, start_time FROM leetcode_contest_posts WHERE rated=0"
+        ).fetchall()
+        return [{"contest_slug": r[0], "contest_type": r[1], "thread_id": r[2], "start_time": r[3]} for r in rows]

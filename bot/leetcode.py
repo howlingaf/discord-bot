@@ -33,6 +33,8 @@ from .database import (
     leetcode_set_premium_weekly_state,
     leetcode_contest_post_get,
     leetcode_contest_post_save,
+    leetcode_contest_post_set_rated,
+    leetcode_contest_posts_get_unrated,
     linked_users_all,
 )
 
@@ -640,11 +642,9 @@ def build_contest_forum_embed(
 
         rating = ratings_by_slug.get(q_slug)
         if rating is not None:
-            spoiler = f"||⭐ {rating:.0f}||"
+            desc_lines.append(f"{link_text} ||⭐ {rating:.0f}||")
         else:
-            spoiler = "||unrated||"
-
-        desc_lines.append(f"{link_text} {spoiler}")
+            desc_lines.append(link_text)
 
     return discord.Embed(
         title=title,
@@ -803,6 +803,38 @@ def build_rankings_embed(rankings: list[dict]) -> discord.Embed:
     return embed
 
 
+_DIFFICULTY_TAG_WEIGHTS = [3, 4, 5, 6]  # Q1 → Q4 fallback weights
+
+
+def _contest_difficulty_tag(questions: list[dict], ratings_by_slug: dict[str, float]) -> str:
+    """Compute a difficulty tag for a contest from zerotrac ratings.
+
+    Uses the credit field (GraphQL) if available, else falls back to Q-index
+    weights (3/4/5/6). Returns 'Beginner', 'Intermediate', 'Advanced', or
+    'Unrated' if any problem is missing a rating.
+    """
+    if not questions:
+        return "Unrated"
+    weighted_sum = 0.0
+    total_weight = 0
+    for i, q in enumerate(questions):
+        q_slug = q.get("titleSlug") or ""
+        rating = ratings_by_slug.get(q_slug)
+        if rating is None:
+            return "Unrated"
+        weight = int(q.get("credit") or _DIFFICULTY_TAG_WEIGHTS[min(i, 3)])
+        weighted_sum += rating * weight
+        total_weight += weight
+    if total_weight == 0:
+        return "Unrated"
+    avg = weighted_sum / total_weight
+    if avg < 1500:
+        return "Easy"
+    elif avg < 2000:
+        return "Medium"
+    return "Hard"
+
+
 async def post_leetcode_contest(
     bot,
     contest_type: str,
@@ -884,18 +916,27 @@ async def post_leetcode_contest(
     title = contest.get("title") or contest_type.title()
     forum_embed = build_contest_forum_embed(contest, questions, ratings_by_slug, question_thread_ids)
 
+    tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
+    is_rated = tag_name != "Unrated"
+
     forum_thread_id: int | None = None
     forum_thread_url: str = ""
     try:
+        contest_tag = await _get_or_create_forum_tag(forum_channel, tag_name)
         result = await forum_channel.create_thread(
             name=title[:100],
             embed=forum_embed,
+            applied_tags=[contest_tag],
             reason=f"{contest_type.title()} contest post",
         )
         forum_thread = result.thread if hasattr(result, "thread") else result
         forum_thread_id = forum_thread.id
         forum_thread_url = f"https://discord.com/channels/{GUILD_ID}/{forum_thread_id}"
-        leetcode_contest_post_save(slug, contest_type, forum_thread_id)
+        leetcode_contest_post_save(
+            slug, contest_type, forum_thread_id,
+            start_time=start_ts,
+            rated=1 if is_rated else 0,
+        )
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] forum thread create failed: {e}")
 
@@ -1106,6 +1147,101 @@ async def leetcode_premium_weekly_scheduler(bot):
         await asyncio.sleep(300)
 
 
+async def check_and_update_contest_ratings(bot) -> int:
+    """Check unrated contest posts and update embed + tag once zerotrac has ratings.
+
+    Returns the number of contests updated.
+    """
+    unrated = leetcode_contest_posts_get_unrated()
+    if not unrated:
+        return 0
+
+    try:
+        async with bot.http_session.get(
+            "https://raw.githubusercontent.com/zerotrac/leetcode_problem_rating/main/data.json"
+        ) as resp:
+            if resp.status != 200:
+                return 0
+            zerotrac_data = await resp.json(content_type=None)
+    except Exception as e:
+        print(f"[RATINGS UPDATE] Failed to fetch zerotrac: {e}")
+        return 0
+
+    ratings_by_slug: dict[str, float] = {p["TitleSlug"]: p["Rating"] for p in zerotrac_data}
+
+    from collections import defaultdict
+    zerotrac_by_contest: dict[str, list[dict]] = defaultdict(list)
+    for p in zerotrac_data:
+        zerotrac_by_contest[p["ContestSlug"]].append(p)
+
+    updated = 0
+    for row in unrated:
+        contest_slug = row["contest_slug"]
+        contest_type = row["contest_type"]
+        thread_id = row["thread_id"]
+        start_time = row["start_time"]
+
+        problems = zerotrac_by_contest.get(contest_slug)
+        if not problems:
+            continue  # Too old for zerotrac or not yet indexed
+
+        problems = sorted(problems, key=lambda p: p["ProblemIndex"])
+        questions = [
+            {"questionId": str(p["ID"]), "title": p["Title"], "titleSlug": p["TitleSlug"]}
+            for p in problems
+        ]
+
+        tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
+        if tag_name == "Unrated":
+            continue  # Ratings still not out
+
+        try:
+            forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type, 0)
+            if not forum_channel_id:
+                continue
+            forum_channel = bot.get_channel(forum_channel_id) or await bot.fetch_channel(forum_channel_id)
+            if not isinstance(forum_channel, discord.ForumChannel):
+                continue
+
+            thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
+            if not isinstance(thread, discord.Thread):
+                continue
+
+            # Rebuild embed with ratings now filled in
+            question_thread_ids: dict[str, int] = {}
+            for q in questions:
+                existing = leetcode_get_problem_by_slug(q["titleSlug"])
+                if existing:
+                    question_thread_ids[q["titleSlug"]] = existing["thread_id"]
+
+            contest_id_en = problems[0].get("ContestID_en", contest_slug.replace("-", " ").title())
+            mock_contest = {"title": contest_id_en, "titleSlug": contest_slug, "startTime": start_time}
+            new_embed = build_contest_forum_embed(mock_contest, questions, ratings_by_slug, question_thread_ids)
+
+            # Edit the starter message (forum post starter message ID == thread ID)
+            try:
+                starter = await thread.fetch_message(thread_id)
+                await starter.edit(embed=new_embed)
+            except Exception:
+                # Fallback: walk history
+                async for msg in thread.history(limit=1, oldest_first=True):
+                    await msg.edit(embed=new_embed)
+                    break
+
+            # Swap "Unrated" tag for difficulty tag
+            difficulty_tag = await _get_or_create_forum_tag(forum_channel, tag_name)
+            new_tags = [t for t in thread.applied_tags if t.name != "Unrated"] + [difficulty_tag]
+            await thread.edit(applied_tags=new_tags)
+
+            leetcode_contest_post_set_rated(contest_slug)
+            updated += 1
+            print(f"[RATINGS UPDATE] {contest_slug} → {tag_name} (avg computed)")
+        except Exception as e:
+            print(f"[RATINGS UPDATE] Failed to update {contest_slug}: {e}")
+
+    return updated
+
+
 async def leetcode_contest_scheduler(bot):
     await bot.wait_until_ready()
     await asyncio.sleep(5)
@@ -1124,6 +1260,14 @@ async def leetcode_contest_scheduler(bot):
                         print(f"[CONTEST/{ctype.upper()}] {msg}")
                 except Exception as e:
                     print(f"[CONTEST/{ctype.upper()}] error:", repr(e))
+
+            # Update any contest forum posts that now have ratings from zerotrac
+            try:
+                n = await check_and_update_contest_ratings(bot)
+                if n:
+                    print(f"[RATINGS UPDATE] Updated {n} contest(s) with ratings")
+            except Exception as e:
+                print("[RATINGS UPDATE] error:", repr(e))
 
             # If any contest has ended but not yet been posted, poll every 5 min
             now = int(datetime.now().timestamp())

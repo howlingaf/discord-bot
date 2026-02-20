@@ -21,6 +21,8 @@ from .leetcode import (
     build_contest_forum_embed,
     CONTEST_FORUM_CHANNEL_MAP,
     _classify_contest,
+    _contest_difficulty_tag,
+    _get_or_create_forum_tag,
 )
 from .database import (
     leetcode_delete_problem,
@@ -277,16 +279,20 @@ async def backfill_test(interaction: discord.Interaction):
         ]
 
         try:
+            tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
+            contest_tag = await _get_or_create_forum_tag(forum_channel, tag_name)
             forum_embed = build_contest_forum_embed(mock_contest, questions, ratings_by_slug, question_thread_ids)
             result = await forum_channel.create_thread(
                 name=contest_id_en[:100],
                 embed=forum_embed,
+                applied_tags=[contest_tag],
                 reason=f"Backfill test: {slug}",
             )
             thread = result.thread if hasattr(result, "thread") else result
-            leetcode_contest_post_save(slug, contest_type, thread.id)
+            is_rated = tag_name != "Unrated"
+            leetcode_contest_post_save(slug, contest_type, thread.id, rated=1 if is_rated else 0)
             thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread.id}"
-            results.append(f"\u2705 `{slug}` — [forum post]({thread_url}), {len(question_thread_ids)}/{len(problems)} problem posts created")
+            results.append(f"\u2705 `{slug}` — [{tag_name}] [forum post]({thread_url}), {len(question_thread_ids)}/{len(problems)} problem posts created")
         except Exception as e:
             results.append(f"\u274c `{slug}` — forum thread failed: {e}")
 
@@ -376,14 +382,18 @@ async def backfill_contests(interaction: discord.Interaction):
         ]
 
         try:
+            tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
+            contest_tag = await _get_or_create_forum_tag(forum_channel, tag_name)
             forum_embed = build_contest_forum_embed(mock_contest, questions, ratings_by_slug, question_thread_ids)
             result = await forum_channel.create_thread(
                 name=contest_id_en[:100],
                 embed=forum_embed,
+                applied_tags=[contest_tag],
                 reason=f"Backfill: {slug}",
             )
             thread = result.thread if hasattr(result, "thread") else result
-            leetcode_contest_post_save(slug, contest_type, thread.id)
+            is_rated = tag_name != "Unrated"
+            leetcode_contest_post_save(slug, contest_type, thread.id, rated=1 if is_rated else 0)
             created += 1
         except Exception as e:
             print(f"[BACKFILL] contest thread '{slug}' failed: {e}")
