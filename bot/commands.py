@@ -669,7 +669,7 @@ async def get_contest_cmd(interaction: discord.Interaction):
     contest_label = best_slug.replace("-", " ").title()
     embed = discord.Embed(
         title=f"🏆 {contest_label}",
-        description=f"Avg rating: ||{best_avg:.0f}|| | Your rating: `{user_rating:.0f}`\n\n👉 {thread_url}",
+        description=f"Avg rating: ||{best_avg:.0f}|| | Your server rating: `{user_rating:.0f}`\n\n👉 {thread_url}",
         color=0x9B59B6,
     )
     embed.set_footer(text="Log your result with /set-contest <new_rating>")
@@ -720,7 +720,7 @@ async def set_contest_cmd(interaction: discord.Interaction, new_rating: float):
     delta = new_rating - old_rating
     sign = "+" if delta >= 0 else ""
     await interaction.followup.send(
-        f"✅ `{slug.replace('-', ' ').title()}`: `{old_rating:.0f}` → `{new_rating:.0f}` ({sign}{delta:.0f})",
+        f"✅ `{slug.replace('-', ' ').title()}`: server rating `{old_rating:.0f}` → `{new_rating:.0f}` ({sign}{delta:.0f})",
         ephemeral=True,
     )
 
@@ -777,9 +777,9 @@ async def practice_cmd(interaction: discord.Interaction):
     title = best_slug.replace("-", " ").title()
     if thread_id:
         thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-        desc = f"Rating: ||{best_rating:.0f}|| | Your rating: `{user_rating:.0f}`\n\n👉 {thread_url}"
+        desc = f"Rating: ||{best_rating:.0f}|| | Your server rating: `{user_rating:.0f}`\n\n👉 {thread_url}"
     else:
-        desc = f"Rating: ||{best_rating:.0f}|| | Your rating: `{user_rating:.0f}`\n\n👉 https://leetcode.com/problems/{best_slug}/"
+        desc = f"Rating: ||{best_rating:.0f}|| | Your server rating: `{user_rating:.0f}`\n\n👉 https://leetcode.com/problems/{best_slug}/"
 
     embed = discord.Embed(title=f"📝 {title}", description=desc, color=0x9B59B6)
     await interaction.followup.send(embed=embed, ephemeral=True)
