@@ -650,7 +650,7 @@ def build_contest_forum_embed(
         title=title,
         url=url,
         description="\n".join(desc_lines) if desc_lines else None,
-        color=CONTEST_COLOR,
+        color=CONTEST_RECAP_COLOR,
     )
 
 
