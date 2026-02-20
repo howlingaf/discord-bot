@@ -1030,11 +1030,14 @@ async def _run_fix_problem_embeds(log_channel: discord.abc.Messageable):
                 continue
             new_embeds = []
             changed = False
-            for emb in msg.embeds:
-                fixed_emb, emb_changed = _fix_embed_superscripts(emb)
-                new_embeds.append(fixed_emb)
-                if emb_changed:
-                    changed = True
+            for i, emb in enumerate(msg.embeds):
+                if i < 2:
+                    fixed_emb, emb_changed = _fix_embed_superscripts(emb)
+                    new_embeds.append(fixed_emb)
+                    if emb_changed:
+                        changed = True
+                else:
+                    new_embeds.append(emb)
             if not changed:
                 skipped += 1
                 continue
@@ -1070,11 +1073,14 @@ async def fix_problem_embeds(interaction: discord.Interaction, question_id: int 
                 return
             new_embeds = []
             changed = False
-            for emb in msg.embeds:
-                fixed_emb, emb_changed = _fix_embed_superscripts(emb)
-                new_embeds.append(fixed_emb)
-                if emb_changed:
-                    changed = True
+            for i, emb in enumerate(msg.embeds):
+                if i < 2:
+                    fixed_emb, emb_changed = _fix_embed_superscripts(emb)
+                    new_embeds.append(fixed_emb)
+                    if emb_changed:
+                        changed = True
+                else:
+                    new_embeds.append(emb)
             if not changed:
                 await interaction.followup.send("ℹ️ No superscript issues found — embed looks fine.", ephemeral=True)
                 return
