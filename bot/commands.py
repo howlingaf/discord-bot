@@ -932,8 +932,8 @@ async def post_rating_info(interaction: discord.Interaction):
     try:
         ch = bot.get_channel(1474376865400619189) or await bot.fetch_channel(1474376865400619189)
         await ch.send(
-            "Your server rating starts from your LeetCode contest rating (or **1500** if you haven't competed).\n"
-            "It updates when you log virtual contest results.\n\n"
+            "Your server rating starts from your LeetCode contest rating (or **1500** if you haven't done any live contests).\n"
+            "Your server rating updates when you log virtual contest results via `/get-contest` and `/set-contest`.\n\n"
             "Problem **ratings** are based on ratings from past contests.\n"
             "Contest ratings are a **weighted average of the ratings of their problems**\n"
             "(credit to Zerotrac: https://github.com/zerotrac/leetcode_problem_rating)\n\n"
