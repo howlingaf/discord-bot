@@ -971,30 +971,48 @@ async def post_rating_info(interaction: discord.Interaction):
 def _fix_sup_text(text: str) -> str:
     if not text:
         return text
-    # 10^4 through 10^9 (e.g. 104 → 10^4)
+    # 10^4 through 10^9 (e.g. 104 → 10^4). Single-digit only — two-digit
+    # would catch binary representations like 1010 in problem statements.
     text = re.sub(r'(?<!\d)10([4-9])(?!\d)', r'10^\1', text)
-    # 10^10 through 10^19 (e.g. 1012 → 10^12, 1018 → 10^18)
-    text = re.sub(r'(?<!\d)10(1[0-9])(?!\d)', r'10^\1', text)
+    # 2^31 (signed 32-bit int bound, e.g. -231 → -2^31)
+    text = re.sub(r'(?<!\d)2(31)(?!\d)', r'2^\1', text)
     return text
 
 
-def _fix_embed_superscripts(embed: discord.Embed) -> tuple[discord.Embed, bool]:
+def _strip_sup_text(text: str) -> str:
+    """Reverse accidental caret insertions in example embeds: 10^N → 10N, 2^31 → 231."""
+    if not text:
+        return text
+    text = re.sub(r'10\^(\d+)', r'10\1', text)
+    text = re.sub(r'2\^(31)', r'231', text)
+    return text
+
+
+def _apply_embed_transform(embed: discord.Embed, fn) -> tuple[discord.Embed, bool]:
     d = embed.to_dict()
     changed = False
     if d.get('description'):
-        fixed = _fix_sup_text(d['description'])
+        fixed = fn(d['description'])
         if fixed != d['description']:
             d['description'] = fixed
             changed = True
     for field in d.get('fields', []):
-        fixed = _fix_sup_text(field.get('value', ''))
+        fixed = fn(field.get('value', ''))
         if fixed != field.get('value', ''):
             field['value'] = fixed
             changed = True
     return discord.Embed.from_dict(d), changed
 
 
-async def _run_fix_problem_embeds(log_channel: discord.abc.Messageable):
+def _fix_embed_superscripts(embed: discord.Embed) -> tuple[discord.Embed, bool]:
+    return _apply_embed_transform(embed, _fix_sup_text)
+
+
+def _strip_embed_superscripts(embed: discord.Embed) -> tuple[discord.Embed, bool]:
+    return _apply_embed_transform(embed, _strip_sup_text)
+
+
+async def _run_fix_problem_embeds(log_channel: discord.abc.Messageable, revert: bool = False):
     try:
         ch = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
         if not isinstance(ch, discord.ForumChannel):
@@ -1031,13 +1049,22 @@ async def _run_fix_problem_embeds(log_channel: discord.abc.Messageable):
             new_embeds = []
             changed = False
             for i, emb in enumerate(msg.embeds):
-                if i < 2:
-                    fixed_emb, emb_changed = _fix_embed_superscripts(emb)
-                    new_embeds.append(fixed_emb)
-                    if emb_changed:
-                        changed = True
+                if revert:
+                    if i >= 2:
+                        fixed_emb, emb_changed = _strip_embed_superscripts(emb)
+                        new_embeds.append(fixed_emb)
+                        if emb_changed:
+                            changed = True
+                    else:
+                        new_embeds.append(emb)
                 else:
-                    new_embeds.append(emb)
+                    if i < 2:
+                        fixed_emb, emb_changed = _fix_embed_superscripts(emb)
+                        new_embeds.append(fixed_emb)
+                        if emb_changed:
+                            changed = True
+                    else:
+                        new_embeds.append(emb)
             if not changed:
                 skipped += 1
                 continue
@@ -1053,14 +1080,16 @@ async def _run_fix_problem_embeds(log_channel: discord.abc.Messageable):
     await log_channel.send(f"✅ Fix complete: {fixed} updated, {skipped} unchanged, {failed} failed.")
 
 
-@bot.tree.command(name="fix-problem-embeds", description="(Admin) Fix 10^N display in problem embeds (e.g. 104 → 10^4).")
-@app_commands.describe(question_id="Only fix this one problem (by LeetCode ID). Omit to fix all.")
+@bot.tree.command(name="fix-problem-embeds", description="(Admin) Fix/revert 10^N display in problem embeds.")
+@app_commands.describe(
+    question_id="Only fix this one problem (by LeetCode ID). Omit to fix all.",
+    revert="If true, strip accidental carets from example embeds instead of fixing the statement/constraints.",
+)
 @app_commands.checks.has_permissions(manage_messages=True)
-async def fix_problem_embeds(interaction: discord.Interaction, question_id: int | None = None):
+async def fix_problem_embeds(interaction: discord.Interaction, question_id: int | None = None, revert: bool = False):
     await interaction.response.defer(ephemeral=True)
 
     if question_id is not None:
-        # Single-problem test: look up thread, fix inline, respond ephemerally
         row = leetcode_get_problem(str(question_id))
         if not row:
             await interaction.followup.send(f"❌ Problem #{question_id} not found in DB.", ephemeral=True)
@@ -1074,28 +1103,41 @@ async def fix_problem_embeds(interaction: discord.Interaction, question_id: int 
             new_embeds = []
             changed = False
             for i, emb in enumerate(msg.embeds):
-                if i < 2:
-                    fixed_emb, emb_changed = _fix_embed_superscripts(emb)
-                    new_embeds.append(fixed_emb)
-                    if emb_changed:
-                        changed = True
+                if revert:
+                    # Strip carets from example embeds (i >= 2); leave statement/constraints alone
+                    if i >= 2:
+                        fixed_emb, emb_changed = _strip_embed_superscripts(emb)
+                        new_embeds.append(fixed_emb)
+                        if emb_changed:
+                            changed = True
+                    else:
+                        new_embeds.append(emb)
                 else:
-                    new_embeds.append(emb)
+                    # Fix superscripts in statement/constraints (i < 2); leave examples alone
+                    if i < 2:
+                        fixed_emb, emb_changed = _fix_embed_superscripts(emb)
+                        new_embeds.append(fixed_emb)
+                        if emb_changed:
+                            changed = True
+                    else:
+                        new_embeds.append(emb)
             if not changed:
-                await interaction.followup.send("ℹ️ No superscript issues found — embed looks fine.", ephemeral=True)
+                await interaction.followup.send("ℹ️ No changes needed — embed looks fine.", ephemeral=True)
                 return
             was_archived = thread.archived
             await msg.edit(embeds=new_embeds)
             if was_archived:
                 await thread.edit(archived=True)
-            await interaction.followup.send(f"✅ Fixed problem #{question_id}.", ephemeral=True)
+            action = "Reverted" if revert else "Fixed"
+            await interaction.followup.send(f"✅ {action} problem #{question_id}.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ {e}", ephemeral=True)
         return
 
-    asyncio.create_task(_run_fix_problem_embeds(interaction.channel))
+    asyncio.create_task(_run_fix_problem_embeds(interaction.channel, revert=revert))
+    action = "Reverting carets in example embeds" if revert else "Fixing superscripts in statement/constraints"
     await interaction.followup.send(
-        "⏳ Scanning and fixing problem embeds in the background. Results will appear in this channel.",
+        f"⏳ {action} in the background. Results will appear in this channel.",
         ephemeral=True,
     )
 
