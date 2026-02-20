@@ -557,7 +557,7 @@ async def rating_cmd(interaction: discord.Interaction):
         stats = await _init_virtual_stats(interaction.user.id, lc_username, bot.http_session)
 
     embed = discord.Embed(title=f"📊 {lc_username}", color=0x9B59B6)
-    embed.add_field(name="Rating", value=f"`{stats['rating']:.0f}`", inline=True)
+    embed.add_field(name="Server Rating", value=f"`{stats['rating']:.0f}`", inline=True)
     embed.add_field(name="Live Contests", value=f"`{stats['live_contest_count']}`", inline=True)
     embed.add_field(name="Virtual Contests", value=f"`{stats['virtual_contest_count']}`", inline=True)
     await interaction.followup.send(embed=embed, ephemeral=True)
