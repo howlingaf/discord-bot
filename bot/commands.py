@@ -1146,7 +1146,7 @@ async def fix_problem_embeds(interaction: discord.Interaction, question_id: int 
 
 # ---- Commands-only channel ----
 
-_COMMANDS_CHANNEL_ID = 1474387868834336880
+_COMMANDS_CHANNEL_ID = 1474376865400619189
 
 
 @bot.event
