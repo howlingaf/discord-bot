@@ -633,7 +633,7 @@ async def contest_cmd(
         contests_map[e["contest_slug"]].append(e)
 
     done_slugs = virtual_contest_history_done_slugs(interaction.user.id)
-    target = stats["rating"] + _CONTEST_STRETCH
+    user_rating = stats["rating"]
 
     ratings_by_slug = {e["title_slug"]: e["rating"] for e in zerotrac_entries}
 
@@ -661,10 +661,14 @@ async def contest_cmd(
         await interaction.followup.send("❌ No more contests available.", ephemeral=True)
         return
 
-    # Find closest untaken contest at or above target; fallback to closest overall
-    above = [(s, a) for s, a in candidates if a >= target]
-    pool = above if above else candidates
-    best_slug, best_avg = min(pool, key=lambda x: abs(x[1] - target))
+    # Prefer contests within [rating, rating+50]; fall back to closest above; then closest overall
+    band = [(s, a) for s, a in candidates if user_rating <= a <= user_rating + _CONTEST_STRETCH]
+    if band:
+        best_slug, best_avg = min(band, key=lambda x: abs(x[1] - (user_rating + _CONTEST_STRETCH / 2)))
+    else:
+        above = [(s, a) for s, a in candidates if a > user_rating]
+        pool = above if above else candidates
+        best_slug, best_avg = min(pool, key=lambda x: abs(x[1] - user_rating))
 
     # Get or create the contest forum thread
     post = leetcode_contest_post_get(best_slug)
@@ -708,7 +712,7 @@ async def contest_cmd(
     contest_label = best_slug.replace("-", " ").title()
     embed = discord.Embed(
         title=f"🏆 {contest_label}",
-        description=f"Avg rating: `{best_avg:.0f}` | Your rating: `{stats['rating']:.0f}`\n\n👉 {thread_url}",
+        description=f"Avg rating: ||{best_avg:.0f}|| | Your rating: `{user_rating:.0f}`\n\n👉 {thread_url}",
         color=0x9B59B6,
     )
     embed.set_footer(text=f"Log your result with /contest {_classify_contest(best_slug)} {best_slug.rsplit('-', 1)[-1]} <new_rating>")
@@ -734,14 +738,21 @@ async def practice_cmd(interaction: discord.Interaction):
         return
 
     done_slugs = virtual_problem_history_done_slugs(interaction.user.id)
-    target = stats["rating"]
+    user_rating = stats["rating"]
 
     candidates = [(e["title_slug"], e["rating"]) for e in zerotrac_entries if e["title_slug"] not in done_slugs]
     if not candidates:
         await interaction.followup.send("❌ You've done every rated problem. Impressive.", ephemeral=True)
         return
 
-    best_slug, best_rating = min(candidates, key=lambda x: abs(x[1] - target))
+    # Prefer problems within [rating, rating+50]; fall back to closest above; then closest overall
+    band = [(s, r) for s, r in candidates if user_rating <= r <= user_rating + _CONTEST_STRETCH]
+    if band:
+        best_slug, best_rating = min(band, key=lambda x: abs(x[1] - (user_rating + _CONTEST_STRETCH / 2)))
+    else:
+        above = [(s, r) for s, r in candidates if r > user_rating]
+        pool = above if above else candidates
+        best_slug, best_rating = min(pool, key=lambda x: abs(x[1] - user_rating))
 
     thread_id = None
     existing = leetcode_get_problem_by_slug(best_slug)
@@ -755,9 +766,9 @@ async def practice_cmd(interaction: discord.Interaction):
     title = best_slug.replace("-", " ").title()
     if thread_id:
         thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-        desc = f"Rating: `{best_rating:.0f}` | Your rating: `{target:.0f}`\n\n👉 {thread_url}"
+        desc = f"Rating: ||{best_rating:.0f}|| | Your rating: `{user_rating:.0f}`\n\n👉 {thread_url}"
     else:
-        desc = f"Rating: `{best_rating:.0f}` | Your rating: `{target:.0f}`\n\n👉 https://leetcode.com/problems/{best_slug}/"
+        desc = f"Rating: ||{best_rating:.0f}|| | Your rating: `{user_rating:.0f}`\n\n👉 https://leetcode.com/problems/{best_slug}/"
 
     embed = discord.Embed(title=f"📝 {title}", description=desc, color=0x9B59B6)
     await interaction.followup.send(embed=embed, ephemeral=True)
