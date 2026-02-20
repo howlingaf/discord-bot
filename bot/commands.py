@@ -26,6 +26,7 @@ from .leetcode import (
 )
 from .database import (
     leetcode_delete_problem,
+    leetcode_get_problem_by_slug,
     leetcode_contest_post_get,
     leetcode_contest_post_save,
     linked_users_get,
@@ -342,20 +343,24 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
         forum_channel = channel_cache[contest_type]
         problems = sorted(contests_map[slug], key=lambda p: p["ProblemIndex"])
 
-        # Create + archive a problem forum post for each problem, with a
-        # small sleep between each to avoid hammering the problems forum.
+        # Resolve problem thread IDs — only hit the API if the problem
+        # isn't already in the DB. Sleep only when a real API call is made.
         question_thread_ids: dict[str, int] = {}
         for p in problems:
             p_slug = p["TitleSlug"]
             try:
-                thread_id, err = await get_or_create_problem_post_archived(bot, p_slug)
-                if thread_id:
-                    question_thread_ids[p_slug] = thread_id
-                elif err:
-                    print(f"[BACKFILL] problem post '{p_slug}': {err}")
+                existing = leetcode_get_problem_by_slug(p_slug)
+                if existing:
+                    question_thread_ids[p_slug] = existing["thread_id"]
+                else:
+                    thread_id, err = await get_or_create_problem_post_archived(bot, p_slug)
+                    if thread_id:
+                        question_thread_ids[p_slug] = thread_id
+                    elif err:
+                        print(f"[BACKFILL] problem post '{p_slug}': {err}")
+                    await asyncio.sleep(4.0)  # only sleep when we hit the API
             except Exception as e:
                 print(f"[BACKFILL] problem post '{p_slug}' failed: {e}")
-            await asyncio.sleep(1.0)
 
         contest_id_en = problems[0].get("ContestID_en", slug.replace("-", " ").title())
         mock_contest = {"title": contest_id_en, "titleSlug": slug, "startTime": 0}
@@ -366,7 +371,6 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
 
         try:
             tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
-            # Tags are pre-created — just look up from cached channel
             contest_tag = next(t for t in forum_channel.available_tags if t.name == tag_name)
             forum_embed = build_contest_forum_embed(mock_contest, questions, ratings_by_slug, question_thread_ids)
             result = await forum_channel.create_thread(
@@ -378,6 +382,7 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
             thread = result.thread if hasattr(result, "thread") else result
             leetcode_contest_post_save(slug, contest_type, thread.id, rated=1 if tag_name != "Unrated" else 0)
             created += 1
+            await asyncio.sleep(4.0)  # only sleep when we hit the API
         except Exception as e:
             print(f"[BACKFILL] contest thread '{slug}' failed: {e}")
             failed += 1
@@ -389,8 +394,6 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
                 )
             except Exception:
                 pass
-
-        await asyncio.sleep(2.0)
 
     try:
         await log_channel.send(
