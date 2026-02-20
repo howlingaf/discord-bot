@@ -16,6 +16,8 @@ from .config import (
     LEETCODE_WEEKLY_CHANNEL_ID,
     LEETCODE_BIWEEKLY_CHANNEL_ID,
     LEETCODE_CONTEST_URL,
+    LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
+    LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
     LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID,
     GUILD_ID,
 )
@@ -29,6 +31,8 @@ from .database import (
     leetcode_set_contest_state,
     leetcode_get_premium_weekly_state,
     leetcode_set_premium_weekly_state,
+    leetcode_contest_post_get,
+    leetcode_contest_post_save,
     linked_users_all,
 )
 
@@ -497,6 +501,11 @@ CONTEST_CHANNEL_MAP: dict[str, int] = {
     "biweekly": LEETCODE_BIWEEKLY_CHANNEL_ID,
 }
 
+CONTEST_FORUM_CHANNEL_MAP: dict[str, int] = {
+    "weekly":   LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
+    "biweekly": LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
+}
+
 
 async def fetch_leetcode_contests(session: ClientSession) -> list[dict]:
     async with session.get(LEETCODE_CONTEST_URL) as resp:
@@ -584,6 +593,107 @@ def build_contest_recap_embed(
         description="\n".join(desc_lines),
         color=CONTEST_RECAP_COLOR,
     )
+
+
+async def fetch_zerotrac_ratings(session: ClientSession) -> dict[str, float]:
+    """Fetch problem ratings from zerotrac. Returns {TitleSlug: Rating} or {} on failure."""
+    try:
+        async with session.get(
+            "https://raw.githubusercontent.com/zerotrac/leetcode_problem_rating/main/data.json"
+        ) as resp:
+            if resp.status != 200:
+                return {}
+            data = await resp.json(content_type=None)
+            return {p["TitleSlug"]: p["Rating"] for p in data}
+    except Exception as e:
+        print(f"[ZEROTRAC] Failed to fetch ratings: {e}")
+        return {}
+
+
+def build_contest_forum_embed(
+    contest: dict,
+    questions: list[dict],
+    ratings_by_slug: dict[str, float],
+    question_thread_ids: dict[str, int] | None = None,
+) -> discord.Embed:
+    title = contest.get("title") or "LeetCode Contest"
+    slug = contest.get("titleSlug") or ""
+    start_ts = contest.get("startTime") or 0
+
+    url = f"{LEETCODE_BASE}/contest/{slug}/" if slug else LEETCODE_BASE
+
+    desc_lines: list[str] = []
+    if start_ts:
+        desc_lines.append(f"\U0001f4c5 <t:{start_ts}:D>")
+        desc_lines.append("")
+
+    for i, q in enumerate(questions, 1):
+        q_title = q.get("title") or f"Problem {i}"
+        q_slug = q.get("titleSlug") or ""
+        q_id = q.get("questionId") or i
+        thread_id = (question_thread_ids or {}).get(q_slug)
+
+        if thread_id:
+            link_text = f"[{q_id}. {q_title}](https://discord.com/channels/{GUILD_ID}/{thread_id})"
+        else:
+            link_text = f"{q_id}. {q_title}"
+
+        rating = ratings_by_slug.get(q_slug)
+        if rating is not None:
+            spoiler = f"||⭐ {rating:.0f}||"
+        else:
+            spoiler = "||unrated||"
+
+        desc_lines.append(f"{link_text} {spoiler}")
+
+    return discord.Embed(
+        title=title,
+        url=url,
+        description="\n".join(desc_lines) if desc_lines else None,
+        color=CONTEST_COLOR,
+    )
+
+
+def build_contest_notif_embed(contest: dict, forum_thread_url: str) -> discord.Embed:
+    title = contest.get("title") or "LeetCode Contest"
+    slug = contest.get("titleSlug") or ""
+    start_ts = contest.get("startTime") or 0
+
+    url = f"{LEETCODE_BASE}/contest/{slug}/" if slug else LEETCODE_BASE
+
+    desc_lines: list[str] = []
+    if start_ts:
+        desc_lines.append(f"\U0001f4c5 <t:{start_ts}:D>")
+        desc_lines.append("")
+    if forum_thread_url:
+        desc_lines.append(f"\U0001f449 [View Post]({forum_thread_url})")
+
+    return discord.Embed(
+        title=title,
+        url=url,
+        description="\n".join(desc_lines) if desc_lines else None,
+        color=CONTEST_RECAP_COLOR,
+    )
+
+
+async def get_or_create_problem_post_archived(bot, slug: str) -> tuple[int | None, str]:
+    """Like get_or_create_problem_post but immediately archives the thread after creation."""
+    # Check by slug first to avoid creating duplicate threads for existing problems
+    existing = leetcode_get_problem_by_slug(slug)
+    if existing:
+        thread_id = existing["thread_id"]
+        err = ""
+    else:
+        thread_id, err = await get_or_create_problem_post(bot, slug)
+
+    if thread_id:
+        try:
+            thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
+            if isinstance(thread, discord.Thread) and not thread.archived:
+                await thread.edit(archived=True)
+        except Exception as e:
+            print(f"[ARCHIVE] could not archive {thread_id}: {e}")
+    return thread_id, err
 
 
 def _format_finish_time(seconds: int) -> str:
@@ -737,14 +847,6 @@ async def post_leetcode_contest(
             if not await _ratings_ready(bot.http_session, contest.get("title") or ""):
                 return False, f"{contest_type} ratings not yet available, will retry"
 
-    channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
-    if not channel_id:
-        return False, f"no channel configured for {contest_type}"
-
-    channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
-    if not isinstance(channel, discord.TextChannel):
-        return False, f"{contest_type} channel must be a text channel"
-
     # Fetch contest questions via GraphQL
     questions: list[dict] = []
     try:
@@ -752,21 +854,17 @@ async def post_leetcode_contest(
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
 
-    # Create forum posts for each contest question and collect thread IDs
+    # Fetch zerotrac ratings for spoiler display
+    ratings_by_slug = await fetch_zerotrac_ratings(bot.http_session)
+
+    # Create/archive a problem forum post for each contest question
     question_thread_ids: dict[str, int] = {}
     for q in questions:
         q_slug = q.get("titleSlug") or ""
         if not q_slug:
             continue
-        # Check DB by slug first to avoid redundant API calls
-        existing = leetcode_get_problem_by_slug(q_slug)
-        if existing:
-            question_thread_ids[q_slug] = existing["thread_id"]
-            continue
-        # Use titleSlug as the identifier — the API accepts slugs and is more
-        # reliable than the questionId field returned by GraphQL
         try:
-            thread_id, err = await get_or_create_problem_post(bot, q_slug)
+            thread_id, err = await get_or_create_problem_post_archived(bot, q_slug)
             if thread_id:
                 question_thread_ids[q_slug] = thread_id
             elif err:
@@ -774,8 +872,37 @@ async def post_leetcode_contest(
         except Exception as e:
             print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
-    # Fetch rankings before sending so both embeds go in one message
+    # Create the contest thread in the dedicated forum channel
+    forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type, 0)
+    if not forum_channel_id:
+        return False, f"no forum channel configured for {contest_type}"
+
+    forum_channel = bot.get_channel(forum_channel_id) or await bot.fetch_channel(forum_channel_id)
+    if not isinstance(forum_channel, discord.ForumChannel):
+        return False, f"{contest_type} forum channel must be a forum channel"
+
     title = contest.get("title") or contest_type.title()
+    forum_embed = build_contest_forum_embed(contest, questions, ratings_by_slug, question_thread_ids)
+
+    forum_thread_id: int | None = None
+    forum_thread_url: str = ""
+    try:
+        result = await forum_channel.create_thread(
+            name=title[:100],
+            embed=forum_embed,
+            reason=f"{contest_type.title()} contest post",
+        )
+        forum_thread = result.thread if hasattr(result, "thread") else result
+        forum_thread_id = forum_thread.id
+        forum_thread_url = f"https://discord.com/channels/{GUILD_ID}/{forum_thread_id}"
+        leetcode_contest_post_save(slug, contest_type, forum_thread_id)
+    except Exception as e:
+        print(f"[CONTEST/{contest_type.upper()}] forum thread create failed: {e}")
+
+    # Build simplified notif embed linking to the forum post
+    notif_embed = build_contest_notif_embed(contest, forum_thread_url)
+
+    # Fetch rankings
     rankings_embed: discord.Embed | None = None
     try:
         rankings = await _build_contest_rankings(bot, title)
@@ -784,24 +911,19 @@ async def post_leetcode_contest(
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
 
-    recap_embed = build_contest_recap_embed(contest, questions, question_thread_ids)
-    embeds = [recap_embed, rankings_embed] if rankings_embed else [recap_embed]
-    sent = await channel.send(embeds=embeds)
+    # Send notif + rankings to the text notification channel (no thread)
+    channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
+    if not channel_id:
+        return False, f"no notif channel configured for {contest_type}"
 
-    # Create thread on the message — starts empty
-    recap_thread_id: int | None = None
-    try:
-        thread = await channel.create_thread(
-            name=title[:100],
-            message=sent,
-            auto_archive_duration=10080,
-            reason=f"{contest_type.title()} contest recap thread",
-        )
-        recap_thread_id = thread.id
-    except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] thread create failed: {e}")
+    channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        return False, f"{contest_type} notif channel must be a text channel"
 
-    leetcode_set_contest_state(contest_type, slug, thread_id=recap_thread_id)
+    embeds = [notif_embed, rankings_embed] if rankings_embed else [notif_embed]
+    await channel.send(embeds=embeds)
+
+    leetcode_set_contest_state(contest_type, slug, thread_id=forum_thread_id)
     return True, f"posted {contest_type} slug={slug}"
 
 

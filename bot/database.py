@@ -112,6 +112,15 @@ def db_init():
         """)
         conn.execute("INSERT OR IGNORE INTO leetcode_premium_weekly_state(id) VALUES(1)")
 
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS leetcode_contest_posts (
+          contest_slug TEXT PRIMARY KEY,
+          contest_type TEXT NOT NULL,
+          thread_id    INTEGER NOT NULL,
+          created_at   INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+
         conn.commit()
 
 
@@ -377,5 +386,32 @@ def leetcode_set_premium_weekly_state(*, question_id: str, title_slug: str, date
         conn.execute(
             "UPDATE leetcode_premium_weekly_state SET question_id=?, title_slug=?, date=? WHERE id=1",
             (question_id, title_slug, date),
+        )
+        conn.commit()
+
+
+# ---- LeetCode Contest Posts helpers ----
+
+def leetcode_contest_post_get(contest_slug: str) -> dict | None:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT contest_slug, contest_type, thread_id, created_at FROM leetcode_contest_posts WHERE contest_slug=?",
+            (contest_slug,),
+        ).fetchone()
+        if not row:
+            return None
+        return {"contest_slug": row[0], "contest_type": row[1], "thread_id": row[2], "created_at": row[3]}
+
+
+def leetcode_contest_post_save(contest_slug: str, contest_type: str, thread_id: int):
+    now = int(time.time())
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO leetcode_contest_posts(contest_slug, contest_type, thread_id, created_at)
+               VALUES(?,?,?,?)
+               ON CONFLICT(contest_slug) DO UPDATE SET
+                 thread_id=excluded.thread_id,
+                 contest_type=excluded.contest_type""",
+            (contest_slug, contest_type, thread_id, now),
         )
         conn.commit()

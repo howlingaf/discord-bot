@@ -1,3 +1,5 @@
+import asyncio
+
 import discord
 from discord import app_commands
 
@@ -6,11 +8,29 @@ from .config import (
     SPOTIFY_CLIENT_SECRET,
     SPOTIFY_REDIRECT_URI,
     SPOTIFY_ALLOWED_USER_ID,
+    GUILD_ID,
 )
 from .spotify import dm_spotify_link
-from .config import GUILD_ID
-from .leetcode import post_leetcode_contest, post_leetcode_problem, post_leetcode_weekly_premium, get_or_create_problem_post, _classify_contest
-from .database import leetcode_delete_problem, linked_users_get, linked_users_get_by_username, linked_users_set, linked_users_delete
+from .leetcode import (
+    post_leetcode_contest,
+    post_leetcode_problem,
+    post_leetcode_weekly_premium,
+    get_or_create_problem_post,
+    get_or_create_problem_post_archived,
+    fetch_zerotrac_ratings,
+    build_contest_forum_embed,
+    CONTEST_FORUM_CHANNEL_MAP,
+    _classify_contest,
+)
+from .database import (
+    leetcode_delete_problem,
+    leetcode_contest_post_get,
+    leetcode_contest_post_save,
+    linked_users_get,
+    linked_users_get_by_username,
+    linked_users_set,
+    linked_users_delete,
+)
 from .client import bot
 
 
@@ -184,3 +204,201 @@ async def contest_recap(interaction: discord.Interaction, slug: str):
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="backfill-test", description="(Admin) Test backfill with weekly-contest-100 and biweekly-contest-100.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def backfill_test(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        async with bot.http_session.get(
+            "https://raw.githubusercontent.com/zerotrac/leetcode_problem_rating/main/data.json"
+        ) as resp:
+            if resp.status != 200:
+                await interaction.followup.send(f"\u274c Failed to fetch zerotrac data (HTTP {resp.status}).", ephemeral=True)
+                return
+            data = await resp.json(content_type=None)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed to fetch zerotrac data: {e}", ephemeral=True)
+        return
+
+    ratings_by_slug: dict[str, float] = {p["TitleSlug"]: p["Rating"] for p in data}
+
+    from collections import defaultdict
+    contests_map: dict[str, list[dict]] = defaultdict(list)
+    for p in data:
+        contests_map[p["ContestSlug"]].append(p)
+
+    test_slugs = ["weekly-contest-100", "biweekly-contest-100"]
+    results: list[str] = []
+
+    for slug in test_slugs:
+        if slug not in contests_map:
+            results.append(f"\u2753 `{slug}` not found in zerotrac data")
+            continue
+
+        if leetcode_contest_post_get(slug):
+            results.append(f"\u23ed\ufe0f `{slug}` already exists, skipping")
+            continue
+
+        contest_type = _classify_contest(slug)
+        forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type, 0)
+
+        try:
+            forum_channel = bot.get_channel(forum_channel_id) or await bot.fetch_channel(forum_channel_id)
+        except Exception as e:
+            results.append(f"\u274c `{slug}` — could not fetch forum channel: {e}")
+            continue
+
+        if not isinstance(forum_channel, discord.ForumChannel):
+            results.append(f"\u274c `{slug}` — channel is not a forum channel")
+            continue
+
+        problems = sorted(contests_map[slug], key=lambda p: p["ProblemIndex"])
+
+        question_thread_ids: dict[str, int] = {}
+        for p in problems:
+            p_slug = p["TitleSlug"]
+            try:
+                thread_id, err = await get_or_create_problem_post_archived(bot, p_slug)
+                if thread_id:
+                    question_thread_ids[p_slug] = thread_id
+                elif err:
+                    print(f"[BACKFILL TEST] problem post '{p_slug}': {err}")
+            except Exception as e:
+                print(f"[BACKFILL TEST] problem post '{p_slug}' failed: {e}")
+
+        contest_id_en = problems[0].get("ContestID_en", slug.replace("-", " ").title())
+        mock_contest = {"title": contest_id_en, "titleSlug": slug, "startTime": 0}
+        questions = [
+            {"questionId": str(p["ID"]), "title": p["Title"], "titleSlug": p["TitleSlug"]}
+            for p in problems
+        ]
+
+        try:
+            forum_embed = build_contest_forum_embed(mock_contest, questions, ratings_by_slug, question_thread_ids)
+            result = await forum_channel.create_thread(
+                name=contest_id_en[:100],
+                embed=forum_embed,
+                reason=f"Backfill test: {slug}",
+            )
+            thread = result.thread if hasattr(result, "thread") else result
+            leetcode_contest_post_save(slug, contest_type, thread.id)
+            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread.id}"
+            results.append(f"\u2705 `{slug}` — [forum post]({thread_url}), {len(question_thread_ids)}/{len(problems)} problem posts created")
+        except Exception as e:
+            results.append(f"\u274c `{slug}` — forum thread failed: {e}")
+
+    await interaction.followup.send("\n".join(results) or "No results.", ephemeral=True)
+
+
+@bot.tree.command(name="backfill-contests", description="(Admin) Backfill all past contests from zerotrac into forum channels.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def backfill_contests(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    # Download zerotrac data
+    try:
+        async with bot.http_session.get(
+            "https://raw.githubusercontent.com/zerotrac/leetcode_problem_rating/main/data.json"
+        ) as resp:
+            if resp.status != 200:
+                await interaction.followup.send(f"\u274c Failed to fetch zerotrac data (HTTP {resp.status}).", ephemeral=True)
+                return
+            data = await resp.json(content_type=None)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed to fetch zerotrac data: {e}", ephemeral=True)
+        return
+
+    ratings_by_slug: dict[str, float] = {p["TitleSlug"]: p["Rating"] for p in data}
+
+    # Group problems by contest slug, sorted by ProblemIndex within each contest
+    from collections import defaultdict
+    contests_map: dict[str, list[dict]] = defaultdict(list)
+    for p in data:
+        contests_map[p["ContestSlug"]].append(p)
+
+    contest_slugs = sorted(contests_map.keys())
+    total = len(contest_slugs)
+    created = 0
+    skipped = 0
+    failed = 0
+
+    for i, slug in enumerate(contest_slugs):
+        # Skip if already posted
+        if leetcode_contest_post_get(slug):
+            skipped += 1
+            continue
+
+        contest_type = _classify_contest(slug)
+        if not contest_type:
+            skipped += 1
+            continue
+
+        forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type, 0)
+        if not forum_channel_id:
+            skipped += 1
+            continue
+
+        try:
+            forum_channel = bot.get_channel(forum_channel_id) or await bot.fetch_channel(forum_channel_id)
+        except Exception as e:
+            print(f"[BACKFILL] could not fetch forum channel for {slug}: {e}")
+            failed += 1
+            continue
+
+        if not isinstance(forum_channel, discord.ForumChannel):
+            failed += 1
+            continue
+
+        # Sort problems Q1 → Q4
+        problems = sorted(contests_map[slug], key=lambda p: p["ProblemIndex"])
+
+        # Create + archive a problem forum post for each problem
+        question_thread_ids: dict[str, int] = {}
+        for p in problems:
+            p_slug = p["TitleSlug"]
+            try:
+                thread_id, err = await get_or_create_problem_post_archived(bot, p_slug)
+                if thread_id:
+                    question_thread_ids[p_slug] = thread_id
+                elif err:
+                    print(f"[BACKFILL] problem post '{p_slug}': {err}")
+            except Exception as e:
+                print(f"[BACKFILL] problem post '{p_slug}' failed: {e}")
+
+        contest_id_en = problems[0].get("ContestID_en", slug.replace("-", " ").title())
+        mock_contest = {"title": contest_id_en, "titleSlug": slug, "startTime": 0}
+        questions = [
+            {"questionId": str(p["ID"]), "title": p["Title"], "titleSlug": p["TitleSlug"]}
+            for p in problems
+        ]
+
+        try:
+            forum_embed = build_contest_forum_embed(mock_contest, questions, ratings_by_slug, question_thread_ids)
+            result = await forum_channel.create_thread(
+                name=contest_id_en[:100],
+                embed=forum_embed,
+                reason=f"Backfill: {slug}",
+            )
+            thread = result.thread if hasattr(result, "thread") else result
+            leetcode_contest_post_save(slug, contest_type, thread.id)
+            created += 1
+        except Exception as e:
+            print(f"[BACKFILL] contest thread '{slug}' failed: {e}")
+            failed += 1
+
+        # Progress update every 25 contests
+        if (i + 1) % 25 == 0:
+            await interaction.followup.send(
+                f"\u23f3 Progress: {i + 1}/{total} ({created} created, {skipped} skipped, {failed} failed)",
+                ephemeral=True,
+            )
+
+        await asyncio.sleep(1.5)
+
+    await interaction.followup.send(
+        f"\u2705 Backfill complete: {created} created, {skipped} skipped, {failed} failed (of {total} total).",
+        ephemeral=True,
+    )
