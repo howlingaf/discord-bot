@@ -863,9 +863,8 @@ async def archive_old_contests(interaction: discord.Interaction):
                 results.append(f"❌ <#{ch_id}> is not a forum channel")
                 continue
 
-            # Active threads only — skip pinned, sort by ID descending (higher = newer)
-            active = [t for t in ch.threads if not getattr(t.flags, "pinned", False)]
-            active.sort(key=lambda t: t.id, reverse=True)
+            # Active threads only — sort by ID descending (higher = newer)
+            active = sorted(ch.threads, key=lambda t: t.id, reverse=True)
 
             if len(active) <= 1:
                 results.append(f"ℹ️ <#{ch_id}> — nothing to archive")
