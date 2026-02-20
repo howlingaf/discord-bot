@@ -31,6 +31,7 @@ from .leetcode import (
 )
 from .database import (
     leetcode_delete_problem,
+    leetcode_get_problem,
     leetcode_get_problem_by_slug,
     leetcode_contest_post_get,
     leetcode_contest_post_save,
@@ -1051,7 +1052,7 @@ async def fix_problem_embeds(interaction: discord.Interaction, question_id: int 
 
     if question_id is not None:
         # Single-problem test: look up thread, fix inline, respond ephemerally
-        row = leetcode_get_problem_by_slug(str(question_id))
+        row = leetcode_get_problem(str(question_id))
         if not row:
             await interaction.followup.send(f"❌ Problem #{question_id} not found in DB.", ephemeral=True)
             return
