@@ -58,6 +58,7 @@ def html_to_text_preserve_newlines(content_html: str) -> str:
     s = re.sub(r"<br\s*/?>", "\n", s, flags=re.IGNORECASE)
     s = re.sub(r"</li\s*>", "\n", s, flags=re.IGNORECASE)
     s = re.sub(r"</h\d\s*>", "\n\n", s, flags=re.IGNORECASE)
+    s = re.sub(r"<sup>(.*?)</sup>", r"^\1", s, flags=re.IGNORECASE)
     s = re.sub(r"<(script|style)[\s\S]*?</\1>", "", s, flags=re.IGNORECASE)
     s = re.sub(r"<[^>]+>", "", s)
     s = html.unescape(s)

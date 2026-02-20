@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 import discord
 from discord import app_commands
@@ -962,6 +963,122 @@ async def post_rating_info(interaction: discord.Interaction):
         await interaction.followup.send("✅ Posted.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ {e}", ephemeral=True)
+
+
+# ---- Fix problem embed superscripts ----
+
+def _fix_sup_text(text: str) -> str:
+    if not text:
+        return text
+    # 10^4 through 10^9 (e.g. 104 → 10^4)
+    text = re.sub(r'(?<!\d)10([4-9])(?!\d)', r'10^\1', text)
+    # 10^10 through 10^19 (e.g. 1012 → 10^12, 1018 → 10^18)
+    text = re.sub(r'(?<!\d)10(1[0-9])(?!\d)', r'10^\1', text)
+    return text
+
+
+def _fix_embed_superscripts(embed: discord.Embed) -> tuple[discord.Embed, bool]:
+    d = embed.to_dict()
+    changed = False
+    if d.get('description'):
+        fixed = _fix_sup_text(d['description'])
+        if fixed != d['description']:
+            d['description'] = fixed
+            changed = True
+    for field in d.get('fields', []):
+        fixed = _fix_sup_text(field.get('value', ''))
+        if fixed != field.get('value', ''):
+            field['value'] = fixed
+            changed = True
+    return discord.Embed.from_dict(d), changed
+
+
+async def _run_fix_problem_embeds(log_channel: discord.abc.Messageable):
+    try:
+        ch = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
+        if not isinstance(ch, discord.ForumChannel):
+            await log_channel.send("❌ Problems channel is not a forum channel.")
+            return
+    except Exception as e:
+        await log_channel.send(f"❌ Could not fetch problems channel: {e}")
+        return
+
+    all_threads: list[tuple[discord.Thread, bool]] = []  # (thread, was_archived)
+
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        try:
+            for t in await guild.active_threads():
+                if t.parent_id == LEETCODE_PROBLEMS_CHANNEL_ID:
+                    all_threads.append((t, False))
+        except Exception as e:
+            print(f"[FIX EMBEDS] failed to list active threads: {e}")
+
+    try:
+        async for t in ch.archived_threads(limit=None):
+            all_threads.append((t, True))
+    except Exception as e:
+        print(f"[FIX EMBEDS] failed to list archived threads: {e}")
+
+    fixed = skipped = failed = 0
+    for thread, was_archived in all_threads:
+        try:
+            msg = await thread.fetch_message(thread.id)
+            if not msg.embeds:
+                skipped += 1
+                continue
+            new_embed, changed = _fix_embed_superscripts(msg.embeds[0])
+            if not changed:
+                skipped += 1
+                continue
+            await msg.edit(embed=new_embed)
+            if was_archived:
+                await thread.edit(archived=True)
+            fixed += 1
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            print(f"[FIX EMBEDS] error on thread {thread.id}: {e}")
+            failed += 1
+
+    await log_channel.send(f"✅ Fix complete: {fixed} updated, {skipped} unchanged, {failed} failed.")
+
+
+@bot.tree.command(name="fix-problem-embeds", description="(Admin) Fix 10^N display in problem embeds (e.g. 104 → 10^4).")
+@app_commands.describe(question_id="Only fix this one problem (by LeetCode ID). Omit to fix all.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def fix_problem_embeds(interaction: discord.Interaction, question_id: int | None = None):
+    await interaction.response.defer(ephemeral=True)
+
+    if question_id is not None:
+        # Single-problem test: look up thread, fix inline, respond ephemerally
+        row = leetcode_get_problem_by_slug(str(question_id))
+        if not row:
+            await interaction.followup.send(f"❌ Problem #{question_id} not found in DB.", ephemeral=True)
+            return
+        try:
+            thread = bot.get_channel(row["thread_id"]) or await bot.fetch_channel(row["thread_id"])
+            msg = await thread.fetch_message(thread.id)
+            if not msg.embeds:
+                await interaction.followup.send("ℹ️ No embed found on that post.", ephemeral=True)
+                return
+            new_embed, changed = _fix_embed_superscripts(msg.embeds[0])
+            if not changed:
+                await interaction.followup.send("ℹ️ No superscript issues found — embed looks fine.", ephemeral=True)
+                return
+            was_archived = thread.archived
+            await msg.edit(embed=new_embed)
+            if was_archived:
+                await thread.edit(archived=True)
+            await interaction.followup.send(f"✅ Fixed problem #{question_id}.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ {e}", ephemeral=True)
+        return
+
+    asyncio.create_task(_run_fix_problem_embeds(interaction.channel))
+    await interaction.followup.send(
+        "⏳ Scanning and fixing problem embeds in the background. Results will appear in this channel.",
+        ephemeral=True,
+    )
 
 
 # ---- Commands-only channel ----
