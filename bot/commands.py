@@ -1068,6 +1068,8 @@ async def _run_fix_problem_embeds(log_channel: discord.abc.Messageable, revert: 
             if not changed:
                 skipped += 1
                 continue
+            if was_archived:
+                await thread.edit(archived=False)
             await msg.edit(embeds=new_embeds)
             if was_archived:
                 await thread.edit(archived=True)
@@ -1125,6 +1127,8 @@ async def fix_problem_embeds(interaction: discord.Interaction, question_id: int 
                 await interaction.followup.send("ℹ️ No changes needed — embed looks fine.", ephemeral=True)
                 return
             was_archived = thread.archived
+            if was_archived:
+                await thread.edit(archived=False)
             await msg.edit(embeds=new_embeds)
             if was_archived:
                 await thread.edit(archived=True)
