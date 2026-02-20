@@ -29,6 +29,7 @@ from .database import (
     leetcode_get_problem_by_slug,
     leetcode_contest_post_get,
     leetcode_contest_post_save,
+    leetcode_contest_posts_delete_by_type,
     linked_users_get,
     linked_users_get_by_username,
     linked_users_set,
@@ -300,6 +301,66 @@ async def backfill_test(interaction: discord.Interaction):
     await interaction.followup.send("\n".join(results) or "No results.", ephemeral=True)
 
 
+async def _run_wipe(log_channel: discord.abc.Messageable, forum_channel: discord.ForumChannel, contest_type: str):
+    """Background task: delete all threads in a contest forum and clear DB records."""
+    deleted = failed = 0
+
+    # Active threads
+    for thread in list(forum_channel.threads):
+        try:
+            await thread.delete()
+            deleted += 1
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            print(f"[WIPE] Failed to delete thread {thread.id}: {e}")
+            failed += 1
+
+    # Archived threads
+    try:
+        async for thread in forum_channel.archived_threads(limit=None):
+            try:
+                await thread.delete()
+                deleted += 1
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"[WIPE] Failed to delete archived thread {thread.id}: {e}")
+                failed += 1
+    except Exception as e:
+        print(f"[WIPE] Error iterating archived threads: {e}")
+
+    removed = leetcode_contest_posts_delete_by_type(contest_type)
+    await log_channel.send(
+        f"\u2705 Wipe complete: {deleted} Discord threads deleted, {failed} failed, {removed} DB records cleared."
+    )
+
+
+@bot.tree.command(name="wipe-contest-forum", description="(Admin) Delete all threads in a contest forum and clear DB records.")
+@app_commands.describe(contest_type="Which forum to wipe: 'weekly' or 'biweekly'")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def wipe_contest_forum(interaction: discord.Interaction, contest_type: str):
+    if contest_type not in ("weekly", "biweekly"):
+        await interaction.response.send_message("\u274c Must be 'weekly' or 'biweekly'.", ephemeral=True)
+        return
+
+    forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type, 0)
+    try:
+        forum_channel = await bot.fetch_channel(forum_channel_id)
+    except Exception as e:
+        await interaction.response.send_message(f"\u274c Could not fetch forum channel: {e}", ephemeral=True)
+        return
+
+    if not isinstance(forum_channel, discord.ForumChannel):
+        await interaction.response.send_message("\u274c Not a forum channel.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    asyncio.create_task(_run_wipe(interaction.channel, forum_channel, contest_type))
+    await interaction.followup.send(
+        f"\u23f3 Wiping {contest_type} forum in the background. Results will appear in this channel.",
+        ephemeral=True,
+    )
+
+
 async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
     """Background task: backfill all contests. Posts progress to log_channel."""
     from collections import defaultdict
@@ -326,7 +387,15 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
         except Exception as e:
             print(f"[BACKFILL] could not set up forum channel for {ctype}: {e}")
 
-    contest_slugs = sorted(contests_map.keys())
+    def _sort_key(slug: str) -> tuple[str, int]:
+        ctype = _classify_contest(slug) or "z"
+        try:
+            num = int(slug.rsplit("-", 1)[-1])
+        except ValueError:
+            num = 0
+        return (ctype, num)
+
+    contest_slugs = sorted(contests_map.keys(), key=_sort_key)
     total = len(contest_slugs)
     created = skipped = failed = 0
 
