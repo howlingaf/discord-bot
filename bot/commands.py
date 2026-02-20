@@ -957,9 +957,9 @@ async def post_rating_info(interaction: discord.Interaction):
             "`/set-contest <new_rating>` — log your result after finishing\n"
             "`/practice` — get a problem within 50 points of your rating\n"
             "`/history` — view your last 10 contests and problems\n\n"
-            "*All commands are ephemeral (only visible to you) — run them anywhere, or use <#1474387868834336880> for convenience.*\n\n"
-            "*You have 24 hours to log a result after `/get-contest`*\n"
-            "*Missing the window won't affect your rating, but the contest counts as done and can't be retaken*"
+            "*All commands are ephemeral (only visible to you) — run them in this channel or anywhere in the server. Non-command messages in this channel are automatically deleted.*\n\n"
+            "*You have 24 hours to `/set-contest <rating>` after `/get-contest`*\n"
+            "*Missing the window won't affect your rating, but the contest cannot be retaken to affect rating*"
         )
         await interaction.followup.send("✅ Posted.", ephemeral=True)
     except Exception as e:
