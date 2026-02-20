@@ -841,10 +841,17 @@ async def post_contest_credits(interaction: discord.Interaction):
             if not isinstance(ch, discord.ForumChannel):
                 results.append(f"❌ <#{ch_id}> is not a forum channel")
                 continue
-            await ch.create_thread(
+            result = await ch.create_thread(
                 name="Credit to https://github.com/zerotrac/leetcode_problem_rating",
-                content="Easy (<1750), Medium (1750-1950), Hard (>= 1950)",
+                content=(
+                    "**Difficulty ratings** are based on the weighted average of all 4 problems per contest.\n\n"
+                    "> 🟢 **Easy** — avg rating < 1750\n"
+                    "> 🟡 **Medium** — avg rating 1750–1950\n"
+                    "> 🔴 **Hard** — avg rating ≥ 1950"
+                ),
             )
+            thread = result.thread if hasattr(result, "thread") else result
+            await thread.edit(pinned=True, locked=True)
             results.append(f"✅ Posted in <#{ch_id}>")
         except Exception as e:
             results.append(f"❌ <#{ch_id}>: {e}")
