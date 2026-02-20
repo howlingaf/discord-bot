@@ -584,7 +584,12 @@ async def get_contest_cmd(interaction: discord.Interaction):
     for e in zerotrac_entries:
         contests_map[e["contest_slug"]].append(e)
 
-    done_slugs = virtual_contest_history_done_slugs(interaction.user.id)
+    done_contest_slugs = virtual_contest_history_done_slugs(interaction.user.id)
+    # Also exclude contests that contain any problem the user has already practiced
+    done_problem_slugs = virtual_problem_history_done_slugs(interaction.user.id)
+    practiced_contest_slugs = {e["contest_slug"] for e in zerotrac_entries if e["title_slug"] in done_problem_slugs}
+    done_slugs = done_contest_slugs | practiced_contest_slugs
+
     user_rating = stats["rating"]
     ratings_by_slug = {e["title_slug"]: e["rating"] for e in zerotrac_entries}
 
@@ -736,10 +741,15 @@ async def practice_cmd(interaction: discord.Interaction):
         await interaction.followup.send("❌ Could not load problem data.", ephemeral=True)
         return
 
-    done_slugs = virtual_problem_history_done_slugs(interaction.user.id)
+    done_problem_slugs = virtual_problem_history_done_slugs(interaction.user.id)
+    # Also exclude problems that appeared in any contest the user has already done
+    done_contest_slugs = virtual_contest_history_done_slugs(interaction.user.id)
+    contest_problem_slugs = {e["title_slug"] for e in zerotrac_entries if e["contest_slug"] in done_contest_slugs}
+    excluded_slugs = done_problem_slugs | contest_problem_slugs
+
     user_rating = stats["rating"]
 
-    candidates = [(e["title_slug"], e["rating"]) for e in zerotrac_entries if e["title_slug"] not in done_slugs]
+    candidates = [(e["title_slug"], e["rating"]) for e in zerotrac_entries if e["title_slug"] not in excluded_slugs]
     if not candidates:
         await interaction.followup.send("❌ You've done every rated problem. Impressive.", ephemeral=True)
         return
