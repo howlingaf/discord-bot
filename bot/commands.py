@@ -965,7 +965,3 @@ async def on_message(message: discord.Message):
         return
     if message.channel.id == _COMMANDS_CHANNEL_ID:
         await message.delete()
-        await message.channel.send(
-            f"{message.author.mention} Please use slash commands here.",
-            delete_after=5,
-        )
