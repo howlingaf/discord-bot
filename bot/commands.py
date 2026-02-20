@@ -9,6 +9,8 @@ from .config import (
     SPOTIFY_REDIRECT_URI,
     SPOTIFY_ALLOWED_USER_ID,
     GUILD_ID,
+    LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
+    LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
 )
 from .spotify import dm_spotify_link
 from .leetcode import (
@@ -824,3 +826,27 @@ async def reset_rating(interaction: discord.Interaction, user: discord.Member):
         f"✅ Reset **{user.display_name}**: rating set to `{stats['rating']:.0f}`, history wiped.",
         ephemeral=True,
     )
+
+
+@bot.tree.command(name="post-contest-credits", description="(Admin) Post zerotrac credit + difficulty key in both contest forum channels.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def post_contest_credits(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    channel_ids = [LEETCODE_WEEKLY_FORUM_CHANNEL_ID, LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID]
+    results = []
+    for ch_id in channel_ids:
+        try:
+            ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
+            if not isinstance(ch, discord.ForumChannel):
+                results.append(f"❌ <#{ch_id}> is not a forum channel")
+                continue
+            await ch.create_thread(
+                name="Credit to https://github.com/zerotrac/leetcode_problem_rating",
+                content="Easy (<1750), Medium (1750-1950), Hard (>= 1950)",
+            )
+            results.append(f"✅ Posted in <#{ch_id}>")
+        except Exception as e:
+            results.append(f"❌ <#{ch_id}>: {e}")
+
+    await interaction.followup.send("\n".join(results), ephemeral=True)
