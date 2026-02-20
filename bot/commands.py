@@ -299,12 +299,112 @@ async def backfill_test(interaction: discord.Interaction):
     await interaction.followup.send("\n".join(results) or "No results.", ephemeral=True)
 
 
+async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
+    """Background task: backfill all contests. Posts progress to log_channel."""
+    from collections import defaultdict
+
+    ratings_by_slug: dict[str, float] = {p["TitleSlug"]: p["Rating"] for p in data}
+
+    contests_map: dict[str, list[dict]] = defaultdict(list)
+    for p in data:
+        contests_map[p["ContestSlug"]].append(p)
+
+    # Pre-fetch forum channels and ensure all tags exist so we never
+    # hit a channel-edit API call inside the hot loop.
+    tag_names = ["Easy", "Medium", "Hard", "Unrated"]
+    channel_cache: dict[str, discord.ForumChannel] = {}
+    for ctype, fid in CONTEST_FORUM_CHANNEL_MAP.items():
+        try:
+            ch = await bot.fetch_channel(fid)
+            if isinstance(ch, discord.ForumChannel):
+                existing = {t.name for t in ch.available_tags}
+                missing = [discord.ForumTag(name=n) for n in tag_names if n not in existing]
+                if missing:
+                    ch = await ch.edit(available_tags=list(ch.available_tags) + missing)
+                channel_cache[ctype] = ch
+        except Exception as e:
+            print(f"[BACKFILL] could not set up forum channel for {ctype}: {e}")
+
+    contest_slugs = sorted(contests_map.keys())
+    total = len(contest_slugs)
+    created = skipped = failed = 0
+
+    for i, slug in enumerate(contest_slugs):
+        if leetcode_contest_post_get(slug):
+            skipped += 1
+            continue
+
+        contest_type = _classify_contest(slug)
+        if not contest_type or contest_type not in channel_cache:
+            skipped += 1
+            continue
+
+        forum_channel = channel_cache[contest_type]
+        problems = sorted(contests_map[slug], key=lambda p: p["ProblemIndex"])
+
+        # Create + archive a problem forum post for each problem, with a
+        # small sleep between each to avoid hammering the problems forum.
+        question_thread_ids: dict[str, int] = {}
+        for p in problems:
+            p_slug = p["TitleSlug"]
+            try:
+                thread_id, err = await get_or_create_problem_post_archived(bot, p_slug)
+                if thread_id:
+                    question_thread_ids[p_slug] = thread_id
+                elif err:
+                    print(f"[BACKFILL] problem post '{p_slug}': {err}")
+            except Exception as e:
+                print(f"[BACKFILL] problem post '{p_slug}' failed: {e}")
+            await asyncio.sleep(1.0)
+
+        contest_id_en = problems[0].get("ContestID_en", slug.replace("-", " ").title())
+        mock_contest = {"title": contest_id_en, "titleSlug": slug, "startTime": 0}
+        questions = [
+            {"questionId": str(p["ID"]), "title": p["Title"], "titleSlug": p["TitleSlug"]}
+            for p in problems
+        ]
+
+        try:
+            tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
+            # Tags are pre-created — just look up from cached channel
+            contest_tag = next(t for t in forum_channel.available_tags if t.name == tag_name)
+            forum_embed = build_contest_forum_embed(mock_contest, questions, ratings_by_slug, question_thread_ids)
+            result = await forum_channel.create_thread(
+                name=contest_id_en[:100],
+                embed=forum_embed,
+                applied_tags=[contest_tag],
+                reason=f"Backfill: {slug}",
+            )
+            thread = result.thread if hasattr(result, "thread") else result
+            leetcode_contest_post_save(slug, contest_type, thread.id, rated=1 if tag_name != "Unrated" else 0)
+            created += 1
+        except Exception as e:
+            print(f"[BACKFILL] contest thread '{slug}' failed: {e}")
+            failed += 1
+
+        if (i + 1) % 25 == 0:
+            try:
+                await log_channel.send(
+                    f"\u23f3 Backfill progress: {i + 1}/{total} ({created} created, {skipped} skipped, {failed} failed)"
+                )
+            except Exception:
+                pass
+
+        await asyncio.sleep(2.0)
+
+    try:
+        await log_channel.send(
+            f"\u2705 Backfill complete: {created} created, {skipped} skipped, {failed} failed (of {total} total)."
+        )
+    except Exception:
+        pass
+
+
 @bot.tree.command(name="backfill-contests", description="(Admin) Backfill all past contests from zerotrac into forum channels.")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def backfill_contests(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
-    # Download zerotrac data
     try:
         async with bot.http_session.get(
             "https://raw.githubusercontent.com/zerotrac/leetcode_problem_rating/main/data.json"
@@ -317,98 +417,10 @@ async def backfill_contests(interaction: discord.Interaction):
         await interaction.followup.send(f"\u274c Failed to fetch zerotrac data: {e}", ephemeral=True)
         return
 
-    ratings_by_slug: dict[str, float] = {p["TitleSlug"]: p["Rating"] for p in data}
-
-    # Group problems by contest slug, sorted by ProblemIndex within each contest
-    from collections import defaultdict
-    contests_map: dict[str, list[dict]] = defaultdict(list)
-    for p in data:
-        contests_map[p["ContestSlug"]].append(p)
-
-    contest_slugs = sorted(contests_map.keys())
-    total = len(contest_slugs)
-    created = 0
-    skipped = 0
-    failed = 0
-
-    for i, slug in enumerate(contest_slugs):
-        # Skip if already posted
-        if leetcode_contest_post_get(slug):
-            skipped += 1
-            continue
-
-        contest_type = _classify_contest(slug)
-        if not contest_type:
-            skipped += 1
-            continue
-
-        forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type, 0)
-        if not forum_channel_id:
-            skipped += 1
-            continue
-
-        try:
-            forum_channel = bot.get_channel(forum_channel_id) or await bot.fetch_channel(forum_channel_id)
-        except Exception as e:
-            print(f"[BACKFILL] could not fetch forum channel for {slug}: {e}")
-            failed += 1
-            continue
-
-        if not isinstance(forum_channel, discord.ForumChannel):
-            failed += 1
-            continue
-
-        # Sort problems Q1 → Q4
-        problems = sorted(contests_map[slug], key=lambda p: p["ProblemIndex"])
-
-        # Create + archive a problem forum post for each problem
-        question_thread_ids: dict[str, int] = {}
-        for p in problems:
-            p_slug = p["TitleSlug"]
-            try:
-                thread_id, err = await get_or_create_problem_post_archived(bot, p_slug)
-                if thread_id:
-                    question_thread_ids[p_slug] = thread_id
-                elif err:
-                    print(f"[BACKFILL] problem post '{p_slug}': {err}")
-            except Exception as e:
-                print(f"[BACKFILL] problem post '{p_slug}' failed: {e}")
-
-        contest_id_en = problems[0].get("ContestID_en", slug.replace("-", " ").title())
-        mock_contest = {"title": contest_id_en, "titleSlug": slug, "startTime": 0}
-        questions = [
-            {"questionId": str(p["ID"]), "title": p["Title"], "titleSlug": p["TitleSlug"]}
-            for p in problems
-        ]
-
-        try:
-            tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
-            contest_tag = await _get_or_create_forum_tag(forum_channel, tag_name)
-            forum_embed = build_contest_forum_embed(mock_contest, questions, ratings_by_slug, question_thread_ids)
-            result = await forum_channel.create_thread(
-                name=contest_id_en[:100],
-                embed=forum_embed,
-                applied_tags=[contest_tag],
-                reason=f"Backfill: {slug}",
-            )
-            thread = result.thread if hasattr(result, "thread") else result
-            is_rated = tag_name != "Unrated"
-            leetcode_contest_post_save(slug, contest_type, thread.id, rated=1 if is_rated else 0)
-            created += 1
-        except Exception as e:
-            print(f"[BACKFILL] contest thread '{slug}' failed: {e}")
-            failed += 1
-
-        # Progress update every 25 contests
-        if (i + 1) % 25 == 0:
-            await interaction.followup.send(
-                f"\u23f3 Progress: {i + 1}/{total} ({created} created, {skipped} skipped, {failed} failed)",
-                ephemeral=True,
-            )
-
-        await asyncio.sleep(1.5)
-
+    log_channel = interaction.channel
+    asyncio.create_task(_run_backfill(log_channel, data))
     await interaction.followup.send(
-        f"\u2705 Backfill complete: {created} created, {skipped} skipped, {failed} failed (of {total} total).",
+        f"\u23f3 Backfill started ({sum(1 for p in {p['ContestSlug'] for p in data})} contests). "
+        f"Progress updates will appear in this channel.",
         ephemeral=True,
     )
