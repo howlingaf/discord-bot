@@ -11,6 +11,7 @@ from .config import (
     GUILD_ID,
     LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
     LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
+    LEETCODE_PROBLEMS_CHANNEL_ID,
 )
 from .spotify import dm_spotify_link
 from .leetcode import (
@@ -849,22 +850,77 @@ async def post_setup_info(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ {e}", ephemeral=True)
 
 
-@bot.tree.command(name="post-problems-info", description="(Admin) Post a how-to post in the problems forum channel.")
+@bot.tree.command(name="archive-old-contests", description="(Admin) Archive all contest threads except the most recent in each forum.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def post_problems_info(interaction: discord.Interaction):
+async def archive_old_contests(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    results = []
+    for ch_id in [LEETCODE_WEEKLY_FORUM_CHANNEL_ID, LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID]:
+        try:
+            ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
+            if not isinstance(ch, discord.ForumChannel):
+                results.append(f"❌ <#{ch_id}> is not a forum channel")
+                continue
+
+            # Active threads only — skip pinned, sort by ID descending (higher = newer)
+            active = [t for t in ch.threads if not t.pinned]
+            active.sort(key=lambda t: t.id, reverse=True)
+
+            if len(active) <= 1:
+                results.append(f"ℹ️ <#{ch_id}> — nothing to archive")
+                continue
+
+            archived = 0
+            for thread in active[1:]:  # skip the most recent
+                try:
+                    await thread.edit(archived=True)
+                    archived += 1
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    print(f"[ARCHIVE] failed to archive {thread.id}: {e}")
+
+            results.append(f"✅ <#{ch_id}> — archived {archived} thread(s), kept 1")
+        except Exception as e:
+            results.append(f"❌ <#{ch_id}>: {e}")
+
+    await interaction.followup.send("\n".join(results), ephemeral=True)
+
+
+@bot.tree.command(name="archive-inactive-problems", description="(Admin) Archive all problem posts with no replies.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def archive_inactive_problems(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
     try:
-        ch = bot.get_channel(1472231552607064144) or await bot.fetch_channel(1472231552607064144)
+        ch = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
         if not isinstance(ch, discord.ForumChannel):
             await interaction.followup.send("❌ Not a forum channel.", ephemeral=True)
             return
-        result = await ch.create_thread(
-            name="How to Post a LeetCode Problem",
-            content="To create a post, use the command: **`/problem <number>`**",
-        )
-        thread = result.thread if hasattr(result, "thread") else result
-        await thread.edit(pinned=True, locked=True)
-        await interaction.followup.send("✅ Posted.", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Could not fetch problems channel: {e}", ephemeral=True)
+        return
+
+    asyncio.create_task(_run_archive_inactive(interaction.channel, ch))
+    await interaction.followup.send("⏳ Archiving inactive problems in the background. Result will appear in this channel.", ephemeral=True)
+
+
+async def _run_archive_inactive(log_channel, forum: discord.ForumChannel):
+    archived = skipped = failed = 0
+
+    active = [t for t in forum.threads if not t.archived]
+    for thread in active:
+        try:
+            if thread.message_count == 0:
+                await thread.edit(archived=True)
+                archived += 1
+                await asyncio.sleep(0.5)
+            else:
+                skipped += 1
+        except Exception as e:
+            print(f"[ARCHIVE PROBLEMS] failed {thread.id}: {e}")
+            failed += 1
+
+    await log_channel.send(
+        f"✅ Done: {archived} archived, {skipped} kept (have replies), {failed} failed."
+    )
