@@ -925,6 +925,35 @@ async def _run_archive_inactive(log_channel, forum: discord.ForumChannel):
     )
 
 
+@bot.tree.command(name="post-rating-info", description="(Admin) Post the virtual rating system info to the info channel.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def post_rating_info(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        ch = bot.get_channel(1474376865400619189) or await bot.fetch_channel(1474376865400619189)
+        await ch.send(
+            "Your server rating starts from your LeetCode contest rating (or **1500** if you haven't competed).\n"
+            "It updates when you log virtual contest results.\n\n"
+            "Problem **ratings** are based on ratings from past contests.\n"
+            "Contest ratings are a **weighted average of the ratings of their problems**\n"
+            "(credit to Zerotrac: https://github.com/zerotrac/leetcode_problem_rating)\n\n"
+            "`/link <username>` — link your LeetCode account\n"
+            "- Required to use any command below\n"
+            "- Adds you to contest rankings in <#1470261383701594153> and <#1470261431483105535>\n\n"
+            "`/rating` — view your server rating and contest counts\n"
+            "`/get-contest` — get a virtual contest matched to your rating\n"
+            "`/set-contest <new_rating>` — log your result after finishing\n"
+            "`/practice` — get a problem within 50 points of your rating\n"
+            "`/history` — view your last 10 contests and problems\n\n"
+            "*All commands are ephemeral (only visible to you) — run them anywhere, or use <#1474387868834336880> for convenience.*\n\n"
+            "*You have 24 hours to log a result after `/get-contest`*\n"
+            "*Missing the window won't affect your rating, but the contest counts as done and can't be retaken*"
+        )
+        await interaction.followup.send("✅ Posted.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ {e}", ephemeral=True)
+
+
 # ---- Commands-only channel ----
 
 _COMMANDS_CHANNEL_ID = 1474387868834336880
