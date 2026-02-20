@@ -923,3 +923,20 @@ async def _run_archive_inactive(log_channel, forum: discord.ForumChannel):
     await log_channel.send(
         f"✅ Done: {archived} archived, {skipped} kept (have replies), {failed} failed."
     )
+
+
+# ---- Commands-only channel ----
+
+_COMMANDS_CHANNEL_ID = 1474387868834336880
+
+
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+    if message.channel.id == _COMMANDS_CHANNEL_ID:
+        await message.delete()
+        await message.channel.send(
+            f"{message.author.mention} Please use slash commands here.",
+            delete_after=5,
+        )

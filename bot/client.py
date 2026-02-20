@@ -12,6 +12,7 @@ intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
 intents.voice_states = True
+intents.messages = True
 
 
 class MyBot(discord.Client):
