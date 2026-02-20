@@ -828,14 +828,15 @@ async def reset_rating(interaction: discord.Interaction, user: discord.Member):
     )
 
 
-@bot.tree.command(name="post-contest-credits", description="(Admin) Post zerotrac credit + difficulty key in both contest forum channels.")
+@bot.tree.command(name="post-setup-info", description="(Admin) Post pinned info posts in contest and problems forum channels.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def post_contest_credits(interaction: discord.Interaction):
+async def post_setup_info(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
-    channel_ids = [LEETCODE_WEEKLY_FORUM_CHANNEL_ID, LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID]
     results = []
-    for ch_id in channel_ids:
+
+    # Contest forums — zerotrac credit + difficulty key
+    for ch_id in [LEETCODE_WEEKLY_FORUM_CHANNEL_ID, LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID]:
         try:
             ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
             if not isinstance(ch, discord.ForumChannel):
@@ -851,4 +852,41 @@ async def post_contest_credits(interaction: discord.Interaction):
         except Exception as e:
             results.append(f"❌ <#{ch_id}>: {e}")
 
+    # Problems forum — how-to post
+    try:
+        ch = bot.get_channel(1472231552607064144) or await bot.fetch_channel(1472231552607064144)
+        if not isinstance(ch, discord.ForumChannel):
+            results.append("❌ <#1472231552607064144> is not a forum channel")
+        else:
+            result = await ch.create_thread(
+                name="How to Post a LeetCode Problem",
+                content="To create a post, use the command: **`/problem <number>`**",
+            )
+            thread = result.thread if hasattr(result, "thread") else result
+            await thread.edit(pinned=True, locked=True)
+            results.append("✅ Posted in <#1472231552607064144>")
+    except Exception as e:
+        results.append(f"❌ <#1472231552607064144>: {e}")
+
     await interaction.followup.send("\n".join(results), ephemeral=True)
+
+
+@bot.tree.command(name="post-problems-info", description="(Admin) Post a how-to post in the problems forum channel.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def post_problems_info(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        ch = bot.get_channel(1472231552607064144) or await bot.fetch_channel(1472231552607064144)
+        if not isinstance(ch, discord.ForumChannel):
+            await interaction.followup.send("❌ Not a forum channel.", ephemeral=True)
+            return
+        result = await ch.create_thread(
+            name="How to Post a LeetCode Problem",
+            content="To create a post, use the command: **`/problem <number>`**",
+        )
+        thread = result.thread if hasattr(result, "thread") else result
+        await thread.edit(pinned=True, locked=True)
+        await interaction.followup.send("✅ Posted.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ {e}", ephemeral=True)
