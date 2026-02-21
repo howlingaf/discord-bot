@@ -743,7 +743,7 @@ async def set_contest_cmd(interaction: discord.Interaction, solved: str):
         return
 
     # Per-problem Elo: treat each problem as an opponent with its zerotrac rating
-    K = 40.0
+    K = 20.0
     old_rating = stats["rating"]
     delta = 0.0
     for flag, problem in zip([int(c) for c in solved], contest_problems):
@@ -982,7 +982,7 @@ async def post_rating_info(interaction: discord.Interaction):
         ch = bot.get_channel(1474376865400619189) or await bot.fetch_channel(1474376865400619189)
         await ch.send(
             "Your server rating starts from your LeetCode contest rating (or **1500** if you haven't done any live contests).\n"
-            "Your server rating updates using `/get-contest` to get a contest and `/set-contest` to log your score.\n\n"
+            "Your server rating updates using `/get-contest` to get a contest and `/set-contest` to log which problems you solved.\n\n"
             "Problem **ratings** are based on ratings from past contests.\n"
             "Contest ratings are a **weighted average of the ratings of their problems**\n"
             "(credit to Zerotrac: https://github.com/zerotrac/leetcode_problem_rating)\n\n"
@@ -991,11 +991,11 @@ async def post_rating_info(interaction: discord.Interaction):
             "- Adds you to contest rankings in <#1470261383701594153> and <#1470261431483105535>\n\n"
             "`/rating` — view your server rating and contest counts\n"
             "`/get-contest` — get a virtual contest matched to your rating\n"
-            "`/set-contest <solved>` — log which problems you solved, e.g. `1100` = Q1+Q2 solved, Q3+Q4 missed\n"
+            "`/set-contest <solved>` — log which problems you solved as a 4-digit binary string, e.g. `1100` = solved Q1+Q2, missed Q3+Q4\n"
             "`/practice` — get a problem within 50 points of your rating\n"
             "`/history` — view your last 10 contests and problems\n\n"
             "*All commands are ephemeral (only visible to you) — run them in this channel or anywhere in the server. Non-command messages in this channel are automatically deleted.*\n\n"
-            "*You have 24 hours to `/set-contest <solved>` after `/get-contest`*\n"
+            "*You have 24 hours to `/set-contest` after `/get-contest`*\n"
             "*Missing the window won't affect your rating, but the contest cannot be retaken to affect rating*"
         )
         await interaction.followup.send("✅ Posted.", ephemeral=True)
