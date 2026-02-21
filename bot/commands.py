@@ -520,7 +520,8 @@ async def backfill_contests(interaction: discord.Interaction):
 # ---- Virtual rating system ----
 
 _DEFAULT_RATING = 1500.0
-_CONTEST_STRETCH = 50  # serve contests slightly above current rating
+_CONTEST_STRETCH = 50   # serve contests slightly above current rating
+_PRACTICE_STRETCH = 150  # serve problems within this many points of current rating
 
 
 async def _init_virtual_stats(discord_user_id: int, lc_username: str, session) -> dict:
@@ -793,10 +794,10 @@ async def practice_cmd(interaction: discord.Interaction):
         await interaction.followup.send("❌ You've done every rated problem. Impressive.", ephemeral=True)
         return
 
-    # Prefer problems within [rating, rating+50]; fall back to closest above; then closest overall
-    band = [(s, r) for s, r in candidates if user_rating <= r <= user_rating + _CONTEST_STRETCH]
+    # Prefer problems within [rating, rating+150]; fall back to closest above; then closest overall
+    band = [(s, r) for s, r in candidates if user_rating <= r <= user_rating + _PRACTICE_STRETCH]
     if band:
-        best_slug, best_rating = min(band, key=lambda x: abs(x[1] - (user_rating + _CONTEST_STRETCH / 2)))
+        best_slug, best_rating = min(band, key=lambda x: abs(x[1] - (user_rating + _PRACTICE_STRETCH / 2)))
     else:
         above = [(s, r) for s, r in candidates if r > user_rating]
         pool = above if above else candidates
@@ -1000,7 +1001,7 @@ async def post_rating_info(interaction: discord.Interaction):
             "`/rating` — view your server rating and contest counts\n"
             "`/get-contest` — get a virtual contest matched to your server rating\n"
             "`/set-contest <solved>` — log which problems you solved as a 4-digit binary string, e.g. `1100` = solved Q1+Q2, missed Q3+Q4\n"
-            "`/practice` — get a problem within 50 points of your server rating\n"
+            "`/practice` — get a problem matched to your server rating\n"
             "`/history` — view your last 10 contests and problems\n\n"
             "*All commands are ephemeral (only visible to you) — run them in this channel or anywhere in the server. Non-command messages in this channel are automatically deleted.*\n\n"
             "*You have 24 hours to `/set-contest` after `/get-contest`*\n"
