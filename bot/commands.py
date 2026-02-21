@@ -989,7 +989,7 @@ async def post_rating_info(interaction: discord.Interaction):
             "Your server rating starts from your LeetCode contest rating (or **1500** if you haven't done any live contests).\n"
             "Your server rating updates using `/get-contest` to get a contest and `/set-contest` to log which problems you solved.\n\n"
             "Problem **ratings** are based on ratings from past contests.\n"
-            "Contest ratings are a **weighted average of the ratings of their problems**\n"
+            "Contest ratings are a **weighted average of the ratings of their problems** (Q1×3, Q2×4, Q3×5, Q4×6)\n"
             "(credit to Zerotrac: https://github.com/zerotrac/leetcode_problem_rating)\n\n"
             "`/link <username>` — link your LeetCode account\n"
             "- Required to use any command below\n"
