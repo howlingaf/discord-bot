@@ -682,14 +682,18 @@ async def get_contest_cmd(interaction: discord.Interaction):
         description=f"Avg rating: ||{best_avg:.0f}|| | Your server rating: `{user_rating:.0f}`\n\n👉 {thread_url}",
         color=0x9B59B6,
     )
-    embed.set_footer(text="Log your result with /set-contest <new_rating>")
+    embed.set_footer(text="Log your result with /set-contest — e.g. 1100 = solved Q1+Q2, missed Q3+Q4")
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="set-contest", description="Log your result for the last virtual contest you were served.")
-@app_commands.describe(new_rating="Your new rating shown by LeetCode after the virtual contest")
-async def set_contest_cmd(interaction: discord.Interaction, new_rating: float):
+@bot.tree.command(name="set-contest", description="Log which problems you solved in your last virtual contest.")
+@app_commands.describe(solved="4-digit binary string: 1=solved, 0=missed, left to right Q1→Q4 (e.g. 1100)")
+async def set_contest_cmd(interaction: discord.Interaction, solved: str):
     await interaction.response.defer(ephemeral=True)
+
+    if len(solved) != 4 or not all(c in "01" for c in solved):
+        await interaction.followup.send("❌ `solved` must be 4 digits of 0s and 1s, e.g. `1100` for Q1+Q2 solved.", ephemeral=True)
+        return
 
     lc_username = linked_users_get(interaction.user.id)
     if not lc_username:
@@ -724,13 +728,36 @@ async def set_contest_cmd(interaction: discord.Interaction, new_rating: float):
         )
         return
 
-    virtual_contest_history_complete(interaction.user.id, slug, new_rating)
+    # Get problem ratings for this contest from zerotrac
+    zerotrac_entries = await get_zerotrac_data(bot.http_session)
+    contest_problems = sorted(
+        [e for e in zerotrac_entries if e["contest_slug"] == slug],
+        key=lambda e: e["problem_index"]
+    )[:4]
+
+    if len(contest_problems) < 4:
+        await interaction.followup.send(
+            f"⚠️ Could not find ratings for `{slug.replace('-', ' ').title()}` — contest may be unrated. Rating not updated.",
+            ephemeral=True,
+        )
+        return
+
+    # Per-problem Elo: treat each problem as an opponent with its zerotrac rating
+    K = 40.0
     old_rating = stats["rating"]
+    delta = 0.0
+    for flag, problem in zip([int(c) for c in solved], contest_problems):
+        expected = 1.0 / (1.0 + 10 ** ((problem["rating"] - old_rating) / 400.0))
+        delta += K * (flag - expected)
+
+    new_rating = round(old_rating + delta, 1)
+    virtual_contest_history_complete(interaction.user.id, slug, new_rating)
     virtual_stats_update_rating(interaction.user.id, new_rating)
-    delta = new_rating - old_rating
+
+    solved_display = " ".join(f"Q{i+1}{'✅' if c == '1' else '❌'}" for i, c in enumerate(solved))
     sign = "+" if delta >= 0 else ""
     await interaction.followup.send(
-        f"✅ `{slug.replace('-', ' ').title()}`: server rating `{old_rating:.0f}` → `{new_rating:.0f}` ({sign}{delta:.0f})",
+        f"✅ `{slug.replace('-', ' ').title()}`\n{solved_display}\nServer rating: `{old_rating:.0f}` → `{new_rating:.0f}` ({sign}{delta:.0f})",
         ephemeral=True,
     )
 
@@ -964,11 +991,11 @@ async def post_rating_info(interaction: discord.Interaction):
             "- Adds you to contest rankings in <#1470261383701594153> and <#1470261431483105535>\n\n"
             "`/rating` — view your server rating and contest counts\n"
             "`/get-contest` — get a virtual contest matched to your rating\n"
-            "`/set-contest <new_rating>` — log your result after finishing\n"
+            "`/set-contest <solved>` — log which problems you solved, e.g. `1100` = Q1+Q2 solved, Q3+Q4 missed\n"
             "`/practice` — get a problem within 50 points of your rating\n"
             "`/history` — view your last 10 contests and problems\n\n"
             "*All commands are ephemeral (only visible to you) — run them in this channel or anywhere in the server. Non-command messages in this channel are automatically deleted.*\n\n"
-            "*You have 24 hours to `/set-contest <rating>` after `/get-contest`*\n"
+            "*You have 24 hours to `/set-contest <solved>` after `/get-contest`*\n"
             "*Missing the window won't affect your rating, but the contest cannot be retaken to affect rating*"
         )
         await interaction.followup.send("✅ Posted.", ephemeral=True)
