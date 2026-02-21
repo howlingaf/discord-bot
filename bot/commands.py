@@ -809,6 +809,14 @@ async def practice_cmd(interaction: discord.Interaction):
     else:
         thread_id, _ = await get_or_create_problem_post_archived(bot, best_slug)
 
+    if thread_id:
+        try:
+            problem_thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
+            if isinstance(problem_thread, discord.Thread) and problem_thread.archived:
+                await problem_thread.edit(archived=False)
+        except Exception as e:
+            print(f"[PRACTICE] could not unarchive problem thread {thread_id}: {e}")
+
     virtual_problem_history_log(interaction.user.id, best_slug)
 
     title = best_slug.replace("-", " ").title()
