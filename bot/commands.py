@@ -520,8 +520,8 @@ async def backfill_contests(interaction: discord.Interaction):
 # ---- Virtual rating system ----
 
 _DEFAULT_RATING = 1500.0
-_CONTEST_STRETCH = 50   # serve contests slightly above current rating
-_PRACTICE_STRETCH = 150  # serve problems within this many points of current rating
+_CONTEST_RADIUS = 100   # serve contests within this many points of current rating (symmetric)
+_PRACTICE_RADIUS = 150  # serve problems within this many points of current rating (symmetric)
 
 
 async def _init_virtual_stats(discord_user_id: int, lc_username: str, session) -> dict:
@@ -620,14 +620,12 @@ async def get_contest_cmd(interaction: discord.Interaction):
         await interaction.followup.send("❌ No more contests available.", ephemeral=True)
         return
 
-    # Prefer contests within [rating, rating+50]; fall back to closest above; then closest overall
-    band = [(s, a) for s, a in candidates if user_rating <= a <= user_rating + _CONTEST_STRETCH]
+    # Prefer contests within [rating-100, rating+100]; fall back to closest overall
+    band = [(s, a) for s, a in candidates if abs(a - user_rating) <= _CONTEST_RADIUS]
     if band:
-        best_slug, best_avg = min(band, key=lambda x: abs(x[1] - (user_rating + _CONTEST_STRETCH / 2)))
+        best_slug, best_avg = min(band, key=lambda x: abs(x[1] - user_rating))
     else:
-        above = [(s, a) for s, a in candidates if a > user_rating]
-        pool = above if above else candidates
-        best_slug, best_avg = min(pool, key=lambda x: abs(x[1] - user_rating))
+        best_slug, best_avg = min(candidates, key=lambda x: abs(x[1] - user_rating))
 
     # Get or create the contest forum thread
     post = leetcode_contest_post_get(best_slug)
@@ -794,14 +792,12 @@ async def practice_cmd(interaction: discord.Interaction):
         await interaction.followup.send("❌ You've done every rated problem. Impressive.", ephemeral=True)
         return
 
-    # Prefer problems within [rating, rating+150]; fall back to closest above; then closest overall
-    band = [(s, r) for s, r in candidates if user_rating <= r <= user_rating + _PRACTICE_STRETCH]
+    # Prefer problems within [rating-150, rating+150]; fall back to closest overall
+    band = [(s, r) for s, r in candidates if abs(r - user_rating) <= _PRACTICE_RADIUS]
     if band:
-        best_slug, best_rating = min(band, key=lambda x: abs(x[1] - (user_rating + _PRACTICE_STRETCH / 2)))
+        best_slug, best_rating = min(band, key=lambda x: abs(x[1] - user_rating))
     else:
-        above = [(s, r) for s, r in candidates if r > user_rating]
-        pool = above if above else candidates
-        best_slug, best_rating = min(pool, key=lambda x: abs(x[1] - user_rating))
+        best_slug, best_rating = min(candidates, key=lambda x: abs(x[1] - user_rating))
 
     thread_id = None
     existing = leetcode_get_problem_by_slug(best_slug)
