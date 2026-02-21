@@ -631,7 +631,8 @@ async def get_contest_cmd(interaction: discord.Interaction):
     # Get or create the contest forum thread
     post = leetcode_contest_post_get(best_slug)
     if post:
-        thread_url = f"https://discord.com/channels/{GUILD_ID}/{post['thread_id']}"
+        contest_thread_id = post['thread_id']
+        thread_url = f"https://discord.com/channels/{GUILD_ID}/{contest_thread_id}"
     else:
         contest_type_str = _classify_contest(best_slug)
         forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type_str, 0)
@@ -658,10 +659,19 @@ async def get_contest_cmd(interaction: discord.Interaction):
             )
             thread = result.thread if hasattr(result, "thread") else result
             leetcode_contest_post_save(best_slug, contest_type_str, thread.id, rated=1 if tag_name != "Unrated" else 0)
-            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread.id}"
+            contest_thread_id = thread.id
+            thread_url = f"https://discord.com/channels/{GUILD_ID}/{contest_thread_id}"
         except Exception as e:
             await interaction.followup.send(f"❌ Could not create contest post: {e}", ephemeral=True)
             return
+
+    # Unarchive the contest thread so the link resolves correctly in Discord
+    try:
+        contest_thread = bot.get_channel(contest_thread_id) or await bot.fetch_channel(contest_thread_id)
+        if isinstance(contest_thread, discord.Thread) and contest_thread.archived:
+            await contest_thread.edit(archived=False)
+    except Exception as e:
+        print(f"[GET-CONTEST] could not unarchive contest thread {contest_thread_id}: {e}")
 
     virtual_contest_history_log(interaction.user.id, best_slug, user_rating)
     virtual_stats_set_last_contest(interaction.user.id, best_slug)
