@@ -1,7 +1,7 @@
 import asyncio
 import html
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import discord
 from aiohttp import ClientSession
@@ -35,6 +35,7 @@ from .database import (
     leetcode_contest_post_save,
     leetcode_contest_post_set_rated,
     leetcode_contest_post_set_rankings_posted,
+    leetcode_contest_post_set_problems_posted,
     leetcode_contest_posts_get_unrated,
     linked_users_all,
     zerotrac_cache_get_all,
@@ -770,6 +771,26 @@ def build_contest_notif_embed(contest: dict, forum_thread_url: str) -> discord.E
     )
 
 
+def build_pre_contest_embed(contest: dict) -> discord.Embed:
+    """Countdown embed posted 24h before the contest (before problems are available)."""
+    title = contest.get("title") or "LeetCode Contest"
+    slug = contest.get("titleSlug") or ""
+    start_ts = contest.get("startTime") or 0
+
+    url = f"{LEETCODE_BASE}/contest/{slug}/" if slug else LEETCODE_BASE
+
+    desc_lines = ["Problems will be available when the contest starts."]
+    if start_ts:
+        desc_lines.append(f"\U0001f550 Starts <t:{start_ts}:R>")
+
+    return discord.Embed(
+        title=title,
+        url=url,
+        description="\n".join(desc_lines),
+        color=CONTEST_RECAP_COLOR,
+    )
+
+
 async def get_or_create_problem_post_archived(bot, slug: str) -> tuple[int | None, str]:
     """Like get_or_create_problem_post but immediately archives the thread after creation.
 
@@ -946,14 +967,18 @@ def _contest_difficulty_tag(questions: list[dict], ratings_by_slug: dict[str, fl
     return "Hard"
 
 
-async def post_leetcode_contest_live(
+async def post_pre_contest(
     bot,
     contest_type: str,
     *,
     force: bool = False,
     contests: list[dict] | None = None,
 ) -> tuple[bool, str]:
-    """Phase 1: post the contest forum thread + notif embed at contest start."""
+    """Phase 0: create forum thread + send notif 24h before contest starts (typically Friday).
+
+    Does NOT wait for contest start — fires as soon as we're within 24h of start_ts.
+    Thread is created with a countdown embed; problems are filled in by post_contest_problems.
+    """
     if not bot.http_session:
         return False, "http session not ready"
 
@@ -975,25 +1000,11 @@ async def post_leetcode_contest_live(
     if not force:
         last_slug = leetcode_get_contest_state(contest_type)
         if last_slug == slug:
-            return False, f"already posted live {contest_type} slug={slug}"
+            return False, f"already posted {contest_type} slug={slug}"
 
         now = int(datetime.now().timestamp())
-        if start_ts and now < start_ts:
-            return False, f"{contest_type} starts <t:{start_ts}:R>, too early to post live"
-
-    # Fetch contest questions via GraphQL
-    questions: list[dict] = []
-    try:
-        questions = await fetch_contest_questions(bot.http_session, slug)
-    except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
-
-    # Contest problems aren't in the public problem API yet while the contest is live,
-    # so skip individual problem post creation here — phase 2 handles that after the
-    # contest ends. Link problems to the LeetCode contest page for now.
-    forum_embed = build_contest_forum_embed(
-        contest, questions, {}, fallback_contest_slug=slug,
-    )
+        if start_ts and now < start_ts - 86400:
+            return False, f"{contest_type} starts <t:{start_ts}:R>, more than 24h away"
 
     forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type, 0)
     if not forum_channel_id:
@@ -1004,6 +1015,8 @@ async def post_leetcode_contest_live(
         return False, f"{contest_type} forum channel must be a forum channel"
 
     title = contest.get("title") or contest_type.title()
+    forum_embed = build_pre_contest_embed(contest)
+
     forum_thread_id: int | None = None
     forum_thread_url: str = ""
     try:
@@ -1012,7 +1025,7 @@ async def post_leetcode_contest_live(
             name=title[:100],
             embed=forum_embed,
             applied_tags=[unrated_tag],
-            reason=f"{contest_type.title()} contest post (live)",
+            reason=f"{contest_type.title()} contest post (pre-contest)",
         )
         forum_thread = result.thread if hasattr(result, "thread") else result
         forum_thread_id = forum_thread.id
@@ -1038,7 +1051,109 @@ async def post_leetcode_contest_live(
     await channel.send(embed=notif_embed)
 
     leetcode_set_contest_state(contest_type, slug, thread_id=forum_thread_id)
-    return True, f"posted live {contest_type} slug={slug}"
+    return True, f"posted pre-contest {contest_type} slug={slug}"
+
+
+async def post_contest_problems(
+    bot,
+    contest_type: str,
+) -> tuple[bool, str]:
+    """Phase 1: poll for contest problems after start and update the forum thread.
+
+    Polls every loop iteration (5 min) from contest start until problems are available
+    or 2h have elapsed (timeout → mark unavailable, zerotrac fills links later).
+    """
+    if not bot.http_session:
+        return False, "http session not ready"
+
+    slug = leetcode_get_contest_state(contest_type)
+    if not slug:
+        return False, f"{contest_type} no contest posted yet"
+
+    post = leetcode_contest_post_get(slug)
+    if not post:
+        return False, f"{contest_type} no post record for slug={slug}"
+
+    if post.get("problems_posted"):
+        return False, f"{contest_type} problems already posted for slug={slug}"
+
+    start_ts = post.get("start_time") or 0
+    now = int(datetime.now().timestamp())
+
+    if start_ts and now < start_ts:
+        return False, f"{contest_type} contest hasn't started yet, starts <t:{start_ts}:R>"
+
+    forum_thread_id = post["thread_id"]
+
+    # 2h timeout: give up if problems still not available
+    if start_ts and now > start_ts + 7200:
+        try:
+            unavailable_embed = discord.Embed(
+                title=slug.replace("-", " ").title(),
+                url=f"{LEETCODE_BASE}/contest/{slug}/",
+                description="Problems unavailable \u2014 ratings will appear here once published.",
+                color=CONTEST_RECAP_COLOR,
+            )
+            thread = bot.get_channel(forum_thread_id) or await bot.fetch_channel(forum_thread_id)
+            if isinstance(thread, discord.Thread):
+                try:
+                    starter = await thread.fetch_message(forum_thread_id)
+                    await starter.edit(embed=unavailable_embed)
+                except Exception:
+                    async for msg in thread.history(limit=1, oldest_first=True):
+                        await msg.edit(embed=unavailable_embed)
+                        break
+        except Exception as e:
+            print(f"[CONTEST/{contest_type.upper()}] failed to update thread with unavailable msg: {e}")
+        leetcode_contest_post_set_problems_posted(slug, 0)
+        return True, f"{contest_type} 2h timeout — problems unavailable for slug={slug}"
+
+    # Fetch questions
+    questions: list[dict] = []
+    try:
+        questions = await fetch_contest_questions(bot.http_session, slug)
+    except Exception as e:
+        print(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
+
+    if not questions:
+        return False, f"{contest_type} problems not available yet for slug={slug}"
+
+    # Create individual problem posts
+    question_thread_ids: dict[str, int] = {}
+    for q in questions:
+        q_slug = q.get("titleSlug") or ""
+        if not q_slug:
+            continue
+        try:
+            thread_id_q, err = await get_or_create_problem_post_archived(bot, q_slug)
+            if thread_id_q:
+                question_thread_ids[q_slug] = thread_id_q
+            elif err:
+                print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
+        except Exception as e:
+            print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
+
+    # Update thread embed with problem links
+    try:
+        mock_contest = {"title": slug.replace("-", " ").title(), "titleSlug": slug, "startTime": start_ts}
+        new_embed = build_contest_forum_embed(
+            mock_contest, questions, {}, question_thread_ids,
+            fallback_contest_slug=slug,
+        )
+        thread = bot.get_channel(forum_thread_id) or await bot.fetch_channel(forum_thread_id)
+        if isinstance(thread, discord.Thread):
+            try:
+                starter = await thread.fetch_message(forum_thread_id)
+                await starter.edit(embed=new_embed)
+            except Exception:
+                async for msg in thread.history(limit=1, oldest_first=True):
+                    await msg.edit(embed=new_embed)
+                    break
+    except Exception as e:
+        print(f"[CONTEST/{contest_type.upper()}] failed to update thread with problems: {e}")
+
+    leetcode_contest_post_set_problems_posted(slug, now)
+    return True, f"{contest_type} problems posted for slug={slug}"
 
 
 async def post_contest_rankings(
@@ -1046,35 +1161,56 @@ async def post_contest_rankings(
     contest_type: str,
     *,
     force: bool = False,
+    slug_override: str | None = None,
 ) -> tuple[bool, str]:
     """Phase 2: create problem posts, update contest thread embed, post rankings.
 
     Driven entirely from DB state — does not depend on the contests API, which
     rolls over to the next contest as soon as the current one ends.
+
+    slug_override: explicitly target a contest slug (e.g. "weekly-contest-490"),
+    bypassing the DB state lookup. Useful when the state has moved on.
     """
     if not bot.http_session:
         return False, "http session not ready"
 
-    # Phase 1 must be done — get slug from DB state
-    slug = leetcode_get_contest_state(contest_type)
-    if not slug:
-        return False, f"{contest_type} no contest posted yet (phase 1 pending)"
+    if slug_override:
+        slug = slug_override
+    else:
+        # Phase 1 must be done — get slug from DB state
+        slug = leetcode_get_contest_state(contest_type)
+        if not slug:
+            return False, f"{contest_type} no contest posted yet (phase 1 pending)"
 
     post = leetcode_contest_post_get(slug)
-    if not post:
-        return False, f"{contest_type} no post record for slug={slug}"
+    # post may be None if phase 1 was never run for this slug (e.g. manually specified)
 
-    start_time = post.get("start_time") or 0
+    start_time = (post.get("start_time") if post else None) or 0
     end_ts = start_time + 5400  # all LeetCode contests are 90 min
     title = slug.replace("-", " ").title()  # "Weekly Contest 490"
 
     if not force:
+        if not post:
+            return False, f"{contest_type} no post record for slug={slug} (use force=True or run /weekly first)"
+
         now = int(datetime.now().timestamp())
         if start_time and now < end_ts:
             return False, f"{contest_type} hasn't ended yet, ends <t:{end_ts}:R>"
 
         if post.get("rankings_posted"):
             return False, f"{contest_type} rankings already posted for slug={slug}"
+
+        # Give up on Friday of the week the contest ended
+        end_dt = datetime.utcfromtimestamp(end_ts)
+        days_to_friday = (4 - end_dt.weekday()) % 7 or 7
+        friday_ts = int(
+            (end_dt + timedelta(days=days_to_friday))
+            .replace(hour=23, minute=59, second=59)
+            .timestamp()
+        )
+        if now > friday_ts:
+            leetcode_contest_post_set_rankings_posted(slug)
+            return True, f"{contest_type} Friday deadline passed, no rankings for slug={slug}"
 
         if linked_users_all():
             if not await _ratings_ready(bot.http_session, title):
@@ -1104,7 +1240,7 @@ async def post_contest_rankings(
             print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
     # Update the contest thread embed with Discord problem links (ratings added by phase 3)
-    if questions:
+    if questions and post:
         forum_thread_id = post["thread_id"]
         try:
             new_embed = build_contest_forum_embed(
@@ -1129,7 +1265,8 @@ async def post_contest_rankings(
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
 
-    leetcode_contest_post_set_rankings_posted(slug)
+    if post:
+        leetcode_contest_post_set_rankings_posted(slug)
 
     if not rankings:
         return True, f"no participants for {contest_type} slug={slug}, skipping rankings post"
@@ -1518,11 +1655,28 @@ async def check_and_update_contest_ratings(bot) -> int:
                 continue
 
             # Rebuild embed with ratings now filled in
+            # Also create any missing problem posts (recovers from phase 1 failure)
             question_thread_ids: dict[str, int] = {}
             for q in questions:
                 existing = leetcode_get_problem_by_slug(q["titleSlug"])
                 if existing:
                     question_thread_ids[q["titleSlug"]] = existing["thread_id"]
+                else:
+                    try:
+                        thread_id_q, err = await get_or_create_problem_post_archived(bot, q["titleSlug"])
+                        if thread_id_q:
+                            question_thread_ids[q["titleSlug"]] = thread_id_q
+                        elif err:
+                            print(f"[RATINGS UPDATE] problem post '{q['titleSlug']}': {err}")
+                    except Exception as e:
+                        print(f"[RATINGS UPDATE] problem post '{q['titleSlug']}' failed: {e}")
+
+            # Correct questionIds: zerotrac stores internal IDs; replace with frontend
+            # display IDs from the DB (saved when problem posts were created).
+            for q in questions:
+                db_prob = leetcode_get_problem_by_slug(q["titleSlug"])
+                if db_prob and db_prob.get("question_id"):
+                    q["questionId"] = db_prob["question_id"]
 
             contest_id_en = problems[0].get("ContestID_en", contest_slug.replace("-", " ").title())
             mock_contest = {"title": contest_id_en, "titleSlug": contest_slug, "startTime": start_time}
@@ -1560,18 +1714,27 @@ async def leetcode_contest_scheduler(bot):
         try:
             contests = await fetch_leetcode_contests(bot.http_session)
 
-            # Phase 1: post forum thread + notif embed for contests that have started
+            # Phase 0: pre-contest thread (24h before start, i.e. Friday)
             for ctype in ("weekly", "biweekly"):
                 try:
-                    posted, msg = await post_leetcode_contest_live(
+                    posted, msg = await post_pre_contest(
                         bot, ctype, force=False, contests=contests,
                     )
                     if posted:
                         print(f"[CONTEST/{ctype.upper()}] {msg}")
                 except Exception as e:
-                    print(f"[CONTEST/{ctype.upper()}] live post error:", repr(e))
+                    print(f"[CONTEST/{ctype.upper()}] pre-contest post error:", repr(e))
 
-            # Phase 2: post rankings embed for ended contests once ratings are ready
+            # Phase 1: update thread with problems (polls after contest starts)
+            for ctype in ("weekly", "biweekly"):
+                try:
+                    posted, msg = await post_contest_problems(bot, ctype)
+                    if posted:
+                        print(f"[CONTEST/{ctype.upper()}] {msg}")
+                except Exception as e:
+                    print(f"[CONTEST/{ctype.upper()}] problems post error:", repr(e))
+
+            # Phase 2: rankings (contest end → Friday)
             for ctype in ("weekly", "biweekly"):
                 try:
                     posted, msg = await post_contest_rankings(bot, ctype, force=False)
@@ -1580,7 +1743,7 @@ async def leetcode_contest_scheduler(bot):
                 except Exception as e:
                     print(f"[CONTEST/{ctype.upper()}] rankings post error:", repr(e))
 
-            # Phase 3: update forum post embeds once zerotrac ratings are published
+            # Phase 3: zerotrac updates for all unrated posts
             try:
                 n = await check_and_update_contest_ratings(bot)
                 if n:
@@ -1588,40 +1751,43 @@ async def leetcode_contest_scheduler(bot):
             except Exception as e:
                 print("[RATINGS UPDATE] error:", repr(e))
 
-            # Compute sleep time.
-            # Phase 2 check is DB-driven (API rolls over before rankings are ready).
-            # Phase 1 check uses the API to know when the next contest starts.
+            # Sleep logic
             now = int(datetime.now().timestamp())
+            any_polling_problems = False
             any_pending_rankings = False
             next_wake_times: list[int] = []
 
-            # Phase 2: check DB for any posted contest with rankings still pending
             for ctype in ("weekly", "biweekly"):
-                state_slug = leetcode_get_contest_state(ctype)
-                if state_slug:
-                    db_post = leetcode_contest_post_get(state_slug)
-                    if not (db_post and db_post.get("rankings_posted")):
-                        start_time = (db_post or {}).get("start_time") or 0
-                        if start_time:
-                            end_ts = start_time + 5400
-                            if end_ts <= now:
-                                any_pending_rankings = True
-                            else:
-                                next_wake_times.append(end_ts)
+                slug = leetcode_get_contest_state(ctype)
+                post = leetcode_contest_post_get(slug) if slug else None
+                start_time = (post or {}).get("start_time") or 0
+                end_ts = start_time + 5400
 
-            # Phase 1: check API for upcoming contests not yet posted
+                if post and not post["problems_posted"]:
+                    if start_time and now >= start_time:
+                        any_polling_problems = True       # actively polling for problems
+                    elif start_time > now:
+                        next_wake_times.append(start_time)  # wake at contest start
+
+                if post and post["problems_posted"] and not post["rankings_posted"]:
+                    if start_time and now >= end_ts:
+                        any_pending_rankings = True
+                    elif end_ts > now:
+                        next_wake_times.append(end_ts)  # wake at contest end
+
+            # Pre-contest: wake 24h before upcoming contest if not yet posted
             for c in contests:
                 slug = c.get("titleSlug") or ""
                 ctype = _classify_contest(slug)
-                if not ctype:
-                    continue
-                state_slug = leetcode_get_contest_state(ctype)
-                if state_slug != slug:
-                    start_ts = c.get("startTime") or 0
-                    if start_ts > now:
-                        next_wake_times.append(start_ts)
+                if ctype and leetcode_get_contest_state(ctype) != slug:
+                    pre_ts = (c.get("startTime") or 0) - 86400
+                    if pre_ts > now:
+                        next_wake_times.append(pre_ts)
 
-            if any_pending_rankings:
+            if any_polling_problems:
+                print("[CONTEST] polling for problems, rechecking in 5 min")
+                await asyncio.sleep(300)
+            elif any_pending_rankings:
                 print("[CONTEST] waiting for ratings, rechecking in 1h")
                 await asyncio.sleep(3600)
             elif next_wake_times:

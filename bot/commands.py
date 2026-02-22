@@ -17,7 +17,8 @@ from .config import (
 from .spotify import dm_spotify_link
 from .leetcode import (
     post_leetcode_contest,
-    post_leetcode_contest_live,
+    post_pre_contest,
+    post_contest_problems,
     post_contest_rankings,
     post_leetcode_problem,
     post_leetcode_weekly_premium,
@@ -136,49 +137,51 @@ async def daily(interaction: discord.Interaction, force: bool = True):
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
-@bot.tree.command(name="weekly", description="(Admin) Post the current LeetCode weekly contest (manual trigger).")
+@bot.tree.command(name="weekly", description="(Admin) Post the pre-contest thread for the upcoming weekly contest.")
 @app_commands.describe(force="If true, post even if it was already posted.")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def weekly(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
-        posted, msg = await post_leetcode_contest_live(bot, "weekly", force=force)
+        posted, msg = await post_pre_contest(bot, "weekly", force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
-@bot.tree.command(name="biweekly", description="(Admin) Post the current LeetCode biweekly contest (manual trigger).")
+@bot.tree.command(name="biweekly", description="(Admin) Post the pre-contest thread for the upcoming biweekly contest.")
 @app_commands.describe(force="If true, post even if it was already posted.")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def biweekly(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
-        posted, msg = await post_leetcode_contest_live(bot, "biweekly", force=force)
+        posted, msg = await post_pre_contest(bot, "biweekly", force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
-@bot.tree.command(name="weekly-rankings", description="(Admin) Post rankings for the last weekly contest (manual trigger).")
-@app_commands.describe(force="If true, post even if already posted.")
+@bot.tree.command(name="weekly-rankings", description="(Admin) Post rankings for a weekly contest (manual trigger).")
+@app_commands.describe(number="Contest number (e.g. 490). Defaults to last posted contest.", force="If true, post even if already posted.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def weekly_rankings(interaction: discord.Interaction, force: bool = True):
+async def weekly_rankings(interaction: discord.Interaction, number: int | None = None, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
-        posted, msg = await post_contest_rankings(bot, "weekly", force=force)
+        slug_override = f"weekly-contest-{number}" if number else None
+        posted, msg = await post_contest_rankings(bot, "weekly", force=force, slug_override=slug_override)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
-@bot.tree.command(name="biweekly-rankings", description="(Admin) Post rankings for the last biweekly contest (manual trigger).")
-@app_commands.describe(force="If true, post even if already posted.")
+@bot.tree.command(name="biweekly-rankings", description="(Admin) Post rankings for a biweekly contest (manual trigger).")
+@app_commands.describe(number="Contest number (e.g. 177). Defaults to last posted contest.", force="If true, post even if already posted.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def biweekly_rankings(interaction: discord.Interaction, force: bool = True):
+async def biweekly_rankings(interaction: discord.Interaction, number: int | None = None, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
-        posted, msg = await post_contest_rankings(bot, "biweekly", force=force)
+        slug_override = f"biweekly-contest-{number}" if number else None
+        posted, msg = await post_contest_rankings(bot, "biweekly", force=force, slug_override=slug_override)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
@@ -320,10 +323,11 @@ async def backfill_test(interaction: discord.Interaction):
 
         contest_id_en = problems[0].get("ContestID_en", slug.replace("-", " ").title())
         mock_contest = {"title": contest_id_en, "titleSlug": slug, "startTime": 0}
-        questions = [
-            {"questionId": str(p["ID"]), "title": p["Title"], "titleSlug": p["TitleSlug"]}
-            for p in problems
-        ]
+        questions = []
+        for p in problems:
+            db_prob = leetcode_get_problem_by_slug(p["TitleSlug"])
+            frontend_id = db_prob["question_id"] if db_prob and db_prob.get("question_id") else str(p["ID"])
+            questions.append({"questionId": frontend_id, "title": p["Title"], "titleSlug": p["TitleSlug"]})
 
         try:
             tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
@@ -478,10 +482,11 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
 
         contest_id_en = problems[0].get("ContestID_en", slug.replace("-", " ").title())
         mock_contest = {"title": contest_id_en, "titleSlug": slug, "startTime": 0}
-        questions = [
-            {"questionId": str(p["ID"]), "title": p["Title"], "titleSlug": p["TitleSlug"]}
-            for p in problems
-        ]
+        questions = []
+        for p in problems:
+            db_prob = leetcode_get_problem_by_slug(p["TitleSlug"])
+            frontend_id = db_prob["question_id"] if db_prob and db_prob.get("question_id") else str(p["ID"])
+            questions.append({"questionId": frontend_id, "title": p["Title"], "titleSlug": p["TitleSlug"]})
 
         try:
             tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
