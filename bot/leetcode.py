@@ -1129,7 +1129,10 @@ async def post_contest_rankings(
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
 
-    rankings_embed = build_rankings_embed(rankings, title=f"{title} — Rankings")
+    leetcode_contest_post_set_rankings_posted(slug)
+
+    if not rankings:
+        return True, f"no participants for {contest_type} slug={slug}, skipping rankings post"
 
     channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
     if not channel_id:
@@ -1139,9 +1142,7 @@ async def post_contest_rankings(
     if not isinstance(channel, discord.TextChannel):
         return False, f"{contest_type} notif channel must be a text channel"
 
-    await channel.send(embed=rankings_embed)
-
-    leetcode_contest_post_set_rankings_posted(slug)
+    await channel.send(embed=build_rankings_embed(rankings, title=f"{title} — Rankings"))
     return True, f"posted rankings for {contest_type} slug={slug}"
 
 
