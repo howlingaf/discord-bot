@@ -1076,7 +1076,7 @@ async def post_contest_rankings(
         if post.get("rankings_posted"):
             return False, f"{contest_type} rankings already posted for slug={slug}"
 
-        if linked_users_all() and now < end_ts + 20 * 60:
+        if linked_users_all():
             if not await _ratings_ready(bot.http_session, title):
                 return False, f"{contest_type} ratings not yet available, will retry"
 
@@ -1142,7 +1142,7 @@ async def post_contest_rankings(
     if not isinstance(channel, discord.TextChannel):
         return False, f"{contest_type} notif channel must be a text channel"
 
-    await channel.send(embed=build_rankings_embed(rankings, title=f"{title} — Rankings"))
+    await channel.send(embed=build_rankings_embed(rankings, title=f"{title} Rankings"))
     return True, f"posted rankings for {contest_type} slug={slug}"
 
 
@@ -1259,7 +1259,7 @@ async def post_leetcode_contest(
     try:
         rankings = await _build_contest_rankings(bot, title)
         if rankings:
-            rankings_embed = build_rankings_embed(rankings)
+            rankings_embed = build_rankings_embed(rankings, title=f"{title} Rankings")
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
 
@@ -1622,8 +1622,8 @@ async def leetcode_contest_scheduler(bot):
                         next_wake_times.append(start_ts)
 
             if any_pending_rankings:
-                print("[CONTEST] waiting for ratings, rechecking in 2.5 min")
-                await asyncio.sleep(150)
+                print("[CONTEST] waiting for ratings, rechecking in 1h")
+                await asyncio.sleep(3600)
             elif next_wake_times:
                 wait = min(next_wake_times) - now
                 print(f"[CONTEST] sleeping {wait}s until next event")
