@@ -114,17 +114,22 @@ def db_init():
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS leetcode_contest_posts (
-          contest_slug TEXT PRIMARY KEY,
-          contest_type TEXT NOT NULL,
-          thread_id    INTEGER NOT NULL,
-          created_at   INTEGER NOT NULL DEFAULT 0,
-          start_time   INTEGER NOT NULL DEFAULT 0,
-          rated        INTEGER NOT NULL DEFAULT 0
+          contest_slug     TEXT PRIMARY KEY,
+          contest_type     TEXT NOT NULL,
+          thread_id        INTEGER NOT NULL,
+          created_at       INTEGER NOT NULL DEFAULT 0,
+          start_time       INTEGER NOT NULL DEFAULT 0,
+          rated            INTEGER NOT NULL DEFAULT 0,
+          rankings_posted  INTEGER NOT NULL DEFAULT 0
         )
         """)
 
         existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(leetcode_contest_posts)")}
-        for col in ("start_time INTEGER NOT NULL DEFAULT 0", "rated INTEGER NOT NULL DEFAULT 0"):
+        for col in (
+            "start_time INTEGER NOT NULL DEFAULT 0",
+            "rated INTEGER NOT NULL DEFAULT 0",
+            "rankings_posted INTEGER NOT NULL DEFAULT 0",
+        ):
             name = col.split()[0]
             if name not in existing_cols:
                 conn.execute(f"ALTER TABLE leetcode_contest_posts ADD COLUMN {col}")
@@ -453,12 +458,12 @@ def leetcode_set_premium_weekly_state(*, question_id: str, title_slug: str, date
 def leetcode_contest_post_get(contest_slug: str) -> dict | None:
     with _db() as conn:
         row = conn.execute(
-            "SELECT contest_slug, contest_type, thread_id, created_at FROM leetcode_contest_posts WHERE contest_slug=?",
+            "SELECT contest_slug, contest_type, thread_id, created_at, rankings_posted FROM leetcode_contest_posts WHERE contest_slug=?",
             (contest_slug,),
         ).fetchone()
         if not row:
             return None
-        return {"contest_slug": row[0], "contest_type": row[1], "thread_id": row[2], "created_at": row[3]}
+        return {"contest_slug": row[0], "contest_type": row[1], "thread_id": row[2], "created_at": row[3], "rankings_posted": bool(row[4])}
 
 
 def leetcode_contest_post_save(contest_slug: str, contest_type: str, thread_id: int, *, start_time: int = 0, rated: int = 0):
@@ -474,6 +479,12 @@ def leetcode_contest_post_save(contest_slug: str, contest_type: str, thread_id: 
                  rated=excluded.rated""",
             (contest_slug, contest_type, thread_id, now, start_time, rated),
         )
+        conn.commit()
+
+
+def leetcode_contest_post_set_rankings_posted(contest_slug: str):
+    with _db() as conn:
+        conn.execute("UPDATE leetcode_contest_posts SET rankings_posted=1 WHERE contest_slug=?", (contest_slug,))
         conn.commit()
 
 

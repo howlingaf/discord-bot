@@ -17,6 +17,7 @@ from .config import (
 from .spotify import dm_spotify_link
 from .leetcode import (
     post_leetcode_contest,
+    post_leetcode_contest_live,
     post_leetcode_problem,
     post_leetcode_weekly_premium,
     get_or_create_problem_post,
@@ -140,7 +141,7 @@ async def daily(interaction: discord.Interaction, force: bool = True):
 async def weekly(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
-        posted, msg = await post_leetcode_contest(bot, "weekly", force=force)
+        posted, msg = await post_leetcode_contest_live(bot, "weekly", force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
@@ -152,7 +153,7 @@ async def weekly(interaction: discord.Interaction, force: bool = True):
 async def biweekly(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
-        posted, msg = await post_leetcode_contest(bot, "biweekly", force=force)
+        posted, msg = await post_leetcode_contest_live(bot, "biweekly", force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
