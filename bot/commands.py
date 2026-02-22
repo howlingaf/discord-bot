@@ -18,6 +18,7 @@ from .spotify import dm_spotify_link
 from .leetcode import (
     post_leetcode_contest,
     post_leetcode_contest_live,
+    post_contest_rankings,
     post_leetcode_problem,
     post_leetcode_weekly_premium,
     get_or_create_problem_post,
@@ -154,6 +155,30 @@ async def biweekly(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
         posted, msg = await post_leetcode_contest_live(bot, "biweekly", force=force)
+        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="weekly-rankings", description="(Admin) Post rankings for the last weekly contest (manual trigger).")
+@app_commands.describe(force="If true, post even if already posted.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def weekly_rankings(interaction: discord.Interaction, force: bool = True):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        posted, msg = await post_contest_rankings(bot, "weekly", force=force)
+        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="biweekly-rankings", description="(Admin) Post rankings for the last biweekly contest (manual trigger).")
+@app_commands.describe(force="If true, post even if already posted.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def biweekly_rankings(interaction: discord.Interaction, force: bool = True):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        posted, msg = await post_contest_rankings(bot, "biweekly", force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
