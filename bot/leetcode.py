@@ -771,6 +771,14 @@ def build_contest_notif_embed(contest: dict, forum_thread_url: str) -> discord.E
     )
 
 
+def _apply_frontend_ids(questions: list[dict]) -> None:
+    """Replace GraphQL/zerotrac internal questionIds with the frontend display IDs stored in the DB."""
+    for q in questions:
+        db_prob = leetcode_get_problem_by_slug(q.get("titleSlug") or "")
+        if db_prob and db_prob.get("question_id"):
+            q["questionId"] = db_prob["question_id"]
+
+
 def build_pre_contest_embed(contest: dict) -> discord.Embed:
     """Countdown embed posted 24h before the contest (before problems are available)."""
     title = contest.get("title") or "LeetCode Contest"
@@ -1133,6 +1141,9 @@ async def post_contest_problems(
         except Exception as e:
             print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
+    # Correct questionIds: GraphQL returns internal IDs; use frontend IDs from DB
+    _apply_frontend_ids(questions)
+
     # Update thread embed with problem links
     try:
         mock_contest = {"title": slug.replace("-", " ").title(), "titleSlug": slug, "startTime": start_ts}
@@ -1238,6 +1249,9 @@ async def post_contest_rankings(
                 print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
         except Exception as e:
             print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
+
+    # Correct questionIds: GraphQL returns internal IDs; use frontend IDs from DB
+    _apply_frontend_ids(questions)
 
     # Update the contest thread embed with Discord problem links (ratings added by phase 3)
     if questions and post:
@@ -1351,6 +1365,9 @@ async def post_leetcode_contest(
                 print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
         except Exception as e:
             print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
+
+    # Correct questionIds: GraphQL returns internal IDs; use frontend IDs from DB
+    _apply_frontend_ids(questions)
 
     # Create the contest thread in the dedicated forum channel
     forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type, 0)
@@ -1671,12 +1688,8 @@ async def check_and_update_contest_ratings(bot) -> int:
                     except Exception as e:
                         print(f"[RATINGS UPDATE] problem post '{q['titleSlug']}' failed: {e}")
 
-            # Correct questionIds: zerotrac stores internal IDs; replace with frontend
-            # display IDs from the DB (saved when problem posts were created).
-            for q in questions:
-                db_prob = leetcode_get_problem_by_slug(q["titleSlug"])
-                if db_prob and db_prob.get("question_id"):
-                    q["questionId"] = db_prob["question_id"]
+            # Correct questionIds: zerotrac/GraphQL use internal IDs; use frontend IDs from DB
+            _apply_frontend_ids(questions)
 
             contest_id_en = problems[0].get("ContestID_en", contest_slug.replace("-", " ").title())
             mock_contest = {"title": contest_id_en, "titleSlug": contest_slug, "startTime": start_time}
