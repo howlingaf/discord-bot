@@ -1275,6 +1275,8 @@ async def post_leetcode_contest(
     await channel.send(embeds=embeds)
 
     leetcode_set_contest_state(contest_type, slug, thread_id=forum_thread_id)
+    # Mark rankings as done so phase 2 doesn't re-post them
+    leetcode_contest_post_set_rankings_posted(slug)
     return True, f"posted {contest_type} slug={slug}"
 
 
