@@ -119,10 +119,9 @@ def make_web_app(bot_instance) -> web.Application:
             raise web.HTTPBadRequest(text="Invalid JSON")
 
         slug = payload.get("slug") or ""
-        user = payload.get("user") or ""
-        url = payload.get("url") or ""
-        if not slug or not user or not url:
-            raise web.HTTPBadRequest(text="Missing slug, user, or url")
+        solutions = payload.get("solutions") or []
+        if not slug or not solutions:
+            raise web.HTTPBadRequest(text="Missing slug or solutions")
 
         from .database import leetcode_get_problem_by_slug
 
@@ -135,9 +134,16 @@ def make_web_app(bot_instance) -> web.Application:
         async def _post():
             try:
                 thread = bot_instance.get_channel(thread_id) or await bot_instance.fetch_channel(thread_id)
-                content = f"**{user}** submitted a solution!\n<{url}>"
-                await thread.send(content)
-                print(f"[POST-SOLUTION] Posted {user}'s solution to {slug}")
+                lines = []
+                for s in solutions:
+                    user = s.get("user") or "anonymous"
+                    url = s.get("url") or ""
+                    line = f"**{user}** submitted a solution!"
+                    if url:
+                        line += f"\n<{url}>"
+                    lines.append(line)
+                await thread.send("\n\n".join(lines))
+                print(f"[POST-SOLUTION] Posted {len(solutions)} solution(s) to {slug}")
             except Exception as e:
                 print(f"[POST-SOLUTION] Failed: {e!r}")
 
