@@ -237,6 +237,25 @@ async def premium_weekly(interaction: discord.Interaction, force: bool = True):
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
+@bot.tree.command(name="post-solution", description="(Admin) Post a solution submission to a problem's forum thread.")
+@app_commands.describe(slug="Problem slug (e.g. clone-graph)", user="Username to credit", url="Submission URL")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def post_solution(interaction: discord.Interaction, slug: str, user: str, url: str):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        existing = leetcode_get_problem_by_slug(slug)
+        if not existing:
+            await interaction.followup.send(f"\u274c No forum post found for '{slug}'", ephemeral=True)
+            return
+
+        thread = bot.get_channel(existing["thread_id"]) or await bot.fetch_channel(existing["thread_id"])
+        content = f"**{user}** submitted a solution!\n<{url}>"
+        await thread.send(content)
+        await interaction.followup.send(f"\u2705 Posted {user}'s solution to {slug}", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
 @bot.tree.command(name="update-recap", description="(Admin) Add a problem to the latest stream recap embed.")
 @app_commands.describe(slug="Problem slug (e.g. clone-graph)")
 @app_commands.checks.has_permissions(manage_messages=True)
