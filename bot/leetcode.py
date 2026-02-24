@@ -1511,8 +1511,8 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
             old_thread_id = old_problem["thread_id"]
 
     if not force:
-        if old_state and old_state["date"] == date:
-            return False, f"already posted for week of {date}"
+        if old_state and old_state["date"] and date <= old_state["date"]:
+            return False, f"already posted for week of {old_state['date']}, skipping {date}"
 
     forum = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
 
@@ -1603,15 +1603,27 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
 async def leetcode_premium_weekly_scheduler(bot):
     await bot.wait_until_ready()
     await asyncio.sleep(4)
-    print("\u2705 LeetCode premium weekly scheduler started (polling every 5 min)")
+    print("\u2705 LeetCode premium weekly scheduler started")
     while not bot.is_closed():
+        # Only start polling when ~1 week has passed since the last post
+        state = leetcode_get_premium_weekly_state()
+        if state and state.get("date"):
+            try:
+                last_date = datetime.strptime(state["date"], "%Y-%m-%d").date()
+                days_since = (datetime.utcnow().date() - last_date).days
+                if days_since < 6:
+                    await asyncio.sleep(21600)  # 6 hours — not due yet
+                    continue
+            except ValueError:
+                pass
+
         try:
             posted, msg = await post_leetcode_weekly_premium(bot, force=False)
             if posted:
                 print(f"[PREMIUM WEEKLY] {msg}")
         except Exception as e:
             print("[PREMIUM WEEKLY] error:", repr(e))
-        await asyncio.sleep(300)
+        await asyncio.sleep(3600)  # poll hourly once due
 
 
 async def check_and_update_contest_ratings(bot) -> int:
