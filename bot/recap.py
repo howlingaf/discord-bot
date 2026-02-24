@@ -85,27 +85,37 @@ async def process_recap(bot, payload: dict):
 
     session: ClientSession = bot.http_session
 
-    # Only recap problems that were worked on stream (from !lt commands)
-    # Plus any problems chatters submitted for
+    # Build initial problem list from stream tracking + chatter submissions
     problem_slugs: list[str] = list(stream_problems)
     for cs in chatter_submissions:
         slug = cs.get("slug") or ""
         if slug and slug not in problem_slugs:
             problem_slugs.append(slug)
 
+    # Always fetch streamer submissions from API so none are missed
+    streamer_subs = await fetch_streamer_submissions(session, stream_start, stream_end)
+
+    # Merge with any explicitly provided submissions from the payload
+    if payload.get("streamer_submissions"):
+        seen_ids = {str(s.get("id")) for s in streamer_subs if s.get("id")}
+        for sub in payload["streamer_submissions"]:
+            if str(sub.get("id") or "") not in seen_ids:
+                streamer_subs.append(sub)
+
+    print(f"[RECAP] Found {len(streamer_subs)} streamer submissions in window")
+
+    # Auto-include problems the streamer submitted for during the stream
+    for sub in streamer_subs:
+        slug = sub.get("titleSlug") or ""
+        if slug and slug not in problem_slugs:
+            problem_slugs.append(slug)
+            stream_problems.append(slug)
+
     if not problem_slugs:
         print("[RECAP] No stream problems to recap")
         return
 
     print(f"[RECAP] Problems to recap: {problem_slugs}")
-
-    # Use explicit streamer_submissions if provided, otherwise fetch from API
-    if "streamer_submissions" in payload:
-        streamer_subs = payload["streamer_submissions"] or []
-        print(f"[RECAP] Using {len(streamer_subs)} explicit streamer submissions")
-    else:
-        streamer_subs = await fetch_streamer_submissions(session, stream_start, stream_end)
-        print(f"[RECAP] Found {len(streamer_subs)} streamer submissions in window")
 
     # Pick best streamer submission per problem:
     # prefer last accepted, otherwise last submission
