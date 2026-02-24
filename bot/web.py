@@ -105,6 +105,45 @@ def make_web_app(bot_instance) -> web.Application:
         asyncio.create_task(_run_recap())
         return web.json_response({"status": "accepted"})
 
+    # ---- Post Solution ----
+    @routes.post("/post-solution")
+    async def post_solution(request: web.Request):
+        auth = request.headers.get("Authorization", "")
+        expected = f"Bearer {RECAP_SECRET}"
+        if not RECAP_SECRET or auth != expected:
+            raise web.HTTPUnauthorized(text="Invalid or missing auth token")
+
+        try:
+            payload = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(text="Invalid JSON")
+
+        slug = payload.get("slug") or ""
+        user = payload.get("user") or ""
+        url = payload.get("url") or ""
+        if not slug or not user or not url:
+            raise web.HTTPBadRequest(text="Missing slug, user, or url")
+
+        from .database import leetcode_get_problem_by_slug
+
+        existing = leetcode_get_problem_by_slug(slug)
+        if not existing:
+            raise web.HTTPNotFound(text=f"No forum post found for '{slug}'")
+
+        thread_id = existing["thread_id"]
+
+        async def _post():
+            try:
+                thread = bot_instance.get_channel(thread_id) or await bot_instance.fetch_channel(thread_id)
+                content = f"**{user}** submitted a solution!\n<{url}>"
+                await thread.send(content)
+                print(f"[POST-SOLUTION] Posted {user}'s solution to {slug}")
+            except Exception as e:
+                print(f"[POST-SOLUTION] Failed: {e!r}")
+
+        asyncio.create_task(_post())
+        return web.json_response({"status": "accepted"})
+
     app = web.Application()
     app.add_routes(routes)
     return app
