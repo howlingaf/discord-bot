@@ -13,6 +13,7 @@ from .config import (
     LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
     LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
     LEETCODE_PROBLEMS_CHANNEL_ID,
+    LEETCODE_RECAP_CHANNEL_ID,
 )
 from .spotify import dm_spotify_link
 from .leetcode import (
@@ -232,6 +233,62 @@ async def premium_weekly(interaction: discord.Interaction, force: bool = True):
     try:
         posted, msg = await post_leetcode_weekly_premium(bot, force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="update-recap", description="(Admin) Add a problem to the latest stream recap embed.")
+@app_commands.describe(slug="Problem slug (e.g. clone-graph)")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def update_recap(interaction: discord.Interaction, slug: str):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        from .recap import resolve_slug_to_question_id
+
+        session = bot.http_session
+        if not session:
+            await interaction.followup.send("\u274c Bot HTTP session not ready", ephemeral=True)
+            return
+
+        question_id = await resolve_slug_to_question_id(session, slug)
+        if not question_id:
+            await interaction.followup.send(f"\u274c Could not resolve slug '{slug}'", ephemeral=True)
+            return
+
+        thread_id, err = await get_or_create_problem_post(bot, question_id)
+        if not thread_id:
+            await interaction.followup.send(f"\u274c Could not get/create post: {err}", ephemeral=True)
+            return
+
+        channel = bot.get_channel(LEETCODE_RECAP_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_RECAP_CHANNEL_ID)
+
+        last_msg = None
+        async for msg in channel.history(limit=10):
+            if msg.author == bot.user and msg.embeds and msg.embeds[0].title == "Stream Recap":
+                last_msg = msg
+                break
+
+        if not last_msg:
+            await interaction.followup.send("\u274c No recent recap message found", ephemeral=True)
+            return
+
+        embed = last_msg.embeds[0]
+        thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
+        problem_name = slug.replace("-", " ").title()
+        new_line = f"[{question_id}. {problem_name}]({thread_url})"
+
+        desc = embed.description or ""
+        if new_line in desc:
+            await interaction.followup.send(f"\u2139\ufe0f {question_id}. {problem_name} already in recap", ephemeral=True)
+            return
+
+        new_embed = discord.Embed(
+            title=embed.title,
+            description=(desc + "\n\n" + new_line).strip(),
+            color=embed.color,
+        )
+        await last_msg.edit(embed=new_embed)
+        await interaction.followup.send(f"\u2705 Added {question_id}. {problem_name} to recap", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
