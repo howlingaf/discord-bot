@@ -459,8 +459,8 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
             )
         except Exception as e:
             print("[PROBLEM] forum post create failed:", repr(e))
-    elif daily_tag and thread_id:
-        # Thread already exists — apply the Daily tag if not already present
+    if daily_tag and thread_id:
+        # Apply the Daily tag if not already present
         try:
             existing_thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
             if isinstance(existing_thread, discord.Thread):
@@ -470,7 +470,7 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
             print(f"[DAILY TAG] Failed to apply tag to thread {thread_id}: {e}")
 
     # Remove Daily tag from previous daily's thread
-    if daily_tag and old_thread_id and old_thread_id != thread_id:
+    if daily_tag and thread_id and old_thread_id and old_thread_id != thread_id:
         try:
             old_thread = bot.get_channel(old_thread_id) or await bot.fetch_channel(old_thread_id)
             if isinstance(old_thread, discord.Thread):
