@@ -1,7 +1,7 @@
 import asyncio
 import html
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import discord
 from aiohttp import ClientSession
@@ -579,6 +579,18 @@ def _classify_contest(title_slug: str) -> str | None:
     if title_slug.startswith("biweekly-contest"):
         return "biweekly"
     return None
+
+
+def _next_contest_deadline(contests: list[dict], contest_type: str, *, fallback_after: int) -> int:
+    """Return timestamp 24h before the next contest of *contest_type*.
+    Falls back to 7 days after *fallback_after* if no match in *contests*."""
+    for c in contests:
+        slug = c.get("titleSlug") or ""
+        if _classify_contest(slug) == contest_type:
+            start = c.get("startTime") or 0
+            if start > fallback_after:
+                return start - 86400
+    return fallback_after + 7 * 86400
 
 
 async def fetch_leetcode_csrf(session: ClientSession) -> str:
@@ -1173,6 +1185,7 @@ async def post_contest_rankings(
     *,
     force: bool = False,
     slug_override: str | None = None,
+    contests: list[dict] | None = None,
 ) -> tuple[bool, str]:
     """Phase 2: create problem posts, update contest thread embed, post rankings.
 
@@ -1211,17 +1224,11 @@ async def post_contest_rankings(
         if post.get("rankings_posted"):
             return False, f"{contest_type} rankings already posted for slug={slug}"
 
-        # Give up on Friday of the week the contest ended
-        end_dt = datetime.utcfromtimestamp(end_ts)
-        days_to_friday = (4 - end_dt.weekday()) % 7 or 7
-        friday_ts = int(
-            (end_dt + timedelta(days=days_to_friday))
-            .replace(hour=23, minute=59, second=59)
-            .timestamp()
-        )
-        if now > friday_ts:
+        # Give up 24h before the next contest of the same type
+        deadline_ts = _next_contest_deadline(contests or [], contest_type, fallback_after=end_ts)
+        if now > deadline_ts:
             leetcode_contest_post_set_rankings_posted(slug)
-            return True, f"{contest_type} Friday deadline passed, no rankings for slug={slug}"
+            return True, f"{contest_type} deadline passed, no rankings for slug={slug}"
 
         if linked_users_all():
             if not await _ratings_ready(bot.http_session, title):
@@ -1762,7 +1769,7 @@ async def leetcode_contest_scheduler(bot):
             # Phase 2: rankings (contest end → Friday)
             for ctype in ("weekly", "biweekly"):
                 try:
-                    posted, msg = await post_contest_rankings(bot, ctype, force=False)
+                    posted, msg = await post_contest_rankings(bot, ctype, force=False, contests=contests)
                     if posted:
                         print(f"[CONTEST/{ctype.upper()}] {msg}")
                 except Exception as e:
@@ -1810,18 +1817,20 @@ async def leetcode_contest_scheduler(bot):
                         next_wake_times.append(pre_ts)
 
             if any_polling_problems:
-                print("[CONTEST] polling for problems, rechecking in 5 min")
-                await asyncio.sleep(300)
+                sleep_time = 300
             elif any_pending_rankings:
-                print("[CONTEST] waiting for ratings, rechecking in 1h")
-                await asyncio.sleep(3600)
+                sleep_time = 86400
             elif next_wake_times:
-                wait = min(next_wake_times) - now
-                print(f"[CONTEST] sleeping {wait}s until next event")
-                await asyncio.sleep(max(wait, 60))
+                sleep_time = min(next_wake_times) - now
             else:
-                print("[CONTEST] no pending work, rechecking in 6h")
-                await asyncio.sleep(6 * 60 * 60)
+                sleep_time = 6 * 60 * 60
+
+            # Also respect scheduled wake times even during active polling
+            if next_wake_times:
+                sleep_time = min(sleep_time, min(next_wake_times) - now)
+
+            print(f"[CONTEST] sleeping {max(sleep_time, 60)}s")
+            await asyncio.sleep(max(sleep_time, 60))
 
         except Exception as e:
             print("[CONTEST] error:", repr(e))
