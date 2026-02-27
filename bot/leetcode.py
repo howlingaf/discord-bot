@@ -460,12 +460,14 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
         except Exception as e:
             print("[PROBLEM] forum post create failed:", repr(e))
     if daily_tag and thread_id:
-        # Apply the Daily tag if not already present
+        # Apply the Daily tag and unarchive so people can discuss
         try:
             existing_thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
             if isinstance(existing_thread, discord.Thread):
-                if not any(t.id == daily_tag.id for t in existing_thread.applied_tags):
-                    await existing_thread.edit(applied_tags=list(existing_thread.applied_tags) + [daily_tag])
+                new_tags = list(existing_thread.applied_tags)
+                if not any(t.id == daily_tag.id for t in new_tags):
+                    new_tags.append(daily_tag)
+                await existing_thread.edit(archived=False, applied_tags=new_tags)
         except Exception as e:
             print(f"[DAILY TAG] Failed to apply tag to thread {thread_id}: {e}")
 
@@ -963,22 +965,22 @@ def _contest_difficulty_tag(questions: list[dict], ratings_by_slug: dict[str, fl
 
     Uses the credit field (GraphQL) if available, else falls back to Q-index
     weights (3/4/5/6). Returns 'Easy' (<1750), 'Medium' (1750-1950),
-    'Hard' (>=1950), or 'Unrated' if any problem is missing a rating.
+    'Hard' (>=1950), or 'Rating Pending' if any problem is missing a rating.
     """
     if not questions:
-        return "Unrated"
+        return "Rating Pending"
     weighted_sum = 0.0
     total_weight = 0
     for i, q in enumerate(questions):
         q_slug = q.get("titleSlug") or ""
         rating = ratings_by_slug.get(q_slug)
         if rating is None:
-            return "Unrated"
+            return "Rating Pending"
         weight = int(q.get("credit") or _DIFFICULTY_TAG_WEIGHTS[min(i, 3)])
         weighted_sum += rating * weight
         total_weight += weight
     if total_weight == 0:
-        return "Unrated"
+        return "Rating Pending"
     avg = weighted_sum / total_weight
     if avg < 1750:
         return "Easy"
@@ -1040,7 +1042,7 @@ async def post_pre_contest(
     forum_thread_id: int | None = None
     forum_thread_url: str = ""
     try:
-        unrated_tag = await _get_or_create_forum_tag(forum_channel, "Unrated")
+        unrated_tag = await _get_or_create_forum_tag(forum_channel, "Rating Pending")
         result = await forum_channel.create_thread(
             name=title[:100],
             embed=forum_embed,
@@ -1389,7 +1391,7 @@ async def post_leetcode_contest(
     forum_embed = build_contest_forum_embed(contest, questions, ratings_by_slug, question_thread_ids)
 
     tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
-    is_rated = tag_name != "Unrated"
+    is_rated = tag_name != "Rating Pending"
 
     forum_thread_id: int | None = None
     forum_thread_url: str = ""
@@ -1670,12 +1672,12 @@ async def check_and_update_contest_ratings(bot) -> int:
 
         problems = sorted(problems, key=lambda p: p["ProblemIndex"])
         questions = [
-            {"questionId": str(p["ID"]), "title": p["Title"], "titleSlug": p["TitleSlug"]}
+            {"questionId": "", "title": p["TitleSlug"].replace("-", " ").title(), "titleSlug": p["TitleSlug"]}
             for p in problems
         ]
 
         tag_name = _contest_difficulty_tag(questions, ratings_by_slug)
-        if tag_name == "Unrated":
+        if tag_name == "Rating Pending":
             continue  # Ratings still not out
 
         try:
@@ -1724,9 +1726,9 @@ async def check_and_update_contest_ratings(bot) -> int:
                     await msg.edit(embed=new_embed)
                     break
 
-            # Swap "Unrated" tag for difficulty tag
+            # Swap "Rating Pending" tag for difficulty tag
             difficulty_tag = await _get_or_create_forum_tag(forum_channel, tag_name)
-            new_tags = [t for t in thread.applied_tags if t.name != "Unrated"] + [difficulty_tag]
+            new_tags = [t for t in thread.applied_tags if t.name != "Rating Pending"] + [difficulty_tag]
             await thread.edit(applied_tags=new_tags)
 
             leetcode_contest_post_set_rated(contest_slug)
@@ -1787,6 +1789,7 @@ async def leetcode_contest_scheduler(bot):
             now = int(datetime.now().timestamp())
             any_polling_problems = False
             any_pending_rankings = False
+            any_unrated = bool(leetcode_contest_posts_get_unrated())
             next_wake_times: list[int] = []
 
             for ctype in ("weekly", "biweekly"):
@@ -1818,7 +1821,7 @@ async def leetcode_contest_scheduler(bot):
 
             if any_polling_problems:
                 sleep_time = 300
-            elif any_pending_rankings:
+            elif any_pending_rankings or any_unrated:
                 sleep_time = 86400
             elif next_wake_times:
                 sleep_time = min(next_wake_times) - now

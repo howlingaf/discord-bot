@@ -416,7 +416,7 @@ async def backfill_test(interaction: discord.Interaction):
                 reason=f"Backfill test: {slug}",
             )
             thread = result.thread if hasattr(result, "thread") else result
-            is_rated = tag_name != "Unrated"
+            is_rated = tag_name != "Rating Pending"
             leetcode_contest_post_save(slug, contest_type, thread.id, rated=1 if is_rated else 0)
             thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread.id}"
             results.append(f"\u2705 `{slug}` — [{tag_name}] [forum post]({thread_url}), {len(question_thread_ids)}/{len(problems)} problem posts created")
@@ -498,7 +498,7 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
 
     # Pre-fetch forum channels and ensure all tags exist so we never
     # hit a channel-edit API call inside the hot loop.
-    tag_names = ["Easy", "Medium", "Hard", "Unrated"]
+    tag_names = ["Easy", "Medium", "Hard", "Rating Pending"]
     channel_cache: dict[str, discord.ForumChannel] = {}
     for ctype, fid in CONTEST_FORUM_CHANNEL_MAP.items():
         try:
@@ -575,7 +575,7 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
                 reason=f"Backfill: {slug}",
             )
             thread = result.thread if hasattr(result, "thread") else result
-            leetcode_contest_post_save(slug, contest_type, thread.id, rated=1 if tag_name != "Unrated" else 0)
+            leetcode_contest_post_save(slug, contest_type, thread.id, rated=1 if tag_name != "Rating Pending" else 0)
             created += 1
             await asyncio.sleep(4.0)  # only sleep when we hit the API
         except Exception as e:
@@ -764,7 +764,7 @@ async def get_contest_cmd(interaction: discord.Interaction):
                 applied_tags=[contest_tag],
             )
             thread = result.thread if hasattr(result, "thread") else result
-            leetcode_contest_post_save(best_slug, contest_type_str, thread.id, rated=1 if tag_name != "Unrated" else 0)
+            leetcode_contest_post_save(best_slug, contest_type_str, thread.id, rated=1 if tag_name != "Rating Pending" else 0)
             contest_thread_id = thread.id
             thread_url = f"https://discord.com/channels/{GUILD_ID}/{contest_thread_id}"
         except Exception as e:
