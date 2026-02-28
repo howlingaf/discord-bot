@@ -783,7 +783,7 @@ def build_contest_notif_embed(contest: dict, forum_thread_url: str, *, show_coun
     return discord.Embed(
         title=title,
         url=url,
-        description="\n".join(desc_lines) if desc_lines else None,
+        description="\n\n".join(desc_lines) if desc_lines else None,
         color=CONTEST_RECAP_COLOR,
     )
 
