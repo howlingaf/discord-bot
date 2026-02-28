@@ -767,13 +767,16 @@ def build_contest_forum_embed(
     )
 
 
-def build_contest_notif_embed(contest: dict, forum_thread_url: str) -> discord.Embed:
+def build_contest_notif_embed(contest: dict, forum_thread_url: str, *, show_countdown: bool = False) -> discord.Embed:
     title = contest.get("title") or "LeetCode Contest"
     slug = contest.get("titleSlug") or ""
+    start_ts = contest.get("startTime") or 0
 
     url = f"{LEETCODE_BASE}/contest/{slug}/" if slug else LEETCODE_BASE
 
     desc_lines: list[str] = []
+    if show_countdown and start_ts:
+        desc_lines.append(f"\U0001f550 Starts <t:{start_ts}:R>")
     if forum_thread_url:
         desc_lines.append(f"\U0001f449 [View Post]({forum_thread_url})")
 
@@ -802,8 +805,6 @@ def build_pre_contest_embed(contest: dict) -> discord.Embed:
     url = f"{LEETCODE_BASE}/contest/{slug}/" if slug else LEETCODE_BASE
 
     desc_lines = ["Problems will be available when the contest starts."]
-    if start_ts:
-        desc_lines.append(f"\U0001f550 Starts <t:{start_ts}:R>")
 
     return discord.Embed(
         title=title,
@@ -1060,7 +1061,7 @@ async def post_pre_contest(
     except Exception as e:
         print(f"[CONTEST/{contest_type.upper()}] forum thread create failed: {e}")
 
-    notif_embed = build_contest_notif_embed(contest, forum_thread_url)
+    notif_embed = build_contest_notif_embed(contest, forum_thread_url, show_countdown=True)
 
     channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
     if not channel_id:
