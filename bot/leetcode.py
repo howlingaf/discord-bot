@@ -35,6 +35,7 @@ from .database import (
     leetcode_contest_post_set_rated,
     leetcode_contest_post_set_rankings_posted,
     leetcode_contest_post_set_problems_posted,
+    leetcode_contest_post_set_notif_message_id,
     leetcode_contest_posts_get_unrated,
     linked_users_all,
     zerotrac_cache_get_all,
@@ -792,6 +793,49 @@ def build_contest_notif_embed(contest: dict, forum_thread_url: str, *, show_coun
     )
 
 
+async def _update_notif_embed(bot, contest_type: str, slug: str) -> None:
+    """Update the pre-contest notification embed to reflect current contest phase."""
+    try:
+        post = leetcode_contest_post_get(slug)
+        if not post or not post.get("notif_message_id"):
+            return
+
+        msg_id = post["notif_message_id"]
+        start_ts = post.get("start_time") or 0
+        end_ts = start_ts + 5400  # 90 min
+        thread_id = post.get("thread_id")
+        now = int(datetime.now().timestamp())
+
+        if start_ts and now < start_ts:
+            status_line = f"\U0001f550 Starts <t:{start_ts}:R>"
+        elif start_ts and now < end_ts:
+            status_line = f"\U0001f7e2 In progress \u2014 ends <t:{end_ts}:R>"
+        else:
+            status_line = "\u2705 Contest ended"
+
+        title = slug.replace("-", " ").title()
+        url = f"{LEETCODE_BASE}/contest/{slug}/"
+        desc_lines = [status_line]
+        if thread_id:
+            forum_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
+            desc_lines.append(f"\U0001f449 [View Post]({forum_url})")
+
+        embed = discord.Embed(
+            title=title, url=url,
+            description="\n\n".join(desc_lines),
+            color=CONTEST_RECAP_COLOR,
+        )
+
+        channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
+        if not channel_id:
+            return
+        channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+        msg = await channel.fetch_message(msg_id)
+        await msg.edit(embed=embed)
+    except Exception as e:
+        print(f"[CONTEST/{contest_type.upper()}] notif embed update failed: {e}")
+
+
 def _apply_frontend_ids(questions: list[dict]) -> None:
     """Replace GraphQL/zerotrac internal questionIds with the frontend display IDs stored in the DB."""
     for q in questions:
@@ -1075,7 +1119,10 @@ async def post_pre_contest(
     if not isinstance(channel, discord.TextChannel):
         return False, f"{contest_type} notif channel must be a text channel"
 
-    await channel.send(embed=notif_embed)
+    notif_msg = await channel.send(embed=notif_embed)
+
+    if slug:
+        leetcode_contest_post_set_notif_message_id(slug, notif_msg.id)
 
     leetcode_set_contest_state(contest_type, slug, thread_id=forum_thread_id)
     return True, f"posted pre-contest {contest_type} slug={slug}"
@@ -1183,6 +1230,7 @@ async def post_contest_problems(
         print(f"[CONTEST/{contest_type.upper()}] failed to update thread with problems: {e}")
 
     leetcode_contest_post_set_problems_posted(slug, now)
+    await _update_notif_embed(bot, contest_type, slug)
     return True, f"{contest_type} problems posted for slug={slug}"
 
 
@@ -1295,6 +1343,7 @@ async def post_contest_rankings(
 
     if post:
         leetcode_contest_post_set_rankings_posted(slug)
+        await _update_notif_embed(bot, contest_type, slug)
 
     if not rankings:
         return True, f"no participants for {contest_type} slug={slug}, skipping rankings post"

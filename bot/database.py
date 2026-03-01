@@ -133,6 +133,7 @@ def db_init():
             "rankings_posted INTEGER NOT NULL DEFAULT 0",
             "problems_posted INTEGER NOT NULL DEFAULT 0",
             "problems_posted_at INTEGER",
+            "notif_message_id INTEGER",
         ):
             name = col.split()[0]
             if name not in existing_cols:
@@ -462,7 +463,7 @@ def leetcode_set_premium_weekly_state(*, question_id: str, title_slug: str, date
 def leetcode_contest_post_get(contest_slug: str) -> dict | None:
     with _db() as conn:
         row = conn.execute(
-            "SELECT contest_slug, contest_type, thread_id, created_at, start_time, rankings_posted, problems_posted, problems_posted_at FROM leetcode_contest_posts WHERE contest_slug=?",
+            "SELECT contest_slug, contest_type, thread_id, created_at, start_time, rankings_posted, problems_posted, problems_posted_at, notif_message_id FROM leetcode_contest_posts WHERE contest_slug=?",
             (contest_slug,),
         ).fetchone()
         if not row:
@@ -471,6 +472,7 @@ def leetcode_contest_post_get(contest_slug: str) -> dict | None:
             "contest_slug": row[0], "contest_type": row[1], "thread_id": row[2],
             "created_at": row[3], "start_time": row[4], "rankings_posted": bool(row[5]),
             "problems_posted": bool(row[6]), "problems_posted_at": row[7],
+            "notif_message_id": row[8],
         }
 
 
@@ -509,6 +511,12 @@ def leetcode_contest_post_set_problems_posted(contest_slug: str, timestamp: int)
 def leetcode_contest_post_set_rated(contest_slug: str):
     with _db() as conn:
         conn.execute("UPDATE leetcode_contest_posts SET rated=1 WHERE contest_slug=?", (contest_slug,))
+        conn.commit()
+
+
+def leetcode_contest_post_set_notif_message_id(contest_slug: str, message_id: int):
+    with _db() as conn:
+        conn.execute("UPDATE leetcode_contest_posts SET notif_message_id=? WHERE contest_slug=?", (message_id, contest_slug))
         conn.commit()
 
 
