@@ -1545,15 +1545,24 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
         except Exception as e:
             print(f"[PREMIUM WEEKLY] forum post error: {e}")
 
-    # Apply "Weekly Premium" tag to new thread
+    # Apply "Weekly Premium" tag to new thread and archive it (premium content)
     if weekly_premium_tag and thread_id:
         try:
             new_thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
             if isinstance(new_thread, discord.Thread):
-                if not any(t.id == weekly_premium_tag.id for t in new_thread.applied_tags):
-                    await new_thread.edit(applied_tags=list(new_thread.applied_tags) + [weekly_premium_tag])
+                new_tags = list(new_thread.applied_tags)
+                if not any(t.id == weekly_premium_tag.id for t in new_tags):
+                    new_tags.append(weekly_premium_tag)
+                await new_thread.edit(applied_tags=new_tags, archived=True)
         except Exception as e:
             print(f"[PREMIUM WEEKLY] Failed to apply tag to thread {thread_id}: {e}")
+    elif thread_id:
+        try:
+            new_thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
+            if isinstance(new_thread, discord.Thread) and not new_thread.archived:
+                await new_thread.edit(archived=True)
+        except Exception as e:
+            print(f"[PREMIUM WEEKLY] Failed to archive thread {thread_id}: {e}")
 
     # Remove "Weekly Premium" tag from previous week's thread
     if weekly_premium_tag and old_thread_id and old_thread_id != thread_id:
