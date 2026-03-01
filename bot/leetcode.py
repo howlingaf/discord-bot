@@ -15,7 +15,6 @@ from .config import (
     MAX_EXAMPLES,
     LEETCODE_WEEKLY_CHANNEL_ID,
     LEETCODE_BIWEEKLY_CHANNEL_ID,
-    LEETCODE_CONTEST_URL,
     LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
     LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
     LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID,
@@ -568,11 +567,16 @@ CONTEST_FORUM_CHANNEL_MAP: dict[str, int] = {
 
 
 async def fetch_leetcode_contests(session: ClientSession) -> list[dict]:
-    async with session.get(LEETCODE_CONTEST_URL) as resp:
-        js = await resp.json()
+    query = "{ topTwoContests { title titleSlug startTime duration originStartTime } }"
+    async with session.post(
+        f"{LEETCODE_BASE}/graphql",
+        json={"query": query},
+        headers={"Content-Type": "application/json"},
+    ) as resp:
+        js = await resp.json(content_type=None)
         if resp.status != 200:
             raise RuntimeError(f"LeetCode contest API failed: {resp.status} {js}")
-        return js.get("topTwoContests") or []
+        return (js.get("data") or {}).get("topTwoContests") or []
 
 
 def _classify_contest(title_slug: str) -> str | None:
