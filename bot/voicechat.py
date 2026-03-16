@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import discord
 from aiohttp import web
 
-from .config import PUBLIC_BASE_URL, VOICECHAT_SECRET, GUILD_ID
+from .config import PUBLIC_BASE_URL, VOICECHAT_SECRET, GUILD_ID, SPOTIFY_ALLOWED_USER_ID
 
 if TYPE_CHECKING:
     from .client import MyBot
@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 # token -> {channel_id, user_id, created_at}
 _sessions: dict[str, dict] = {}
 _SESSION_TTL = 60 * 60 * 12  # 12 hours
+
+# channel_id -> discord.Webhook (cached per channel)
+_webhooks: dict[int, discord.Webhook] = {}
 
 # channel_id -> list[dict]  (recent messages per channel)
 _recent: dict[int, list[dict]] = {}
@@ -153,6 +156,24 @@ async def on_chat_delete(payload: discord.RawMessageDeleteEvent):
     await _broadcast(cid, {"type": "delete", "id": mid})
 
 
+async def _get_or_create_webhook(channel, bot) -> discord.Webhook | None:
+    cid = channel.id
+    if cid in _webhooks:
+        return _webhooks[cid]
+    try:
+        webhooks = await channel.webhooks()
+        for wh in webhooks:
+            if wh.user and wh.user.id == bot.user.id:
+                _webhooks[cid] = wh
+                return wh
+        wh = await channel.create_webhook(name="Voice Chat")
+        _webhooks[cid] = wh
+        return wh
+    except Exception as e:
+        print(f"[VOICECHAT] webhook creation failed: {e}")
+        return None
+
+
 # ── routes ──────────────────────────────────────────────────────────
 def register_routes(app: web.Application, bot: "MyBot"):
     routes = web.RouteTableDef()
@@ -198,7 +219,18 @@ def register_routes(app: web.Application, bot: "MyBot"):
                 if data.get("type") == "send" and can_send and data.get("content", "").strip():
                     content = data["content"].strip()[:2000]
                     try:
-                        await ch.send(content)
+                        # Send as the owner via webhook
+                        guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
+                        owner = guild.get_member(SPOTIFY_ALLOWED_USER_ID) if guild and SPOTIFY_ALLOWED_USER_ID else None
+                        webhook = await _get_or_create_webhook(ch, bot)
+                        if webhook and owner:
+                            await webhook.send(
+                                content,
+                                username=owner.display_name,
+                                avatar_url=owner.display_avatar.url,
+                            )
+                        else:
+                            await ch.send(content)
                     except Exception as e:
                         print(f"[VOICECHAT] send failed: {e}")
         finally:
