@@ -46,7 +46,7 @@ async def on_ready():
                 if not isinstance(ch, discord.VoiceChannel):
                     continue
                 url = f"{PUBLIC_BASE_URL}/voice-chat?channel={cid}"
-                await ch.edit(status=f"Pop out chat: {url}")
+                await ch.edit(status=f"{url}")
             except Exception as e:
                 print(f"[VOICECHAT STATUS] channel {cid}: {e}")
 
@@ -76,7 +76,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                 ch = bot.get_channel(cid)
                 if isinstance(ch, discord.VoiceChannel):
                     url = f"{PUBLIC_BASE_URL}/voice-chat?channel={cid}"
-                    expected = f"Pop out chat: {url}"
+                    expected = f"{url}"
                     if getattr(ch, "status", None) != expected:
                         await ch.edit(status=expected)
             except Exception:
