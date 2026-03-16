@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import discord
 from aiohttp import web
 
-from .config import PUBLIC_BASE_URL, VOICECHAT_SECRET
+from .config import PUBLIC_BASE_URL, VOICECHAT_SECRET, GUILD_ID
 
 if TYPE_CHECKING:
     from .client import MyBot
@@ -180,9 +180,27 @@ def register_routes(app: web.Application, bot: "MyBot"):
             if ch and isinstance(ch, (discord.VoiceChannel, discord.StageChannel)):
                 members = [_member_payload(m) for m in ch.members]
             messages = list(_recent.get(cid, []))
-            await ws.send_str(json.dumps({"type": "init", "members": members, "messages": messages}))
-            async for _msg in ws:
-                pass
+
+            # Key-based auth (user_id=0) can send; per-session tokens can too
+            can_send = session.get("user_id") is not None
+
+            await ws.send_str(json.dumps({
+                "type": "init", "members": members, "messages": messages,
+                "canSend": can_send,
+            }))
+            async for ws_msg in ws:
+                if ws_msg.type != web.WSMsgType.TEXT:
+                    continue
+                try:
+                    data = json.loads(ws_msg.data)
+                except Exception:
+                    continue
+                if data.get("type") == "send" and can_send and data.get("content", "").strip():
+                    content = data["content"].strip()[:2000]
+                    try:
+                        await ch.send(content)
+                    except Exception as e:
+                        print(f"[VOICECHAT] send failed: {e}")
         finally:
             _ws_by_channel.get(cid, set()).discard(ws)
         return ws
@@ -282,6 +300,20 @@ a {{ color: #00a8fc; }}
 .msg .attachments img {{ max-width: 300px; max-height: 200px; border-radius: 4px; }}
 .msg .attachments a {{ display: block; }}
 
+/* ── input bar ── */
+#input-bar {{
+  display: none; padding: 0 16px 12px; background: #1e1f22;
+}}
+#input-bar form {{
+  display: flex; gap: 8px;
+}}
+#input-bar input {{
+  flex: 1; padding: 10px 12px; border-radius: 8px; border: none; outline: none;
+  background: #383a40; color: #dbdee1; font-size: 14px;
+  font-family: inherit;
+}}
+#input-bar input::placeholder {{ color: #6d6f78; }}
+
 /* ── status bar ── */
 #status {{
   padding: 6px 16px; font-size: 12px; color: #949ba4; background: #2b2d31;
@@ -308,6 +340,9 @@ a {{ color: #00a8fc; }}
 <div id="main">
   <div id="chat-header"># {channel_name}</div>
   <div id="messages"></div>
+  <div id="input-bar">
+    <form id="send-form"><input type="text" id="msg-input" placeholder="Send a message" autocomplete="off"></form>
+  </div>
   <div id="status" class="disconnected">Connecting&hellip;</div>
 </div>
 
@@ -347,6 +382,7 @@ function connect() {{
       messagesEl.innerHTML = "";
       data.messages.forEach(m => appendMessage(m));
       scrollToBottom();
+      if (data.canSend) document.getElementById("input-bar").style.display = "block";
     }} else if (data.type === "members") {{
       renderMembers(data.members);
     }} else if (data.type === "message") {{
@@ -469,6 +505,15 @@ function escHtml(s) {{
   d.textContent = s || "";
   return d.innerHTML;
 }}
+
+document.getElementById("send-form").addEventListener("submit", (e) => {{
+  e.preventDefault();
+  const input = document.getElementById("msg-input");
+  const text = input.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({{ type: "send", content: text }}));
+  input.value = "";
+}});
 
 connect();
 </script>
