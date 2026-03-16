@@ -160,10 +160,11 @@ def register_routes(app: web.Application, bot: "MyBot"):
     @routes.get("/voice-chat")
     async def voice_chat_page(request: web.Request):
         session = _resolve_token(request)
-        token = request.query["token"]
+        # Rebuild the query string so the WS connection uses the same auth
+        qs = request.query_string
         ch = bot.get_channel(session["channel_id"])
         ch_name = getattr(ch, "name", "Voice Chat")
-        html = _build_html(token, ch_name)
+        html = _build_html(qs, ch_name)
         return web.Response(text=html, content_type="text/html")
 
     @routes.get("/voice-chat/ws")
@@ -208,7 +209,7 @@ def register_command(bot: "MyBot"):
 
 
 # ── HTML ────────────────────────────────────────────────────────────
-def _build_html(token: str, channel_name: str) -> str:
+def _build_html(query_string: str, channel_name: str) -> str:
     return f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -296,9 +297,9 @@ a {{ color: #00a8fc; }}
 </div>
 
 <script>
-const token = {json.dumps(token)};
+const qs = {json.dumps(query_string)};
 const proto = location.protocol === "https:" ? "wss:" : "ws:";
-const wsUrl = proto + "//" + location.host + "/voice-chat/ws?token=" + encodeURIComponent(token);
+const wsUrl = proto + "//" + location.host + "/voice-chat/ws?" + qs;
 
 const memberList = document.getElementById("member-list");
 const countEl = document.getElementById("count");
