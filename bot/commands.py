@@ -59,7 +59,10 @@ from .database import (
     virtual_reset,
     virtual_stats_set_last_contest,
 )
+from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
 from .client import bot
+
+vc_register_command(bot)
 
 
 @bot.tree.command(name="spotifylink", description="(Owner) DM yourself the Spotify link so the bot can auto pause/resume.")
@@ -1324,7 +1327,18 @@ _COMMANDS_CHANNEL_ID = 1474376865400619189
 
 @bot.event
 async def on_message(message: discord.Message):
+    await on_chat_message(message)
     if message.author.bot:
         return
     if message.channel.id == _COMMANDS_CHANNEL_ID:
         await message.delete()
+
+
+@bot.event
+async def on_message_edit(_before: discord.Message, after: discord.Message):
+    await on_chat_edit(after)
+
+
+@bot.event
+async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
+    await on_chat_delete(payload)

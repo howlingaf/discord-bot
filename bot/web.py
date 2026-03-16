@@ -152,4 +152,8 @@ def make_web_app(bot_instance) -> web.Application:
 
     app = web.Application()
     app.add_routes(routes)
+
+    from .voicechat import register_routes as vc_register
+    vc_register(app, bot_instance)
+
     return app

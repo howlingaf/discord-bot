@@ -10,6 +10,7 @@ from .config import (
 from .spotify import count_humans_in_channel, handle_spotify_auto_pause
 from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler, leetcode_premium_weekly_scheduler
 from .status import leetcode_status_scheduler
+from .voicechat import on_voice_update
 from .client import bot
 
 
@@ -52,6 +53,12 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
     # --- Secret streams channel rename ---
     await _check_secret_streams_rename(member, before, after)
+
+    # --- Broadcast to any active voice-chat overlay sessions ---
+    if before_id:
+        await on_voice_update(bot, before_id)
+    if after_id and after_id != before_id:
+        await on_voice_update(bot, after_id)
 
 
 async def _check_secret_streams_rename(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):

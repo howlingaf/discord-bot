@@ -13,6 +13,7 @@ intents.guilds = True
 intents.members = True
 intents.voice_states = True
 intents.messages = True
+intents.message_content = True
 
 
 class MyBot(discord.Client):
