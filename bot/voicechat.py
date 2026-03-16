@@ -220,30 +220,43 @@ def _build_html(query_string: str, channel_name: str) -> str:
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
   background: #1e1f22; color: #dbdee1; font-family: "gg sans", "Noto Sans", Helvetica, Arial, sans-serif;
-  font-size: 14px; display: flex; height: 100vh; overflow: hidden;
+  font-size: 14px; display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 }}
 a {{ color: #00a8fc; }}
 
-/* ── sidebar: voice members ── */
-#sidebar {{
-  width: 240px; min-width: 240px; background: #2b2d31; display: flex; flex-direction: column;
-  border-right: 1px solid #1e1f22;
+/* ── top bar: voice members ── */
+#member-bar {{
+  display: flex; align-items: center; background: #2b2d31; border-bottom: 1px solid #1e1f22;
+  padding: 8px 12px; gap: 8px; min-height: 52px;
 }}
-#sidebar h2 {{
-  padding: 12px 16px 8px; font-size: 12px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: .02em; color: #949ba4;
+#member-bar .label {{
+  font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em;
+  color: #949ba4; white-space: nowrap;
 }}
-#member-list {{ flex: 1; overflow-y: auto; padding: 0 8px; }}
+#member-viewport {{
+  flex: 1; overflow: hidden; position: relative;
+}}
+#member-list {{
+  display: flex; gap: 8px; transition: transform 0.3s ease;
+}}
 .member {{
-  display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; margin-bottom: 2px;
+  display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 4px;
+  white-space: nowrap; flex-shrink: 0;
 }}
 .member:hover {{ background: #35373c; }}
-.member img {{ width: 32px; height: 32px; border-radius: 50%; }}
-.member .name {{ font-size: 14px; font-weight: 500; }}
+.member img {{ width: 28px; height: 28px; border-radius: 50%; }}
+.member .name {{ font-size: 13px; font-weight: 500; }}
 .member .bot-tag {{
   background: #5865f2; color: #fff; font-size: 10px; padding: 1px 4px; border-radius: 3px;
-  font-weight: 600; margin-left: 4px;
+  font-weight: 600; margin-left: 2px;
 }}
+.nav-btn {{
+  background: none; border: none; color: #949ba4; cursor: pointer; font-size: 18px;
+  padding: 4px 6px; border-radius: 4px; flex-shrink: 0;
+}}
+.nav-btn:hover {{ background: #35373c; color: #dbdee1; }}
+.nav-btn:disabled {{ opacity: 0.3; cursor: default; }}
+.nav-btn:disabled:hover {{ background: none; color: #949ba4; }}
 
 /* ── main: chat ── */
 #main {{ flex: 1; display: flex; flex-direction: column; min-width: 0; }}
@@ -285,9 +298,11 @@ a {{ color: #00a8fc; }}
 </head>
 <body>
 
-<div id="sidebar">
-  <h2>In Voice &mdash; <span id="count">0</span></h2>
-  <div id="member-list"></div>
+<div id="member-bar">
+  <span class="label">In Voice &mdash; <span id="count">0</span></span>
+  <button class="nav-btn" id="nav-left" disabled>&lsaquo;</button>
+  <div id="member-viewport"><div id="member-list"></div></div>
+  <button class="nav-btn" id="nav-right" disabled>&rsaquo;</button>
 </div>
 
 <div id="main">
@@ -345,6 +360,8 @@ function connect() {{
   }};
 }}
 
+let scrollOffset = 0;
+
 function renderMembers(members) {{
   memberList.innerHTML = "";
   countEl.textContent = members.filter(m => !m.bot).length;
@@ -355,7 +372,35 @@ function renderMembers(members) {{
       + '<span class="name">' + escHtml(m.name) + (m.bot ? '<span class="bot-tag">BOT</span>' : '') + '</span>';
     memberList.appendChild(div);
   }});
+  scrollOffset = 0;
+  memberList.style.transform = "translateX(0)";
+  updateNavButtons();
 }}
+
+const viewport = document.getElementById("member-viewport");
+const navLeft = document.getElementById("nav-left");
+const navRight = document.getElementById("nav-right");
+
+function updateNavButtons() {{
+  const maxScroll = Math.max(0, memberList.scrollWidth - viewport.clientWidth);
+  navLeft.disabled = scrollOffset <= 0;
+  navRight.disabled = scrollOffset >= maxScroll;
+}}
+
+navLeft.addEventListener("click", () => {{
+  scrollOffset = Math.max(0, scrollOffset - 200);
+  memberList.style.transform = "translateX(-" + scrollOffset + "px)";
+  updateNavButtons();
+}});
+
+navRight.addEventListener("click", () => {{
+  const maxScroll = Math.max(0, memberList.scrollWidth - viewport.clientWidth);
+  scrollOffset = Math.min(maxScroll, scrollOffset + 200);
+  memberList.style.transform = "translateX(-" + scrollOffset + "px)";
+  updateNavButtons();
+}});
+
+window.addEventListener("resize", updateNavButtons);
 
 let lastAuthor = null;
 let lastTimestamp = 0;
