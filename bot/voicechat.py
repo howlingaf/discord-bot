@@ -49,9 +49,11 @@ def create_session(channel_id: int, user_id: int) -> str:
 
 
 def _resolve_token(request: web.Request) -> dict:
-    # Static key: /voice-chat?key=<secret>&channel=<id>
+    # Channel ID from path or query
+    channel = request.match_info.get("channel_id") or request.query.get("channel", "")
+
+    # Static key: /voice-chat?key=<secret>&channel=<id> or /voice-chat/<id>?key=<secret>
     key = request.query.get("key", "")
-    channel = request.query.get("channel", "")
     if key and channel and VOICECHAT_SECRET and key == VOICECHAT_SECRET:
         try:
             return {"channel_id": int(channel), "user_id": 0}
@@ -174,6 +176,53 @@ async def _get_or_create_webhook(channel, bot) -> discord.Webhook | None:
         return None
 
 
+async def _handle_ws(request: web.Request, bot: "MyBot") -> web.WebSocketResponse:
+    session = _resolve_token(request)
+    cid = session["channel_id"]
+    ws = web.WebSocketResponse(heartbeat=30)
+    await ws.prepare(request)
+    _ws_by_channel.setdefault(cid, set()).add(ws)
+    try:
+        ch = bot.get_channel(cid)
+        members = []
+        if ch and isinstance(ch, (discord.VoiceChannel, discord.StageChannel)):
+            members = [_member_payload(m) for m in ch.members]
+        messages = list(_recent.get(cid, []))
+
+        can_send = session.get("user_id") is not None
+
+        await ws.send_str(json.dumps({
+            "type": "init", "members": members, "messages": messages,
+            "canSend": can_send,
+        }))
+        async for ws_msg in ws:
+            if ws_msg.type != web.WSMsgType.TEXT:
+                continue
+            try:
+                data = json.loads(ws_msg.data)
+            except Exception:
+                continue
+            if data.get("type") == "send" and can_send and data.get("content", "").strip():
+                content = data["content"].strip()[:2000]
+                try:
+                    guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
+                    owner = guild.get_member(SPOTIFY_ALLOWED_USER_ID) if guild and SPOTIFY_ALLOWED_USER_ID else None
+                    webhook = await _get_or_create_webhook(ch, bot)
+                    if webhook and owner:
+                        await webhook.send(
+                            content,
+                            username=owner.display_name,
+                            avatar_url=owner.display_avatar.url,
+                        )
+                    else:
+                        await ch.send(content)
+                except Exception as e:
+                    print(f"[VOICECHAT] send failed: {e}")
+    finally:
+        _ws_by_channel.get(cid, set()).discard(ws)
+    return ws
+
+
 # ── routes ──────────────────────────────────────────────────────────
 def register_routes(app: web.Application, bot: "MyBot"):
     routes = web.RouteTableDef()
@@ -181,61 +230,28 @@ def register_routes(app: web.Application, bot: "MyBot"):
     @routes.get("/voice-chat")
     async def voice_chat_page(request: web.Request):
         session = _resolve_token(request)
-        # Rebuild the query string so the WS connection uses the same auth
         qs = request.query_string
         ch = bot.get_channel(session["channel_id"])
         ch_name = getattr(ch, "name", "Voice Chat")
         html = _build_html(qs, ch_name)
         return web.Response(text=html, content_type="text/html")
 
+    @routes.get("/voice-chat/{channel_id}")
+    async def voice_chat_page_path(request: web.Request):
+        session = _resolve_token(request)
+        qs = request.query_string
+        ch = bot.get_channel(session["channel_id"])
+        ch_name = getattr(ch, "name", "Voice Chat")
+        html = _build_html(qs, ch_name, ws_path=f"/voice-chat/{request.match_info['channel_id']}/ws")
+        return web.Response(text=html, content_type="text/html")
+
+    @routes.get("/voice-chat/{channel_id}/ws")
+    async def voice_chat_ws_path(request: web.Request):
+        return await _handle_ws(request, bot)
+
     @routes.get("/voice-chat/ws")
     async def voice_chat_ws(request: web.Request):
-        session = _resolve_token(request)
-        cid = session["channel_id"]
-        ws = web.WebSocketResponse(heartbeat=30)
-        await ws.prepare(request)
-        _ws_by_channel.setdefault(cid, set()).add(ws)
-        try:
-            ch = bot.get_channel(cid)
-            members = []
-            if ch and isinstance(ch, (discord.VoiceChannel, discord.StageChannel)):
-                members = [_member_payload(m) for m in ch.members]
-            messages = list(_recent.get(cid, []))
-
-            # Key-based auth (user_id=0) can send; per-session tokens can too
-            can_send = session.get("user_id") is not None
-
-            await ws.send_str(json.dumps({
-                "type": "init", "members": members, "messages": messages,
-                "canSend": can_send,
-            }))
-            async for ws_msg in ws:
-                if ws_msg.type != web.WSMsgType.TEXT:
-                    continue
-                try:
-                    data = json.loads(ws_msg.data)
-                except Exception:
-                    continue
-                if data.get("type") == "send" and can_send and data.get("content", "").strip():
-                    content = data["content"].strip()[:2000]
-                    try:
-                        # Send as the owner via webhook
-                        guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
-                        owner = guild.get_member(SPOTIFY_ALLOWED_USER_ID) if guild and SPOTIFY_ALLOWED_USER_ID else None
-                        webhook = await _get_or_create_webhook(ch, bot)
-                        if webhook and owner:
-                            await webhook.send(
-                                content,
-                                username=owner.display_name,
-                                avatar_url=owner.display_avatar.url,
-                            )
-                        else:
-                            await ch.send(content)
-                    except Exception as e:
-                        print(f"[VOICECHAT] send failed: {e}")
-        finally:
-            _ws_by_channel.get(cid, set()).discard(ws)
-        return ws
+        return await _handle_ws(request, bot)
 
     app.add_routes(routes)
 
@@ -259,7 +275,7 @@ def register_command(bot: "MyBot"):
 
 
 # ── HTML ────────────────────────────────────────────────────────────
-def _build_html(query_string: str, channel_name: str) -> str:
+def _build_html(query_string: str, channel_name: str, ws_path: str = "/voice-chat/ws") -> str:
     return f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -381,7 +397,7 @@ a {{ color: #00a8fc; }}
 <script>
 const qs = {json.dumps(query_string)};
 const proto = location.protocol === "https:" ? "wss:" : "ws:";
-const wsUrl = proto + "//" + location.host + "/voice-chat/ws?" + qs;
+const wsUrl = proto + "//" + location.host + {json.dumps(ws_path)} + "?" + qs;
 
 const memberList = document.getElementById("member-list");
 const countEl = document.getElementById("count");
