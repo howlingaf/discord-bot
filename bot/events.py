@@ -37,23 +37,18 @@ async def on_ready():
         bot._premium_weekly_task_started = True
         bot.loop.create_task(leetcode_premium_weekly_scheduler(bot))
 
-    # Pin voice chat popout links in public voice channels
-    if not getattr(bot, "_voicechat_pins_done", False):
-        bot._voicechat_pins_done = True
+    # Set voice chat popout link as voice channel status
+    if not getattr(bot, "_voicechat_status_done", False):
+        bot._voicechat_status_done = True
         for cid in VOICECHAT_PUBLIC_CHANNELS:
             try:
                 ch = bot.get_channel(cid)
                 if not isinstance(ch, discord.VoiceChannel):
                     continue
                 url = f"{PUBLIC_BASE_URL}/voice-chat?channel={cid}"
-                # Check if we already pinned it
-                pins = await ch.pins()
-                already = any(url in (m.content or "") for m in pins if m.author.id == bot.user.id)
-                if not already:
-                    msg = await ch.send(f"Pop out this voice chat: {url}")
-                    await msg.pin()
+                await ch.edit(status=f"Pop out chat: {url}")
             except Exception as e:
-                print(f"[VOICECHAT PIN] channel {cid}: {e}")
+                print(f"[VOICECHAT STATUS] channel {cid}: {e}")
 
 
 @bot.event
