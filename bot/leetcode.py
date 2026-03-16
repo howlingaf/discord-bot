@@ -203,6 +203,8 @@ def build_daily_embeds(daily: dict) -> list[discord.Embed]:
     embeds: list[discord.Embed] = []
 
     header_line = f"{diff_emoji} **{difficulty}**"
+    if q.get("isPaidOnly"):
+        header_line += " \U0001f512 Premium"
 
     desc_parts = [header_line, ""]
 
@@ -1839,6 +1841,15 @@ async def leetcode_contest_scheduler(bot):
                         print(f"[CONTEST/{ctype.upper()}] {msg}")
                 except Exception as e:
                     print(f"[CONTEST/{ctype.upper()}] rankings post error:", repr(e))
+
+            # Keep notif embeds in sync (e.g. transition "In progress" → "Contest ended")
+            for ctype in ("weekly", "biweekly"):
+                slug = leetcode_get_contest_state(ctype)
+                if slug:
+                    try:
+                        await _update_notif_embed(bot, ctype, slug)
+                    except Exception:
+                        pass
 
             # Phase 3: zerotrac updates for all unrated posts
             try:

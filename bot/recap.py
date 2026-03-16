@@ -104,10 +104,11 @@ async def process_recap(bot, payload: dict):
 
     print(f"[RECAP] Found {len(streamer_subs)} streamer submissions in window")
 
-    # Auto-include problems the streamer submitted for during the stream
+    # Auto-include problems the streamer got accepted during the stream
     for sub in streamer_subs:
         slug = sub.get("titleSlug") or ""
-        if slug and slug not in problem_slugs:
+        status = (sub.get("statusDisplay") or "").lower()
+        if slug and slug not in problem_slugs and status == "accepted":
             problem_slugs.append(slug)
             stream_problems.append(slug)
 
@@ -174,7 +175,7 @@ async def process_recap(bot, payload: dict):
         lines = []
 
         sub = entries["streamer"]
-        if sub:
+        if sub and (sub.get("statusDisplay") or "").lower() == "accepted":
             sub_id = sub.get("id") or ""
             sub_url = f"{LEETCODE_BASE}/problems/{slug}/submissions/{sub_id}/" if sub_id else ""
             line = f"**{STREAMER_NAME}** submitted a solution!"

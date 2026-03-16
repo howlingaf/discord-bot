@@ -4,6 +4,8 @@ from .config import (
     GUILD_ID,
     SPOTIFY_VOICE_CHANNEL_ID,
     COMMAND_LOG_CHANNEL_ID,
+    SECRET_STREAMS_CHANNEL_ID,
+    SECRET_STREAMS_EMPTY_NAME,
 )
 from .spotify import count_humans_in_channel, handle_spotify_auto_pause
 from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler, leetcode_premium_weekly_scheduler
@@ -55,6 +57,34 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     member_count = count_humans_in_channel(channel)
     if bot.http_session:
         await handle_spotify_auto_pause(bot.http_session, member_count)
+
+    # --- Secret streams channel rename ---
+    await _check_secret_streams_rename(member, before, after)
+
+
+async def _check_secret_streams_rename(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    if not SECRET_STREAMS_CHANNEL_ID:
+        return
+
+    before_id = before.channel.id if before and before.channel else None
+    after_id = after.channel.id if after and after.channel else None
+    if before_id != SECRET_STREAMS_CHANNEL_ID and after_id != SECRET_STREAMS_CHANNEL_ID:
+        return
+
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+
+    channel = guild.get_channel(SECRET_STREAMS_CHANNEL_ID)
+    if not isinstance(channel, discord.VoiceChannel):
+        return
+
+    humans = count_humans_in_channel(channel)
+    if humans == 0 and channel.name != SECRET_STREAMS_EMPTY_NAME:
+        try:
+            await channel.edit(name=SECRET_STREAMS_EMPTY_NAME)
+        except Exception as e:
+            print(f"[SECRET STREAMS] rename failed: {e}")
 
 
 @bot.event

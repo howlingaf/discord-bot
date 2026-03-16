@@ -14,6 +14,7 @@ from .config import (
     LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
     LEETCODE_PROBLEMS_CHANNEL_ID,
     LEETCODE_RECAP_CHANNEL_ID,
+    SECRET_STREAMS_CHANNEL_ID,
 )
 from .spotify import dm_spotify_link
 from .leetcode import (
@@ -1291,6 +1292,29 @@ async def fix_problem_embeds(interaction: discord.Interaction, question_id: int 
         f"⏳ {action} in the background. Results will appear in this channel.",
         ephemeral=True,
     )
+
+
+# ---- Secret streams rename ----
+
+@bot.tree.command(name="rename", description="(Admin) Rename the secret streams voice channel.")
+@app_commands.describe(name="New name for the channel")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def rename_stream(interaction: discord.Interaction, name: str):
+    if not SECRET_STREAMS_CHANNEL_ID:
+        await interaction.response.send_message("Channel not configured.", ephemeral=True)
+        return
+
+    channel = bot.get_channel(SECRET_STREAMS_CHANNEL_ID)
+    if not isinstance(channel, discord.VoiceChannel):
+        await interaction.response.send_message("Channel not found.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    try:
+        await channel.edit(name=name)
+        await interaction.followup.send(f"Renamed to **{name}**.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"Failed: {e}", ephemeral=True)
 
 
 # ---- Commands-only channel ----
