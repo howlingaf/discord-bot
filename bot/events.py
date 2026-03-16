@@ -37,26 +37,18 @@ async def on_ready():
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    if not SPOTIFY_VOICE_CHANNEL_ID:
-        return
-
-    watched_id = SPOTIFY_VOICE_CHANNEL_ID
     before_id = before.channel.id if before and before.channel else None
     after_id = after.channel.id if after and after.channel else None
-    if before_id != watched_id and after_id != watched_id:
-        return
 
-    guild = bot.get_guild(GUILD_ID)
-    if not guild:
-        return
-
-    channel = guild.get_channel(watched_id)
-    if not isinstance(channel, discord.VoiceChannel):
-        return
-
-    member_count = count_humans_in_channel(channel)
-    if bot.http_session:
-        await handle_spotify_auto_pause(bot.http_session, member_count)
+    # --- Spotify auto-pause ---
+    if SPOTIFY_VOICE_CHANNEL_ID and (before_id == SPOTIFY_VOICE_CHANNEL_ID or after_id == SPOTIFY_VOICE_CHANNEL_ID):
+        guild = bot.get_guild(GUILD_ID)
+        if guild:
+            channel = guild.get_channel(SPOTIFY_VOICE_CHANNEL_ID)
+            if isinstance(channel, discord.VoiceChannel):
+                member_count = count_humans_in_channel(channel)
+                if bot.http_session:
+                    await handle_spotify_auto_pause(bot.http_session, member_count)
 
     # --- Secret streams channel rename ---
     await _check_secret_streams_rename(member, before, after)
