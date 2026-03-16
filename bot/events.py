@@ -67,26 +67,21 @@ async def _check_secret_streams_rename(member: discord.Member, before: discord.V
 
     before_id = before.channel.id if before and before.channel else None
     after_id = after.channel.id if after and after.channel else None
-    print(f"[SECRET STREAMS] voice update: {member} before={before_id} after={after_id} target={SECRET_STREAMS_CHANNEL_ID}")
     if before_id != SECRET_STREAMS_CHANNEL_ID and after_id != SECRET_STREAMS_CHANNEL_ID:
         return
 
     guild = bot.get_guild(GUILD_ID)
     if not guild:
-        print("[SECRET STREAMS] guild not found")
         return
 
     channel = guild.get_channel(SECRET_STREAMS_CHANNEL_ID)
     if not isinstance(channel, discord.VoiceChannel):
-        print(f"[SECRET STREAMS] channel not a VoiceChannel: {type(channel)}")
         return
 
     humans = count_humans_in_channel(channel)
-    print(f"[SECRET STREAMS] humans={humans} name={channel.name!r} expected={SECRET_STREAMS_EMPTY_NAME!r} match={channel.name == SECRET_STREAMS_EMPTY_NAME}")
     if humans == 0 and channel.name != SECRET_STREAMS_EMPTY_NAME:
         try:
             await channel.edit(name=SECRET_STREAMS_EMPTY_NAME)
-            print(f"[SECRET STREAMS] renamed to {SECRET_STREAMS_EMPTY_NAME!r}")
         except Exception as e:
             print(f"[SECRET STREAMS] rename failed: {e}")
 
