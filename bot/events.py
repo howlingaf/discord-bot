@@ -6,8 +6,6 @@ from .config import (
     COMMAND_LOG_CHANNEL_ID,
     SECRET_STREAMS_CHANNEL_ID,
     SECRET_STREAMS_EMPTY_NAME,
-    PUBLIC_BASE_URL,
-    VOICECHAT_PUBLIC_CHANNELS,
 )
 from .spotify import count_humans_in_channel, handle_spotify_auto_pause
 from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler, leetcode_premium_weekly_scheduler
@@ -37,18 +35,6 @@ async def on_ready():
         bot._premium_weekly_task_started = True
         bot.loop.create_task(leetcode_premium_weekly_scheduler(bot))
 
-    # Set voice chat popout link as voice channel status
-    if not getattr(bot, "_voicechat_status_done", False):
-        bot._voicechat_status_done = True
-        for cid in VOICECHAT_PUBLIC_CHANNELS:
-            try:
-                ch = bot.get_channel(cid)
-                if not isinstance(ch, discord.VoiceChannel):
-                    continue
-                url = f"{PUBLIC_BASE_URL}/voice-chat?channel={cid}"
-                await ch.edit(status=f"{url}")
-            except Exception as e:
-                print(f"[VOICECHAT STATUS] channel {cid}: {e}")
 
 
 @bot.event
@@ -68,19 +54,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
     # --- Secret streams channel rename ---
     await _check_secret_streams_rename(member, before, after)
-
-    # --- Re-set voice chat status when someone joins a public channel ---
-    for cid in (before_id, after_id):
-        if cid and cid in VOICECHAT_PUBLIC_CHANNELS:
-            try:
-                ch = bot.get_channel(cid)
-                if isinstance(ch, discord.VoiceChannel):
-                    url = f"{PUBLIC_BASE_URL}/voice-chat?channel={cid}"
-                    expected = f"{url}"
-                    if getattr(ch, "status", None) != expected:
-                        await ch.edit(status=expected)
-            except Exception:
-                pass
 
     # --- Broadcast to any active voice-chat overlay sessions ---
     if before_id:

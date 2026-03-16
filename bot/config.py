@@ -52,7 +52,6 @@ LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490
 
 # ---------------- Voice Chat Overlay ----------------
 VOICECHAT_SECRET = os.getenv("VOICECHAT_SECRET", "")
-VOICECHAT_PUBLIC_CHANNELS = {int(x) for x in os.getenv("VOICECHAT_PUBLIC_CHANNELS", "").split(",") if x.strip()}
 
 # ---------------- Secret Streams ----------------
 SECRET_STREAMS_CHANNEL_ID = 1409455382564180009
