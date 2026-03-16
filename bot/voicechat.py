@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import discord
 from aiohttp import web
 
-from .config import PUBLIC_BASE_URL
+from .config import PUBLIC_BASE_URL, VOICECHAT_SECRET
 
 if TYPE_CHECKING:
     from .client import MyBot
@@ -46,6 +46,16 @@ def create_session(channel_id: int, user_id: int) -> str:
 
 
 def _resolve_token(request: web.Request) -> dict:
+    # Static key: /voice-chat?key=<secret>&channel=<id>
+    key = request.query.get("key", "")
+    channel = request.query.get("channel", "")
+    if key and channel and VOICECHAT_SECRET and key == VOICECHAT_SECRET:
+        try:
+            return {"channel_id": int(channel), "user_id": 0}
+        except ValueError:
+            raise web.HTTPBadRequest(text="Invalid channel ID")
+
+    # Per-session token
     token = request.query.get("token", "")
     session = _sessions.get(token)
     if not session:

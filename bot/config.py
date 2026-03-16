@@ -50,6 +50,9 @@ LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID = int(os.getenv("LEETCODE_BIWEEKLY_FORUM_CHAN
 RECAP_SECRET = os.getenv("RECAP_SECRET", "")
 LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490
 
+# ---------------- Voice Chat Overlay ----------------
+VOICECHAT_SECRET = os.getenv("VOICECHAT_SECRET", "")
+
 # ---------------- Secret Streams ----------------
 SECRET_STREAMS_CHANNEL_ID = 1409455382564180009
 SECRET_STREAMS_EMPTY_NAME = "\U0001f92bsecret-streams\U0001f92b"
