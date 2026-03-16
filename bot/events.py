@@ -69,6 +69,19 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     # --- Secret streams channel rename ---
     await _check_secret_streams_rename(member, before, after)
 
+    # --- Re-set voice chat status when someone joins a public channel ---
+    for cid in (before_id, after_id):
+        if cid and cid in VOICECHAT_PUBLIC_CHANNELS:
+            try:
+                ch = bot.get_channel(cid)
+                if isinstance(ch, discord.VoiceChannel):
+                    url = f"{PUBLIC_BASE_URL}/voice-chat?channel={cid}"
+                    expected = f"Pop out chat: {url}"
+                    if getattr(ch, "status", None) != expected:
+                        await ch.edit(status=expected)
+            except Exception:
+                pass
+
     # --- Broadcast to any active voice-chat overlay sessions ---
     if before_id:
         await on_voice_update(bot, before_id)
