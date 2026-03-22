@@ -325,7 +325,7 @@ a {{ color: #00a8fc; }}
 .nav-btn:disabled:hover {{ background: none; color: #949ba4; }}
 
 /* ── main: chat ── */
-#main {{ flex: 1; display: flex; flex-direction: column; min-width: 0; }}
+#main {{ flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }}
 #chat-header {{
   padding: 12px 16px; font-weight: 600; border-bottom: 1px solid #1e1f22;
   background: #2b2d31; font-size: 15px;
@@ -429,7 +429,7 @@ function connect() {{
       renderMembers(data.members);
       messagesEl.innerHTML = "";
       data.messages.forEach(m => appendMessage(m));
-      scrollToBottom();
+      scrollToBottom(true);
       if (data.canSend) document.getElementById("input-bar").style.display = "block";
     }} else if (data.type === "members") {{
       renderMembers(data.members);
@@ -544,8 +544,14 @@ function formatTime(iso) {{
   return sameDay ? time : d.toLocaleDateString([], {{ month: "short", day: "numeric" }}) + " " + time;
 }}
 
-function scrollToBottom() {{
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+function isNearBottom() {{
+  return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 80;
+}}
+
+function scrollToBottom(force) {{
+  if (force || isNearBottom()) {{
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }}
 }}
 
 function escHtml(s) {{
