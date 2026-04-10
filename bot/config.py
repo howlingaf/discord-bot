@@ -55,7 +55,7 @@ VOICECHAT_SECRET = os.getenv("VOICECHAT_SECRET", "")
 
 # ---------------- Secret Streams ----------------
 SECRET_STREAMS_CHANNEL_ID = 1409455382564180009
-SECRET_STREAMS_EMPTY_NAME = "secret all day saturday stream"
+SECRET_STREAMS_EMPTY_NAME = "super secret streams"
 
 # ---------------- Command Logging ----------------
 COMMAND_LOG_CHANNEL_ID = 1473840278497525872
