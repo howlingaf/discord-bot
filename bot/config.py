@@ -63,6 +63,3 @@ COMMAND_LOG_CHANNEL_ID = 1473840278497525872
 # ---------------- LeetCode Premium Weekly ----------------
 LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID = 1473828703334174894
 
-# ---------------- LeetCode Status ----------------
-LEETCODE_STATUS_CHANNEL_ID = 1473605778030985247
-LEETCODE_STATUS_API_URL = "https://status.leetcode.com/api/getMonitorList/yJB2mF66QP"

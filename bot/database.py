@@ -94,15 +94,6 @@ def db_init():
         """)
 
         conn.execute("""
-        CREATE TABLE IF NOT EXISTS leetcode_status_state (
-          id INTEGER PRIMARY KEY CHECK (id = 1),
-          message_id INTEGER,
-          last_status TEXT
-        )
-        """)
-        conn.execute("INSERT OR IGNORE INTO leetcode_status_state(id) VALUES(1)")
-
-        conn.execute("""
         CREATE TABLE IF NOT EXISTS leetcode_premium_weekly_state (
           id INTEGER PRIMARY KEY CHECK (id = 1),
           question_id TEXT,
@@ -416,25 +407,6 @@ def linked_users_all() -> list[dict]:
             "SELECT discord_user_id, leetcode_username FROM linked_users"
         ).fetchall()
         return [{"discord_user_id": r[0], "leetcode_username": r[1]} for r in rows]
-
-
-# ---- LeetCode Status helpers ----
-
-def leetcode_status_get() -> tuple[int | None, str | None]:
-    with _db() as conn:
-        row = conn.execute("SELECT message_id, last_status FROM leetcode_status_state WHERE id=1").fetchone()
-        if not row:
-            return None, None
-        return row[0], row[1]
-
-
-def leetcode_status_set(*, message_id: int | None = None, last_status: str | None = None):
-    with _db() as conn:
-        if message_id is not None:
-            conn.execute("UPDATE leetcode_status_state SET message_id=? WHERE id=1", (message_id,))
-        if last_status is not None:
-            conn.execute("UPDATE leetcode_status_state SET last_status=? WHERE id=1", (last_status,))
-        conn.commit()
 
 
 # ---- LeetCode Premium Weekly helpers ----
