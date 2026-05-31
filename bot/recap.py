@@ -78,6 +78,7 @@ async def process_recap(bot, payload: dict):
     stream_end = int(payload.get("stream_end") or 0)
     stream_problems = payload.get("stream_problems") or []
     chatter_submissions = payload.get("chatter_submissions") or []
+    streamer_links = payload.get("streamer_links") or []
 
     if not bot.http_session:
         print("[RECAP] Bot HTTP session not ready")
@@ -112,8 +113,8 @@ async def process_recap(bot, payload: dict):
             problem_slugs.append(slug)
             stream_problems.append(slug)
 
-    if not problem_slugs:
-        print("[RECAP] No stream problems to recap")
+    if not problem_slugs and not streamer_links:
+        print("[RECAP] No stream problems or links to recap")
         return
 
     print(f"[RECAP] Problems to recap: {problem_slugs}")
@@ -212,11 +213,11 @@ async def process_recap(bot, payload: dict):
             })
 
     # 5. Post recap embed
-    if recap_entries:
-        await _post_recap_message(bot, recap_entries)
+    if recap_entries or streamer_links:
+        await _post_recap_message(bot, recap_entries, streamer_links)
 
 
-async def _post_recap_message(bot, entries: list[dict]):
+async def _post_recap_message(bot, entries: list[dict], streamer_links: list[str]):
     """Build and send the recap embed in the recap channel."""
     channel = bot.get_channel(LEETCODE_RECAP_CHANNEL_ID)
     if not channel:
@@ -226,16 +227,23 @@ async def _post_recap_message(bot, entries: list[dict]):
             print(f"[RECAP] Could not fetch recap channel: {e}")
             return
 
-    desc_lines = []
+    problem_lines = []
     for entry in entries:
         thread_url = f"https://discord.com/channels/{GUILD_ID}/{entry['thread_id']}"
-        desc_lines.append(
+        problem_lines.append(
             f"[{entry['question_id']}. {entry['problem_name']}]({thread_url})"
         )
 
+    sections = []
+    if problem_lines:
+        sections.append("\n\n".join(problem_lines))
+    if streamer_links:
+        link_block = "**Links shared**\n" + "\n".join(f"• {u}" for u in streamer_links)
+        sections.append(link_block)
+
     embed = discord.Embed(
         title="Stream Recap",
-        description="\n\n".join(desc_lines),
+        description="\n\n".join(sections),
         color=0xFFA116,
     )
 
