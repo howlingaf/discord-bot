@@ -500,6 +500,14 @@ def leetcode_contest_posts_get_unrated() -> list[dict]:
         return [{"contest_slug": r[0], "contest_type": r[1], "thread_id": r[2], "start_time": r[3]} for r in rows]
 
 
+def leetcode_contest_posts_get_pending_rankings() -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT contest_slug, contest_type, thread_id, start_time FROM leetcode_contest_posts WHERE problems_posted=1 AND rankings_posted=0"
+        ).fetchall()
+        return [{"contest_slug": r[0], "contest_type": r[1], "thread_id": r[2], "start_time": r[3]} for r in rows]
+
+
 def leetcode_contest_posts_delete_by_type(contest_type: str) -> int:
     """Delete all contest post records for a given type. Returns rows deleted."""
     with _db() as conn:

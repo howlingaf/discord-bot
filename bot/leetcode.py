@@ -37,6 +37,7 @@ from .database import (
     leetcode_contest_post_set_problems_posted,
     leetcode_contest_post_set_notif_message_id,
     leetcode_contest_posts_get_unrated,
+    leetcode_contest_posts_get_pending_rankings,
     linked_users_all,
     zerotrac_cache_get_all,
     zerotrac_cache_updated_at,
@@ -1833,14 +1834,28 @@ async def leetcode_contest_scheduler(bot):
                 except Exception as e:
                     print(f"[CONTEST/{ctype.upper()}] problems post error:", repr(e))
 
-            # Phase 2: rankings (contest end → Friday)
-            for ctype in ("weekly", "biweekly"):
+            # Phase 2: rankings (contest end → next contest's pre-contest window).
+            # Iterate every contest with problems posted but rankings still pending,
+            # so a contest doesn't get abandoned when the next one of the same type
+            # transitions contest_state forward.
+            now_ts = int(datetime.now().timestamp())
+            for pending in leetcode_contest_posts_get_pending_rankings():
+                slug = pending["contest_slug"]
+                ctype = pending["contest_type"]
+                start_time = pending.get("start_time") or 0
+                # Skip contests that haven't ended yet (90 min duration)
+                if start_time and now_ts < start_time + 5400:
+                    continue
                 try:
-                    posted, msg = await post_contest_rankings(bot, ctype, force=False, contests=contests)
+                    posted, msg = await post_contest_rankings(
+                        bot, ctype, force=False, slug_override=slug, contests=contests,
+                    )
                     if posted:
                         print(f"[CONTEST/{ctype.upper()}] {msg}")
+                    else:
+                        print(f"[CONTEST/{ctype.upper()}] rankings skip slug={slug}: {msg}")
                 except Exception as e:
-                    print(f"[CONTEST/{ctype.upper()}] rankings post error:", repr(e))
+                    print(f"[CONTEST/{ctype.upper()}] rankings post error slug={slug}:", repr(e))
 
             # Keep notif embeds in sync (e.g. transition "In progress" → "Contest ended")
             for ctype in ("weekly", "biweekly"):
@@ -1862,8 +1877,12 @@ async def leetcode_contest_scheduler(bot):
             # Sleep logic
             now = int(datetime.now().timestamp())
             any_polling_problems = False
-            any_pending_rankings = False
             any_unrated = bool(leetcode_contest_posts_get_unrated())
+            pending_rankings = leetcode_contest_posts_get_pending_rankings()
+            any_pending_rankings = any(
+                (p.get("start_time") or 0) and now >= (p["start_time"] + 5400)
+                for p in pending_rankings
+            )
             next_wake_times: list[int] = []
 
             for ctype in ("weekly", "biweekly"):
@@ -1878,11 +1897,11 @@ async def leetcode_contest_scheduler(bot):
                     elif start_time > now:
                         next_wake_times.append(start_time)  # wake at contest start
 
-                if post and post["problems_posted"] and not post["rankings_posted"]:
-                    if start_time and now >= end_ts:
-                        any_pending_rankings = True
-                    elif end_ts > now:
-                        next_wake_times.append(end_ts)  # wake at contest end
+            # Wake at contest end for any contest with pending rankings that hasn't ended yet
+            for p in pending_rankings:
+                p_start = p.get("start_time") or 0
+                if p_start and now < p_start + 5400:
+                    next_wake_times.append(p_start + 5400)
 
             # Pre-contest: wake 24h before upcoming contest if not yet posted
             for c in contests:
