@@ -234,21 +234,27 @@ async def _post_recap_message(bot, entries: list[dict], streamer_links: list[str
             f"[{entry['question_id']}. {entry['problem_name']}]({thread_url})"
         )
 
-    sections = []
     if problem_lines:
-        sections.append("\n\n".join(problem_lines))
+        embed = discord.Embed(
+            title="Stream Recap",
+            description="\n\n".join(problem_lines),
+            color=0xFFA116,
+        )
+        try:
+            await channel.send(embed=embed)
+            print(f"[RECAP] Recap message sent to channel {LEETCODE_RECAP_CHANNEL_ID}")
+        except Exception as e:
+            print(f"[RECAP] Failed to send recap message: {e}")
+
+    # Send streamer-shared links in their own message(s) so Discord auto-previews
+    # them. Discord caps preview embeds at 5 per message, so chunk accordingly.
     if streamer_links:
-        link_block = "**Links shared**\n" + "\n".join(f"• {u}" for u in streamer_links)
-        sections.append(link_block)
-
-    embed = discord.Embed(
-        title="Stream Recap",
-        description="\n\n".join(sections),
-        color=0xFFA116,
-    )
-
-    try:
-        await channel.send(embed=embed)
-        print(f"[RECAP] Recap message sent to channel {LEETCODE_RECAP_CHANNEL_ID}")
-    except Exception as e:
-        print(f"[RECAP] Failed to send recap message: {e}")
+        for i in range(0, len(streamer_links), 5):
+            chunk = streamer_links[i : i + 5]
+            content = ("**Links shared**\n" if i == 0 else "") + "\n".join(chunk)
+            try:
+                await channel.send(content=content)
+            except Exception as e:
+                print(f"[RECAP] Failed to send links message: {e}")
+                break
+        print(f"[RECAP] Sent {len(streamer_links)} streamer link(s) to channel {LEETCODE_RECAP_CHANNEL_ID}")
