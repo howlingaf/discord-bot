@@ -744,7 +744,10 @@ async def get_zerotrac_data(session: ClientSession) -> list[dict]:
          "contest_slug": p["ContestSlug"], "problem_index": p["ProblemIndex"]}
         for p in raw
     ]
-    zerotrac_cache_upsert_all(entries)
+    # Bulk upsert of thousands of rows (+ commit/fsync) would otherwise block the
+    # event loop; run it on a worker thread. Safe because connections are opened
+    # with check_same_thread=False.
+    await asyncio.to_thread(zerotrac_cache_upsert_all, entries)
     print(f"[ZEROTRAC] Cache refreshed ({len(entries)} entries)")
     return entries
 
