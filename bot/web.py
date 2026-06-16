@@ -1,5 +1,7 @@
 import asyncio
+import hmac
 
+import discord
 from aiohttp import web
 
 from .config import (
@@ -12,6 +14,16 @@ from .config import (
 from .database import consume_state, spotify_upsert_tokens, spotify_set_runtime
 from .recap import process_recap
 from .spotify import spotify_authorize_url, spotify_exchange_code
+
+
+def _require_recap_auth(request: web.Request):
+    """Constant-time Bearer check shared by the recap/post-solution endpoints."""
+    auth = request.headers.get("Authorization", "")
+    expected = f"Bearer {RECAP_SECRET}"
+    # Compare as bytes: hmac.compare_digest raises TypeError on non-ASCII str,
+    # which would turn a malformed header into a 500 instead of a 401.
+    if not RECAP_SECRET or not hmac.compare_digest(auth.encode("utf-8"), expected.encode("utf-8")):
+        raise web.HTTPUnauthorized(text="Invalid or missing auth token")
 
 
 def make_web_app(bot_instance) -> web.Application:
@@ -76,18 +88,12 @@ def make_web_app(bot_instance) -> web.Application:
     # ---- Recap ----
     @routes.get("/recap/verify")
     async def recap_verify(request: web.Request):
-        auth = request.headers.get("Authorization", "")
-        expected = f"Bearer {RECAP_SECRET}"
-        if not RECAP_SECRET or auth != expected:
-            raise web.HTTPUnauthorized(text="Invalid or missing auth token")
+        _require_recap_auth(request)
         return web.json_response({"status": "ok"})
 
     @routes.post("/recap")
     async def recap(request: web.Request):
-        auth = request.headers.get("Authorization", "")
-        expected = f"Bearer {RECAP_SECRET}"
-        if not RECAP_SECRET or auth != expected:
-            raise web.HTTPUnauthorized(text="Invalid or missing auth token")
+        _require_recap_auth(request)
 
         try:
             payload = await request.json()
@@ -108,10 +114,7 @@ def make_web_app(bot_instance) -> web.Application:
     # ---- Post Solution ----
     @routes.post("/post-solution")
     async def post_solution(request: web.Request):
-        auth = request.headers.get("Authorization", "")
-        expected = f"Bearer {RECAP_SECRET}"
-        if not RECAP_SECRET or auth != expected:
-            raise web.HTTPUnauthorized(text="Invalid or missing auth token")
+        _require_recap_auth(request)
 
         try:
             payload = await request.json()
@@ -139,10 +142,15 @@ def make_web_app(bot_instance) -> web.Application:
                     user = s.get("user") or "anonymous"
                     url = s.get("url") or ""
                     line = f"**{user}** submitted a solution!"
-                    if url:
+                    # Only embed real web links — skip javascript:/data: etc.
+                    if url.startswith(("http://", "https://")):
                         line += f"\n<{url}>"
                     lines.append(line)
-                await thread.send("\n\n".join(lines))
+                # user is caller-supplied; never let it ping @everyone/roles.
+                await thread.send(
+                    "\n\n".join(lines),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
                 print(f"[POST-SOLUTION] Posted {len(solutions)} solution(s) to {slug}")
             except Exception as e:
                 print(f"[POST-SOLUTION] Failed: {e!r}")
