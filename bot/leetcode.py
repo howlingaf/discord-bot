@@ -409,7 +409,7 @@ async def get_or_create_problem_post(bot, question_id: str) -> tuple[int | None,
         return await _create_problem_forum_post(bot, data)
 
 
-async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]:
+async def post_leetcode_problem(bot, *, force: bool = False, dry_run: bool = False) -> tuple[bool, str]:
     if not bot.http_session:
         return False, "http session not ready"
 
@@ -441,6 +441,14 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
         state = leetcode_get_daily_state()
         if state and state["date"] == date_ts:
             return False, f"already posted for date={date}"
+
+    if dry_run:
+        existing = leetcode_get_problem(qid)
+        return False, (
+            f"🧪 DRY RUN — would post daily {qid}. {qtitle} "
+            f"({q.get('difficulty') or 'Unknown'}); "
+            f"forum thread already exists: {'yes' if existing else 'no'}"
+        )
 
     # --- Forum post (look up DB, then create if needed) ---
     forum = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
@@ -1083,6 +1091,7 @@ async def post_pre_contest(
     contest_type: str,
     *,
     force: bool = False,
+    dry_run: bool = False,
     contests: list[dict] | None = None,
 ) -> tuple[bool, str]:
     """Phase 0: create forum thread + send notif 24h before contest starts (typically Friday).
@@ -1116,6 +1125,13 @@ async def post_pre_contest(
         now = int(datetime.now().timestamp())
         if start_ts and now < start_ts - 86400:
             return False, f"{contest_type} starts <t:{start_ts}:R>, more than 24h away"
+
+    if dry_run:
+        title = contest.get("title") or contest_type.title()
+        return False, (
+            f"🧪 DRY RUN — would post pre-contest {contest_type}: "
+            f"'{title}' (slug={slug}), starts <t:{start_ts}:R>"
+        )
 
     forum_channel_id = CONTEST_FORUM_CHANNEL_MAP.get(contest_type, 0)
     if not forum_channel_id:
@@ -1279,6 +1295,7 @@ async def post_contest_rankings(
     contest_type: str,
     *,
     force: bool = False,
+    dry_run: bool = False,
     slug_override: str | None = None,
     contests: list[dict] | None = None,
 ) -> tuple[bool, str]:
@@ -1322,12 +1339,25 @@ async def post_contest_rankings(
         # Give up 24h before the next contest of the same type
         deadline_ts = _next_contest_deadline(contests or [], contest_type, fallback_after=end_ts)
         if now > deadline_ts:
-            leetcode_contest_post_set_rankings_posted(slug)
+            if not dry_run:
+                leetcode_contest_post_set_rankings_posted(slug)
             return True, f"{contest_type} deadline passed, no rankings for slug={slug}"
 
         if linked_users_all():
             if not await _ratings_ready(bot.http_session, title):
                 return False, f"{contest_type} ratings not yet available, will retry"
+
+    if dry_run:
+        preview_questions: list[dict] = []
+        try:
+            preview_questions = await fetch_contest_questions(bot.http_session, slug)
+        except Exception:
+            pass
+        preview_ranked = await _build_contest_rankings(bot, title)
+        return False, (
+            f"🧪 DRY RUN — would post {contest_type} rankings for {slug}: "
+            f"{len(preview_questions)} problem(s), {len(preview_ranked)} ranked user(s)"
+        )
 
     mock_contest = {"title": title, "titleSlug": slug, "startTime": start_time}
 
@@ -1589,7 +1619,7 @@ async def fetch_weekly_premium(session: ClientSession) -> dict | None:
     return max(candidates, key=lambda e: e.get("date") or "")
 
 
-async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[bool, str]:
+async def post_leetcode_weekly_premium(bot, *, force: bool = False, dry_run: bool = False) -> tuple[bool, str]:
     if not bot.http_session:
         return False, "http session not ready"
 
@@ -1616,6 +1646,14 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
     if not force:
         if old_state and old_state["date"] and date <= old_state["date"]:
             return False, f"already posted for week of {old_state['date']}, skipping {date}"
+
+    if dry_run:
+        existing = leetcode_get_problem_by_slug(title_slug)
+        return False, (
+            f"🧪 DRY RUN — would post premium weekly {qid}. {qtitle} "
+            f"(slug={title_slug}, week of {date}); "
+            f"forum thread already exists: {'yes' if existing else 'no'}"
+        )
 
     forum = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
 
