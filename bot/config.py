@@ -33,8 +33,10 @@ LEETCODE_BASE = "https://leetcode.com"
 
 MAX_EXAMPLES = int(os.getenv("LEETCODE_MAX_EXAMPLES", "3"))
 
-LEETCODE_SUBMISSIONS_URL = "https://leetcode-api-pied.vercel.app/user/howlingfantods_/submissions"
-STREAMER_NAME = "howlingfantods_"
+# NOTE: LeetCode account handle. Still "howlongfantods" until it can be renamed
+# to "howlingaf" on 2026-07-07 — update this URL then.
+LEETCODE_SUBMISSIONS_URL = "https://leetcode-api-pied.vercel.app/user/howlongfantods/submissions"
+STREAMER_NAME = "howlingaf"
 
 # ---------------- LeetCode Problems Forum ----------------
 LEETCODE_PROBLEMS_CHANNEL_ID = 1472231552607064144
