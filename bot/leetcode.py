@@ -367,6 +367,21 @@ async def _create_problem_forum_post(bot, data: dict) -> tuple[int | None, str]:
     return thread.id, ""
 
 
+# Per-problem locks so two concurrent callers (e.g. the recap task and the daily
+# poller) can't both create a forum thread for the same problem. Keyed by the
+# identifier passed in (question id or slug); callers within a feature use a
+# consistent key. NOT reentrant — never acquire the same key while already held.
+_post_locks: dict[str, asyncio.Lock] = {}
+
+
+def _post_lock(key: str) -> asyncio.Lock:
+    lock = _post_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _post_locks[key] = lock
+    return lock
+
+
 async def get_or_create_problem_post(bot, question_id: str) -> tuple[int | None, str]:
     """Look up or create a forum post for the given question ID.
 
@@ -375,16 +390,22 @@ async def get_or_create_problem_post(bot, question_id: str) -> tuple[int | None,
     if not bot.http_session:
         return None, "http session not ready"
 
-    # Check DB first
+    # Check DB first (fast path, no lock)
     existing = leetcode_get_problem(question_id)
     if existing:
         return existing["thread_id"], ""
 
-    data = await fetch_leetcode_problem(bot.http_session, question_id)
-    if not data["question"].get("title"):
-        return None, f"could not find LeetCode problem #{question_id}"
+    async with _post_lock(question_id):
+        # Re-check inside the lock: another task may have created it meanwhile.
+        existing = leetcode_get_problem(question_id)
+        if existing:
+            return existing["thread_id"], ""
 
-    return await _create_problem_forum_post(bot, data)
+        data = await fetch_leetcode_problem(bot.http_session, question_id)
+        if not data["question"].get("title"):
+            return None, f"could not find LeetCode problem #{question_id}"
+
+        return await _create_problem_forum_post(bot, data)
 
 
 async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]:
@@ -885,12 +906,19 @@ async def get_or_create_problem_post_archived(bot, slug: str) -> tuple[int | Non
             err = str(e)
 
         if thread_id is None:
-            # pied doesn't have it yet — try GraphQL (handles live contest problems)
-            try:
-                data = await fetch_problem_by_slug_graphql(bot.http_session, slug)
-                thread_id, err = await _create_problem_forum_post(bot, data)
-            except Exception as e:
-                print(f"[GRAPHQL FALLBACK] Failed to create post for '{slug}': {e}")
+            # pied doesn't have it yet — try GraphQL (handles live contest problems).
+            # Lock on the slug (get_or_create_problem_post has already released its
+            # lock by now, so this re-acquire is sequential, not nested).
+            async with _post_lock(slug):
+                existing = leetcode_get_problem_by_slug(slug)
+                if existing:
+                    thread_id = existing["thread_id"]
+                else:
+                    try:
+                        data = await fetch_problem_by_slug_graphql(bot.http_session, slug)
+                        thread_id, err = await _create_problem_forum_post(bot, data)
+                    except Exception as e:
+                        print(f"[GRAPHQL FALLBACK] Failed to create post for '{slug}': {e}")
 
     if thread_id:
         try:
