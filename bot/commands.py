@@ -132,12 +132,12 @@ async def delete_problem(interaction: discord.Interaction, question_id: int):
 
 
 @bot.tree.command(name="daily", description="(Admin) Post today's LeetCode daily problem (manual trigger).")
-@app_commands.describe(force="If true, post even if it was already posted.", test="If true, report what would be posted without posting anything.")
+@app_commands.describe(force="If true, post even if it was already posted.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def daily(interaction: discord.Interaction, force: bool = True, test: bool = False):
+async def daily(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
-        posted, msg = await post_leetcode_problem(bot, force=force, dry_run=test)
+        posted, msg = await post_leetcode_problem(bot, force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
@@ -145,12 +145,12 @@ async def daily(interaction: discord.Interaction, force: bool = True, test: bool
 
 
 @bot.tree.command(name="weekly", description="(Admin) Post the pre-contest thread for the upcoming weekly contest.")
-@app_commands.describe(force="If true, post even if it was already posted.", test="If true, report what would be posted without posting anything.")
+@app_commands.describe(force="If true, post even if it was already posted.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def weekly(interaction: discord.Interaction, force: bool = True, test: bool = False):
+async def weekly(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
-        posted, msg = await post_pre_contest(bot, "weekly", force=force, dry_run=test)
+        posted, msg = await post_pre_contest(bot, "weekly", force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
@@ -158,12 +158,12 @@ async def weekly(interaction: discord.Interaction, force: bool = True, test: boo
 
 
 @bot.tree.command(name="biweekly", description="(Admin) Post the pre-contest thread for the upcoming biweekly contest.")
-@app_commands.describe(force="If true, post even if it was already posted.", test="If true, report what would be posted without posting anything.")
+@app_commands.describe(force="If true, post even if it was already posted.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def biweekly(interaction: discord.Interaction, force: bool = True, test: bool = False):
+async def biweekly(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
-        posted, msg = await post_pre_contest(bot, "biweekly", force=force, dry_run=test)
+        posted, msg = await post_pre_contest(bot, "biweekly", force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
@@ -171,13 +171,13 @@ async def biweekly(interaction: discord.Interaction, force: bool = True, test: b
 
 
 @bot.tree.command(name="weekly-rankings", description="(Admin) Post rankings for a weekly contest (manual trigger).")
-@app_commands.describe(number="Contest number (e.g. 490). Defaults to last posted contest.", force="If true, post even if already posted.", test="If true, report what would be posted without posting anything.")
+@app_commands.describe(number="Contest number (e.g. 490). Defaults to last posted contest.", force="If true, post even if already posted.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def weekly_rankings(interaction: discord.Interaction, number: int | None = None, force: bool = True, test: bool = False):
+async def weekly_rankings(interaction: discord.Interaction, number: int | None = None, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
         slug_override = f"weekly-contest-{number}" if number else None
-        posted, msg = await post_contest_rankings(bot, "weekly", force=force, dry_run=test, slug_override=slug_override)
+        posted, msg = await post_contest_rankings(bot, "weekly", force=force, slug_override=slug_override)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
@@ -185,13 +185,13 @@ async def weekly_rankings(interaction: discord.Interaction, number: int | None =
 
 
 @bot.tree.command(name="biweekly-rankings", description="(Admin) Post rankings for a biweekly contest (manual trigger).")
-@app_commands.describe(number="Contest number (e.g. 177). Defaults to last posted contest.", force="If true, post even if already posted.", test="If true, report what would be posted without posting anything.")
+@app_commands.describe(number="Contest number (e.g. 177). Defaults to last posted contest.", force="If true, post even if already posted.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def biweekly_rankings(interaction: discord.Interaction, number: int | None = None, force: bool = True, test: bool = False):
+async def biweekly_rankings(interaction: discord.Interaction, number: int | None = None, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
         slug_override = f"biweekly-contest-{number}" if number else None
-        posted, msg = await post_contest_rankings(bot, "biweekly", force=force, dry_run=test, slug_override=slug_override)
+        posted, msg = await post_contest_rankings(bot, "biweekly", force=force, slug_override=slug_override)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
@@ -242,16 +242,57 @@ async def unlink(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="premium-weekly", description="(Admin) Post this week's premium weekly problem (manual trigger).")
-@app_commands.describe(force="If true, post even if it was already posted.", test="If true, report what would be posted without posting anything.")
+@app_commands.describe(force="If true, post even if it was already posted.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def premium_weekly(interaction: discord.Interaction, force: bool = True, test: bool = False):
+async def premium_weekly(interaction: discord.Interaction, force: bool = True):
     await interaction.response.defer(ephemeral=True)
     try:
-        posted, msg = await post_leetcode_weekly_premium(bot, force=force, dry_run=test)
+        posted, msg = await post_leetcode_weekly_premium(bot, force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="test", description="(Admin) Dry-run a posting command \u2014 see what it would do without posting anything.")
+@app_commands.describe(
+    command="Which posting command to dry-run",
+    number="Contest number for the rankings tests (defaults to last posted).",
+)
+@app_commands.choices(command=[
+    app_commands.Choice(name="daily", value="daily"),
+    app_commands.Choice(name="weekly", value="weekly"),
+    app_commands.Choice(name="biweekly", value="biweekly"),
+    app_commands.Choice(name="weekly-rankings", value="weekly-rankings"),
+    app_commands.Choice(name="biweekly-rankings", value="biweekly-rankings"),
+    app_commands.Choice(name="premium-weekly", value="premium-weekly"),
+])
+@app_commands.checks.has_permissions(manage_messages=True)
+async def test_cmd(interaction: discord.Interaction, command: app_commands.Choice[str], number: int | None = None):
+    await interaction.response.defer(ephemeral=True)
+    name = command.value
+    try:
+        if name == "daily":
+            _, msg = await post_leetcode_problem(bot, force=True, dry_run=True)
+        elif name == "weekly":
+            _, msg = await post_pre_contest(bot, "weekly", force=True, dry_run=True)
+        elif name == "biweekly":
+            _, msg = await post_pre_contest(bot, "biweekly", force=True, dry_run=True)
+        elif name == "weekly-rankings":
+            slug_override = f"weekly-contest-{number}" if number else None
+            _, msg = await post_contest_rankings(bot, "weekly", force=True, dry_run=True, slug_override=slug_override)
+        elif name == "biweekly-rankings":
+            slug_override = f"biweekly-contest-{number}" if number else None
+            _, msg = await post_contest_rankings(bot, "biweekly", force=True, dry_run=True, slug_override=slug_override)
+        elif name == "premium-weekly":
+            _, msg = await post_leetcode_weekly_premium(bot, force=True, dry_run=True)
+        else:
+            await interaction.followup.send(f"\u274c Unknown command: {name}", ephemeral=True)
+            return
+        await interaction.followup.send(msg, ephemeral=True)
+    except Exception as e:
+        log_error(f"[CMD /test {name}] {e!r}")
+        await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
 
 
 @bot.tree.command(name="post-solution", description="(Admin) Post a solution submission to a problem's forum thread.")
