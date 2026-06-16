@@ -1,7 +1,7 @@
 import os
 
 import discord
-from aiohttp import ClientSession, web
+from aiohttp import ClientSession, ClientTimeout, web
 from discord import app_commands
 
 from .config import GUILD_ID, WEB_BIND_HOST, WEB_PORT
@@ -33,7 +33,12 @@ class MyBot(discord.Client):
             raise SystemExit(f"Missing required env vars: {', '.join(missing)}")
 
         db_init()
-        self.http_session = ClientSession()
+        # Default timeout so a hung upstream (LeetCode/pied/GitHub/Spotify) can't
+        # stall the serial schedulers indefinitely. discord.py uses its own
+        # session for the gateway/REST, so this only affects app HTTP calls.
+        self.http_session = ClientSession(timeout=ClientTimeout(total=30))
+
+        self.tree.on_error = self._on_app_command_error
 
         app = make_web_app(self)
         self.web_runner = web.AppRunner(app)
@@ -50,6 +55,32 @@ class MyBot(discord.Client):
         else:
             await self.tree.sync()
             print("\u2705 Synced commands globally (can take a while to appear)")
+
+    async def _on_app_command_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError,
+    ):
+        # Without a global handler, a failed permission check (or any error raised
+        # before the body responds) leaves the interaction unanswered — the user
+        # just sees "This interaction failed". Always send something ephemeral.
+        if isinstance(error, app_commands.MissingPermissions):
+            msg = "❌ You don't have permission to use this command."
+        elif isinstance(error, app_commands.CheckFailure):
+            msg = "❌ You can't use this command here."
+        else:
+            msg = f"❌ Something went wrong: {error}"
+            print(f"[APP-CMD ERROR] {error!r}")
+            import traceback
+            traceback.print_exception(type(error), error, error.__traceback__)
+
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+        except discord.HTTPException:
+            pass
 
     async def close(self):
         if self.web_runner:

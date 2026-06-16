@@ -197,7 +197,8 @@ async def process_recap(bot, payload: dict):
             if len(content) > 2000:
                 content = content[:1997] + "..."
             try:
-                await thread.send(content)
+                # twitch_user is supplied by chatters — suppress mentions.
+                await thread.send(content, allowed_mentions=discord.AllowedMentions.none())
                 print(f"[RECAP] Posted solutions on thread {thread_id} for '{slug}'")
             except Exception as e:
                 print(f"[RECAP] Failed to send to thread {thread_id}: {e}")
@@ -253,7 +254,7 @@ async def _post_recap_message(bot, entries: list[dict], streamer_links: list[str
             chunk = streamer_links[i : i + 5]
             content = ("**Links shared**\n" if i == 0 else "") + "\n".join(chunk)
             try:
-                await channel.send(content=content)
+                await channel.send(content=content, allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:
                 print(f"[RECAP] Failed to send links message: {e}")
                 break

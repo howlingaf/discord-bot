@@ -5,6 +5,7 @@ shows a pop-out page with the member list and live text chat for that
 specific channel, streamed over WebSocket.
 """
 
+import hmac
 import json
 import secrets
 import time
@@ -54,7 +55,9 @@ def _resolve_token(request: web.Request) -> dict:
 
     # Static key: /voice-chat?key=<secret>&channel=<id> or /voice-chat/<id>?key=<secret>
     key = request.query.get("key", "")
-    if key and channel and VOICECHAT_SECRET and key == VOICECHAT_SECRET:
+    if key and channel and VOICECHAT_SECRET and hmac.compare_digest(
+        key.encode("utf-8"), VOICECHAT_SECRET.encode("utf-8")
+    ):
         try:
             return {"channel_id": int(channel), "user_id": 0}
         except ValueError:
@@ -230,7 +233,9 @@ def register_routes(app: web.Application, bot: "MyBot"):
     @routes.get("/voice-chat")
     async def voice_chat_page(request: web.Request):
         session = _resolve_token(request)
-        qs = request.query_string
+        # Mint a fresh per-session token for the page's WS connection so the raw
+        # ?key= secret is never embedded into the served HTML or the WS URL.
+        qs = f"token={create_session(session['channel_id'], session['user_id'])}"
         ch = bot.get_channel(session["channel_id"])
         ch_name = getattr(ch, "name", "Voice Chat")
         html = _build_html(qs, ch_name)
@@ -239,7 +244,7 @@ def register_routes(app: web.Application, bot: "MyBot"):
     @routes.get("/voice-chat/{channel_id}")
     async def voice_chat_page_path(request: web.Request):
         session = _resolve_token(request)
-        qs = request.query_string
+        qs = f"token={create_session(session['channel_id'], session['user_id'])}"
         ch = bot.get_channel(session["channel_id"])
         ch_name = getattr(ch, "name", "Voice Chat")
         html = _build_html(qs, ch_name, ws_path=f"/voice-chat/{request.match_info['channel_id']}/ws")

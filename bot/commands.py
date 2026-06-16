@@ -104,7 +104,9 @@ async def problem(interaction: discord.Interaction, question_id: int):
         else:
             await interaction.followup.send(f"\u274c {err}", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"\u274c Invalid problem ID.", ephemeral=True)
+        # Surface the real failure instead of always blaming the problem ID \u2014
+        # the genuine "not found" case is already handled by the err branch above.
+        await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
 
 
 @bot.tree.command(name="delete", description="(Admin) Delete a problem post by LeetCode ID.")
@@ -197,24 +199,29 @@ async def biweekly_rankings(interaction: discord.Interaction, number: int | None
 async def link(interaction: discord.Interaction, username: str):
     await interaction.response.defer(ephemeral=True)
     try:
-        # Check if this LeetCode username is already claimed by someone else
-        existing_owner = linked_users_get_by_username(username)
-        if existing_owner and existing_owner != interaction.user.id:
-            await interaction.followup.send("\u274c That LeetCode username is already linked to another user.", ephemeral=True)
-            return
-
-        # Verify the username exists on LeetCode
+        # Verify the username exists on LeetCode and resolve its canonical form.
+        # LeetCode usernames are case-insensitive, so we key off the canonical
+        # spelling the API returns rather than the raw (possibly mis-cased) input
+        # \u2014 otherwise "JohnDoe" and "johndoe" would link as two separate accounts.
         async with bot.http_session.get(f"https://leetcode-api-pied.vercel.app/user/{username}") as resp:
             if resp.status != 200:
                 await interaction.followup.send("\u274c Could not find that LeetCode username.", ephemeral=True)
                 return
             data = await resp.json()
-            if not data.get("username"):
-                await interaction.followup.send("\u274c Could not find that LeetCode username.", ephemeral=True)
-                return
 
-        linked_users_set(interaction.user.id, username)
-        await interaction.followup.send(f"\u2705 Linked to **{username}**.", ephemeral=True)
+        canonical = data.get("username")
+        if not canonical:
+            await interaction.followup.send("\u274c Could not find that LeetCode username.", ephemeral=True)
+            return
+
+        # Check if this LeetCode account is already claimed by someone else
+        existing_owner = linked_users_get_by_username(canonical)
+        if existing_owner and existing_owner != interaction.user.id:
+            await interaction.followup.send("\u274c That LeetCode username is already linked to another user.", ephemeral=True)
+            return
+
+        linked_users_set(interaction.user.id, canonical)
+        await interaction.followup.send(f"\u2705 Linked to **{canonical}**.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 

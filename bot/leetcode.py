@@ -952,20 +952,25 @@ async def _build_contest_rankings(bot, contest_title: str) -> list[dict]:
             idx = next((i for i, h in enumerate(sorted_history) if h.get("contest", {}).get("title") == contest_title), None)
             delta = None
             if idx is not None and idx > 0:
-                delta = entry["rating"] - sorted_history[idx - 1]["rating"]
+                prev_rating = sorted_history[idx - 1].get("rating")
+                if entry.get("rating") is not None and prev_rating is not None:
+                    delta = entry["rating"] - prev_rating
 
             guild = bot.get_guild(GUILD_ID)
             member = guild.get_member(discord_id) if guild else None
             discord_handle = member.display_name if member else username
 
+            # Use .get with defaults so one malformed history entry degrades that
+            # row gracefully instead of raising KeyError and dropping the whole
+            # participant (including their rating) from the rankings.
             rankings.append({
                 "discord_id": discord_id,
                 "username": username,
                 "discord_handle": discord_handle,
-                "solved": entry["problemsSolved"],
-                "total": entry["totalProblems"],
-                "time": _format_finish_time(entry["finishTimeInSeconds"]),
-                "rating": entry["rating"],
+                "solved": entry.get("problemsSolved", 0),
+                "total": entry.get("totalProblems", 0),
+                "time": _format_finish_time(entry.get("finishTimeInSeconds", 0)),
+                "rating": entry.get("rating", 0),
                 "delta": delta,
             })
         except Exception as e:
