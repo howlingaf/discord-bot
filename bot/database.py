@@ -6,7 +6,14 @@ from .config import DB_PATH
 
 
 def _db():
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # WAL lets a reader and the writer proceed without blocking each other, and
+    # busy_timeout makes a contended connection wait briefly instead of raising
+    # "database is locked" outright. check_same_thread=False so connections can
+    # be used from a worker thread once DB calls are moved off the event loop.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
 
 
 def db_init():
@@ -180,6 +187,18 @@ def db_init():
         )
         """)
 
+        # ---- Indexes for hot query paths ----
+        # The contest poller filters on these columns every cycle; leetcode_problems
+        # is looked up by slug on the recap path.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_contest_posts_rated ON leetcode_contest_posts(rated)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_contest_posts_pending ON leetcode_contest_posts(problems_posted, rankings_posted)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_contest_posts_type ON leetcode_contest_posts(contest_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_problems_slug ON leetcode_problems(title_slug)")
+
+        # Drop verify_state rows that have already expired (they're unusable and
+        # were previously only deleted on consume, leaking rows over time).
+        conn.execute("DELETE FROM verify_state WHERE expires_at < ?", (int(time.time()),))
+
         conn.commit()
 
 
@@ -200,15 +219,16 @@ def create_state(discord_user_id: int, ttl_sec: int = 15 * 60) -> str:
 def consume_state(state: str) -> int | None:
     now = int(time.time())
     with _db() as conn:
+        # Atomic delete-and-return so two concurrent callbacks can't both consume
+        # the same token (the first DELETE wins; the second sees no row).
         row = conn.execute(
-            "SELECT discord_user_id, expires_at FROM verify_state WHERE state=?",
+            "DELETE FROM verify_state WHERE state=? RETURNING discord_user_id, expires_at",
             (state,),
         ).fetchone()
-        if not row:
-            return None
-        conn.execute("DELETE FROM verify_state WHERE state=?", (state,))
         conn.commit()
 
+    if not row:
+        return None
     discord_user_id, expires_at = int(row[0]), int(row[1])
     return discord_user_id if expires_at >= now else None
 

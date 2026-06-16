@@ -2,5 +2,7 @@ CLAUDE.md
 
 .env
 overlay.db
+overlay.db-wal
+overlay.db-shm
 __pycache__/
 *.pyc
