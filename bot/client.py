@@ -6,6 +6,7 @@ from discord import app_commands
 
 from .config import GUILD_ID, WEB_BIND_HOST, WEB_PORT
 from .database import db_init
+from .logbus import log_error
 from .web import make_web_app
 
 intents = discord.Intents.default()
@@ -70,7 +71,8 @@ class MyBot(discord.Client):
             msg = "❌ You can't use this command here."
         else:
             msg = f"❌ Something went wrong: {error}"
-            print(f"[APP-CMD ERROR] {error!r}")
+            cmd = interaction.command.name if interaction.command else "?"
+            log_error(f"[CMD /{cmd}] {error!r}")
             import traceback
             traceback.print_exception(type(error), error, error.__traceback__)
 

@@ -6,6 +6,7 @@ from datetime import datetime
 import discord
 from aiohttp import ClientSession
 
+from .logbus import log_error
 from .config import (
     LEETCODE_DAILY_URL,
     LEETCODE_PROBLEM_URL,
@@ -450,7 +451,7 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
     try:
         daily_tag = await _get_or_create_forum_tag(forum, "Daily")
     except Exception as e:
-        print(f"[DAILY TAG] Could not get/create tag: {e}")
+        log_error(f"[DAILY TAG] Could not get/create tag: {e}")
 
     thread_name = f"{qid}. {qtitle}".strip(". ")[:100] if qid else qtitle[:100]
 
@@ -482,7 +483,7 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
                 difficulty=q.get("difficulty"),
             )
         except Exception as e:
-            print("[PROBLEM] forum post create failed:", repr(e))
+            log_error("[PROBLEM] forum post create failed:", repr(e))
     if daily_tag and thread_id:
         # Apply the Daily tag and unarchive so people can discuss
         try:
@@ -493,7 +494,7 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
                     new_tags.append(daily_tag)
                 await existing_thread.edit(archived=False, applied_tags=new_tags)
         except Exception as e:
-            print(f"[DAILY TAG] Failed to apply tag to thread {thread_id}: {e}")
+            log_error(f"[DAILY TAG] Failed to apply tag to thread {thread_id}: {e}")
 
     # Remove Daily tag from previous daily's thread
     if daily_tag and thread_id and old_thread_id and old_thread_id != thread_id:
@@ -503,7 +504,7 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
                 new_applied = [t for t in old_thread.applied_tags if t.id != daily_tag.id]
                 await old_thread.edit(applied_tags=new_applied)
         except Exception as e:
-            print(f"[DAILY TAG] Failed to remove tag from old thread {old_thread_id}: {e}")
+            log_error(f"[DAILY TAG] Failed to remove tag from old thread {old_thread_id}: {e}")
 
     # --- Notification card in text channel ---
     try:
@@ -546,7 +547,7 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
 
         await notif_channel.send(embed=notif_embed)
     except Exception as e:
-        print("[PROBLEM] notification send failed:", repr(e))
+        log_error("[PROBLEM] notification send failed:", repr(e))
 
     leetcode_set_daily_state(
         question_id=qid,
@@ -568,7 +569,7 @@ async def leetcode_daily_scheduler(bot):
             if posted:
                 print(f"[DAILY] {msg}")
         except Exception as e:
-            print("[DAILY] error:", repr(e))
+            log_error("[DAILY] error:", repr(e))
 
         await asyncio.sleep(300)  # poll every 5 minutes
 
@@ -707,7 +708,7 @@ async def fetch_zerotrac_ratings(session: ClientSession) -> dict[str, float]:
             data = await resp.json(content_type=None)
             return {p["TitleSlug"]: p["Rating"] for p in data}
     except Exception as e:
-        print(f"[ZEROTRAC] Failed to fetch ratings: {e}")
+        log_error(f"[ZEROTRAC] Failed to fetch ratings: {e}")
         return {}
 
 
@@ -735,7 +736,7 @@ async def get_zerotrac_data(session: ClientSession) -> list[dict]:
                 raise ValueError(f"HTTP {resp.status}")
             raw = await resp.json(content_type=None)
     except Exception as e:
-        print(f"[ZEROTRAC] Fetch failed, using cache: {e}")
+        log_error(f"[ZEROTRAC] Fetch failed, using cache: {e}")
         cached = zerotrac_cache_get_all()
         return list(cached.values())
 
@@ -860,7 +861,7 @@ async def _update_notif_embed(bot, contest_type: str, slug: str) -> None:
         msg = await channel.fetch_message(msg_id)
         await msg.edit(embed=embed)
     except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] notif embed update failed: {e}")
+        log_error(f"[CONTEST/{contest_type.upper()}] notif embed update failed: {e}")
 
 
 def _apply_frontend_ids(questions: list[dict]) -> None:
@@ -921,7 +922,7 @@ async def get_or_create_problem_post_archived(bot, slug: str) -> tuple[int | Non
                         data = await fetch_problem_by_slug_graphql(bot.http_session, slug)
                         thread_id, err = await _create_problem_forum_post(bot, data)
                     except Exception as e:
-                        print(f"[GRAPHQL FALLBACK] Failed to create post for '{slug}': {e}")
+                        log_error(f"[GRAPHQL FALLBACK] Failed to create post for '{slug}': {e}")
 
     if thread_id:
         try:
@@ -929,7 +930,7 @@ async def get_or_create_problem_post_archived(bot, slug: str) -> tuple[int | Non
             if isinstance(thread, discord.Thread) and not thread.archived:
                 await thread.edit(archived=True)
         except Exception as e:
-            print(f"[ARCHIVE] could not archive {thread_id}: {e}")
+            log_error(f"[ARCHIVE] could not archive {thread_id}: {e}")
     return thread_id, err
 
 
@@ -1005,7 +1006,7 @@ async def _build_contest_rankings(bot, contest_title: str) -> list[dict]:
                 "delta": delta,
             })
         except Exception as e:
-            print(f"[RANKINGS] Error fetching {username}: {e}")
+            log_error(f"[RANKINGS] Error fetching {username}: {e}")
 
     rankings.sort(key=lambda r: r["rating"], reverse=True)
     return rankings
@@ -1146,7 +1147,7 @@ async def post_pre_contest(
             rated=0,
         )
     except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] forum thread create failed: {e}")
+        log_error(f"[CONTEST/{contest_type.upper()}] forum thread create failed: {e}")
 
     notif_embed = build_contest_notif_embed(contest, forum_thread_url, show_countdown=True)
 
@@ -1217,7 +1218,7 @@ async def post_contest_problems(
                         await msg.edit(embed=unavailable_embed)
                         break
         except Exception as e:
-            print(f"[CONTEST/{contest_type.upper()}] failed to update thread with unavailable msg: {e}")
+            log_error(f"[CONTEST/{contest_type.upper()}] failed to update thread with unavailable msg: {e}")
         leetcode_contest_post_set_problems_posted(slug, 0)
         return True, f"{contest_type} 2h timeout — problems unavailable for slug={slug}"
 
@@ -1226,7 +1227,7 @@ async def post_contest_problems(
     try:
         questions = await fetch_contest_questions(bot.http_session, slug)
     except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
+        log_error(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
 
     if not questions:
         return False, f"{contest_type} problems not available yet for slug={slug}"
@@ -1242,9 +1243,9 @@ async def post_contest_problems(
             if thread_id_q:
                 question_thread_ids[q_slug] = thread_id_q
             elif err:
-                print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
+                log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
         except Exception as e:
-            print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
+            log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
     # Correct questionIds: GraphQL returns internal IDs; use frontend IDs from DB
     _apply_frontend_ids(questions)
@@ -1266,7 +1267,7 @@ async def post_contest_problems(
                     await msg.edit(embed=new_embed)
                     break
     except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] failed to update thread with problems: {e}")
+        log_error(f"[CONTEST/{contest_type.upper()}] failed to update thread with problems: {e}")
 
     leetcode_contest_post_set_problems_posted(slug, now)
     await _update_notif_embed(bot, contest_type, slug)
@@ -1335,7 +1336,7 @@ async def post_contest_rankings(
     try:
         questions = await fetch_contest_questions(bot.http_session, slug)
     except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
+        log_error(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
 
     question_thread_ids: dict[str, int] = {}
     for q in questions:
@@ -1347,9 +1348,9 @@ async def post_contest_rankings(
             if thread_id_q:
                 question_thread_ids[q_slug] = thread_id_q
             elif err:
-                print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
+                log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
         except Exception as e:
-            print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
+            log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
     # Correct questionIds: GraphQL returns internal IDs; use frontend IDs from DB
     _apply_frontend_ids(questions)
@@ -1372,13 +1373,13 @@ async def post_contest_rankings(
                         await msg.edit(embed=new_embed)
                         break
         except Exception as e:
-            print(f"[CONTEST/{contest_type.upper()}] failed to update thread embed: {e}")
+            log_error(f"[CONTEST/{contest_type.upper()}] failed to update thread embed: {e}")
 
     rankings: list[dict] = []
     try:
         rankings = await _build_contest_rankings(bot, title)
     except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
+        log_error(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
 
     if post:
         leetcode_contest_post_set_rankings_posted(slug)
@@ -1448,7 +1449,7 @@ async def post_leetcode_contest(
     try:
         questions = await fetch_contest_questions(bot.http_session, slug)
     except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
+        log_error(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
 
     # Fetch zerotrac ratings for spoiler display
     ratings_by_slug = await fetch_zerotrac_ratings(bot.http_session)
@@ -1464,9 +1465,9 @@ async def post_leetcode_contest(
             if thread_id:
                 question_thread_ids[q_slug] = thread_id
             elif err:
-                print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
+                log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
         except Exception as e:
-            print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
+            log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
     # Correct questionIds: GraphQL returns internal IDs; use frontend IDs from DB
     _apply_frontend_ids(questions)
@@ -1505,7 +1506,7 @@ async def post_leetcode_contest(
             rated=1 if is_rated else 0,
         )
     except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] forum thread create failed: {e}")
+        log_error(f"[CONTEST/{contest_type.upper()}] forum thread create failed: {e}")
 
     # Build simplified notif embed linking to the forum post
     notif_embed = build_contest_notif_embed(contest, forum_thread_url)
@@ -1517,7 +1518,7 @@ async def post_leetcode_contest(
         if rankings:
             rankings_embed = build_rankings_embed(rankings, title=f"{title} Rankings")
     except Exception as e:
-        print(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
+        log_error(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
 
     # Send notif + rankings to the text notification channel (no thread)
     channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
@@ -1581,7 +1582,7 @@ async def fetch_weekly_premium(session: ClientSession) -> dict | None:
                     if d and d <= today_str:
                         candidates.append(entry)
         except Exception as e:
-            print(f"[PREMIUM WEEKLY] fetch error for {year}-{month:02d}: {e}")
+            log_error(f"[PREMIUM WEEKLY] fetch error for {year}-{month:02d}: {e}")
 
     if not candidates:
         return None
@@ -1622,7 +1623,7 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
     try:
         weekly_premium_tag = await _get_or_create_forum_tag(forum, "Weekly Premium")
     except Exception as e:
-        print(f"[PREMIUM WEEKLY] Could not get/create tag: {e}")
+        log_error(f"[PREMIUM WEEKLY] Could not get/create tag: {e}")
 
     # Ensure a forum post exists for this problem
     thread_id: int | None = None
@@ -1633,9 +1634,9 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
         try:
             thread_id, err = await get_or_create_problem_post(bot, title_slug)
             if not thread_id:
-                print(f"[PREMIUM WEEKLY] forum post failed: {err}")
+                log_error(f"[PREMIUM WEEKLY] forum post failed: {err}")
         except Exception as e:
-            print(f"[PREMIUM WEEKLY] forum post error: {e}")
+            log_error(f"[PREMIUM WEEKLY] forum post error: {e}")
 
     # Apply "Weekly Premium" tag to new thread and archive it (premium content)
     if weekly_premium_tag and thread_id:
@@ -1647,14 +1648,14 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
                     new_tags.append(weekly_premium_tag)
                 await new_thread.edit(applied_tags=new_tags, archived=True)
         except Exception as e:
-            print(f"[PREMIUM WEEKLY] Failed to apply tag to thread {thread_id}: {e}")
+            log_error(f"[PREMIUM WEEKLY] Failed to apply tag to thread {thread_id}: {e}")
     elif thread_id:
         try:
             new_thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
             if isinstance(new_thread, discord.Thread) and not new_thread.archived:
                 await new_thread.edit(archived=True)
         except Exception as e:
-            print(f"[PREMIUM WEEKLY] Failed to archive thread {thread_id}: {e}")
+            log_error(f"[PREMIUM WEEKLY] Failed to archive thread {thread_id}: {e}")
 
     # Remove "Weekly Premium" tag from previous week's thread
     if weekly_premium_tag and old_thread_id and old_thread_id != thread_id:
@@ -1664,7 +1665,7 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
                 new_applied = [t for t in old_thread.applied_tags if t.id != weekly_premium_tag.id]
                 await old_thread.edit(applied_tags=new_applied)
         except Exception as e:
-            print(f"[PREMIUM WEEKLY] Failed to remove tag from old thread {old_thread_id}: {e}")
+            log_error(f"[PREMIUM WEEKLY] Failed to remove tag from old thread {old_thread_id}: {e}")
 
     # Look up stored problem for difficulty
     problem = leetcode_get_problem_by_slug(title_slug)
@@ -1705,7 +1706,7 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False) -> tuple[boo
         )
         await notif_channel.send(embed=notif_embed)
     except Exception as e:
-        print(f"[PREMIUM WEEKLY] notification send failed: {e}")
+        log_error(f"[PREMIUM WEEKLY] notification send failed: {e}")
 
     leetcode_set_premium_weekly_state(question_id=stored_qid, title_slug=title_slug, date=date)
     return True, f"posted premium weekly {date=} {title_slug=}"
@@ -1733,7 +1734,7 @@ async def leetcode_premium_weekly_scheduler(bot):
             if posted:
                 print(f"[PREMIUM WEEKLY] {msg}")
         except Exception as e:
-            print("[PREMIUM WEEKLY] error:", repr(e))
+            log_error("[PREMIUM WEEKLY] error:", repr(e))
         await asyncio.sleep(3600)  # poll hourly once due
 
 
@@ -1807,9 +1808,9 @@ async def check_and_update_contest_ratings(bot) -> int:
                         if thread_id_q:
                             question_thread_ids[q["titleSlug"]] = thread_id_q
                         elif err:
-                            print(f"[RATINGS UPDATE] problem post '{q['titleSlug']}': {err}")
+                            log_error(f"[RATINGS UPDATE] problem post '{q['titleSlug']}': {err}")
                     except Exception as e:
-                        print(f"[RATINGS UPDATE] problem post '{q['titleSlug']}' failed: {e}")
+                        log_error(f"[RATINGS UPDATE] problem post '{q['titleSlug']}' failed: {e}")
 
             # Correct questionIds: zerotrac/GraphQL use internal IDs; use frontend IDs from DB
             _apply_frontend_ids(questions)
@@ -1837,7 +1838,7 @@ async def check_and_update_contest_ratings(bot) -> int:
             updated += 1
             print(f"[RATINGS UPDATE] {contest_slug} → {tag_name} (avg computed)")
         except Exception as e:
-            print(f"[RATINGS UPDATE] Failed to update {contest_slug}: {e}")
+            log_error(f"[RATINGS UPDATE] Failed to update {contest_slug}: {e}")
 
     return updated
 
@@ -1859,7 +1860,7 @@ async def leetcode_contest_scheduler(bot):
                     if posted:
                         print(f"[CONTEST/{ctype.upper()}] {msg}")
                 except Exception as e:
-                    print(f"[CONTEST/{ctype.upper()}] pre-contest post error:", repr(e))
+                    log_error(f"[CONTEST/{ctype.upper()}] pre-contest post error:", repr(e))
 
             # Phase 1: update thread with problems (polls after contest starts)
             for ctype in ("weekly", "biweekly"):
@@ -1868,7 +1869,7 @@ async def leetcode_contest_scheduler(bot):
                     if posted:
                         print(f"[CONTEST/{ctype.upper()}] {msg}")
                 except Exception as e:
-                    print(f"[CONTEST/{ctype.upper()}] problems post error:", repr(e))
+                    log_error(f"[CONTEST/{ctype.upper()}] problems post error:", repr(e))
 
             # Phase 2: rankings (contest end → next contest's pre-contest window).
             # Iterate every contest with problems posted but rankings still pending,
@@ -1891,7 +1892,7 @@ async def leetcode_contest_scheduler(bot):
                     else:
                         print(f"[CONTEST/{ctype.upper()}] rankings skip slug={slug}: {msg}")
                 except Exception as e:
-                    print(f"[CONTEST/{ctype.upper()}] rankings post error slug={slug}:", repr(e))
+                    log_error(f"[CONTEST/{ctype.upper()}] rankings post error slug={slug}:", repr(e))
 
             # Keep notif embeds in sync (e.g. transition "In progress" → "Contest ended")
             for ctype in ("weekly", "biweekly"):
@@ -1908,7 +1909,7 @@ async def leetcode_contest_scheduler(bot):
                 if n:
                     print(f"[RATINGS UPDATE] Updated {n} contest(s) with ratings")
             except Exception as e:
-                print("[RATINGS UPDATE] error:", repr(e))
+                log_error("[RATINGS UPDATE] error:", repr(e))
 
             # Sleep logic
             now = int(datetime.now().timestamp())
@@ -1965,5 +1966,5 @@ async def leetcode_contest_scheduler(bot):
             await asyncio.sleep(max(sleep_time, 60))
 
         except Exception as e:
-            print("[CONTEST] error:", repr(e))
+            log_error("[CONTEST] error:", repr(e))
             await asyncio.sleep(60 * 60)  # retry in 1 hour on error

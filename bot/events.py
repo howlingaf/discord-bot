@@ -10,12 +10,16 @@ from .config import (
 from .spotify import count_humans_in_channel, handle_spotify_auto_pause
 from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler, leetcode_premium_weekly_scheduler
 from .voicechat import on_voice_update
+from .logbus import start as logbus_start
 from .client import bot
 
 
 @bot.event
 async def on_ready():
     print(f"\u2705 Logged in as {bot.user} (id={bot.user.id})")
+
+    # start the #discord-log error forwarder before the schedulers
+    logbus_start(bot)
 
     # start LeetCode schedulers once
     if not getattr(bot, "_daily_task_started", False):
