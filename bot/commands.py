@@ -60,6 +60,7 @@ from .database import (
     virtual_stats_set_last_contest,
 )
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
+from .logbus import log_error
 from .client import bot
 
 vc_register_command(bot)
@@ -104,6 +105,7 @@ async def problem(interaction: discord.Interaction, question_id: int):
         else:
             await interaction.followup.send(f"\u274c {err}", ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         # Surface the real failure instead of always blaming the problem ID \u2014
         # the genuine "not found" case is already handled by the err branch above.
         await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
@@ -129,6 +131,7 @@ async def delete_problem(interaction: discord.Interaction, question_id: int):
 
         await interaction.followup.send(f"\u2705 Deleted problem #{question_id} ({deleted['title']}).", ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -141,6 +144,7 @@ async def daily(interaction: discord.Interaction, force: bool = True):
         posted, msg = await post_leetcode_problem(bot, force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -153,6 +157,7 @@ async def weekly(interaction: discord.Interaction, force: bool = True):
         posted, msg = await post_pre_contest(bot, "weekly", force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -165,6 +170,7 @@ async def biweekly(interaction: discord.Interaction, force: bool = True):
         posted, msg = await post_pre_contest(bot, "biweekly", force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -178,6 +184,7 @@ async def weekly_rankings(interaction: discord.Interaction, number: int | None =
         posted, msg = await post_contest_rankings(bot, "weekly", force=force, slug_override=slug_override)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -191,6 +198,7 @@ async def biweekly_rankings(interaction: discord.Interaction, number: int | None
         posted, msg = await post_contest_rankings(bot, "biweekly", force=force, slug_override=slug_override)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -223,6 +231,7 @@ async def link(interaction: discord.Interaction, username: str):
         linked_users_set(interaction.user.id, canonical)
         await interaction.followup.send(f"\u2705 Linked to **{canonical}**.", ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -245,6 +254,7 @@ async def premium_weekly(interaction: discord.Interaction, force: bool = True):
         posted, msg = await post_leetcode_weekly_premium(bot, force=force)
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -264,6 +274,7 @@ async def post_solution(interaction: discord.Interaction, slug: str, user: str, 
         await thread.send(content)
         await interaction.followup.send(f"\u2705 Posted {user}'s solution to {slug}", ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -320,6 +331,7 @@ async def update_recap(interaction: discord.Interaction, slug: str):
         await last_msg.edit(embed=new_embed)
         await interaction.followup.send(f"\u2705 Added {question_id}. {problem_name} to recap", ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -342,6 +354,7 @@ async def contest_recap(interaction: discord.Interaction, slug: str):
         )
         await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
@@ -359,6 +372,7 @@ async def backfill_test(interaction: discord.Interaction):
                 return
             data = await resp.json(content_type=None)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed to fetch zerotrac data: {e}", ephemeral=True)
         return
 
@@ -404,9 +418,9 @@ async def backfill_test(interaction: discord.Interaction):
                 if thread_id:
                     question_thread_ids[p_slug] = thread_id
                 elif err:
-                    print(f"[BACKFILL TEST] problem post '{p_slug}': {err}")
+                    log_error(f"[BACKFILL TEST] problem post '{p_slug}': {err}")
             except Exception as e:
-                print(f"[BACKFILL TEST] problem post '{p_slug}' failed: {e}")
+                log_error(f"[BACKFILL TEST] problem post '{p_slug}' failed: {e}")
 
         contest_id_en = problems[0].get("ContestID_en", slug.replace("-", " ").title())
         mock_contest = {"title": contest_id_en, "titleSlug": slug, "startTime": 0}
@@ -448,7 +462,7 @@ async def _run_wipe(log_channel: discord.abc.Messageable, forum_channel: discord
             deleted += 1
             await asyncio.sleep(0.5)
         except Exception as e:
-            print(f"[WIPE] Failed to delete thread {thread.id}: {e}")
+            log_error(f"[WIPE] Failed to delete thread {thread.id}: {e}")
             failed += 1
 
     # Archived threads
@@ -459,10 +473,10 @@ async def _run_wipe(log_channel: discord.abc.Messageable, forum_channel: discord
                 deleted += 1
                 await asyncio.sleep(0.5)
             except Exception as e:
-                print(f"[WIPE] Failed to delete archived thread {thread.id}: {e}")
+                log_error(f"[WIPE] Failed to delete archived thread {thread.id}: {e}")
                 failed += 1
     except Exception as e:
-        print(f"[WIPE] Error iterating archived threads: {e}")
+        log_error(f"[WIPE] Error iterating archived threads: {e}")
 
     removed = leetcode_contest_posts_delete_by_type(contest_type)
     await log_channel.send(
@@ -521,7 +535,7 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
                     ch = await ch.edit(available_tags=list(ch.available_tags) + missing)
                 channel_cache[ctype] = ch
         except Exception as e:
-            print(f"[BACKFILL] could not set up forum channel for {ctype}: {e}")
+            log_error(f"[BACKFILL] could not set up forum channel for {ctype}: {e}")
 
     def _sort_key(slug: str) -> tuple[str, int]:
         ctype = _classify_contest(slug) or "z"
@@ -562,10 +576,10 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
                     if thread_id:
                         question_thread_ids[p_slug] = thread_id
                     elif err:
-                        print(f"[BACKFILL] problem post '{p_slug}': {err}")
+                        log_error(f"[BACKFILL] problem post '{p_slug}': {err}")
                     await asyncio.sleep(4.0)  # only sleep when we hit the API
             except Exception as e:
-                print(f"[BACKFILL] problem post '{p_slug}' failed: {e}")
+                log_error(f"[BACKFILL] problem post '{p_slug}' failed: {e}")
 
         contest_id_en = problems[0].get("ContestID_en", slug.replace("-", " ").title())
         mock_contest = {"title": contest_id_en, "titleSlug": slug, "startTime": 0}
@@ -590,7 +604,7 @@ async def _run_backfill(log_channel: discord.TextChannel, data: list[dict]):
             created += 1
             await asyncio.sleep(4.0)  # only sleep when we hit the API
         except Exception as e:
-            print(f"[BACKFILL] contest thread '{slug}' failed: {e}")
+            log_error(f"[BACKFILL] contest thread '{slug}' failed: {e}")
             failed += 1
 
         if (i + 1) % 25 == 0:
@@ -623,6 +637,7 @@ async def backfill_contests(interaction: discord.Interaction):
                 return
             data = await resp.json(content_type=None)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed to fetch zerotrac data: {e}", ephemeral=True)
         return
 
@@ -779,6 +794,7 @@ async def get_contest_cmd(interaction: discord.Interaction):
             contest_thread_id = thread.id
             thread_url = f"https://discord.com/channels/{GUILD_ID}/{contest_thread_id}"
         except Exception as e:
+            log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
             await interaction.followup.send(f"❌ Could not create contest post: {e}", ephemeral=True)
             return
 
@@ -788,7 +804,7 @@ async def get_contest_cmd(interaction: discord.Interaction):
         if isinstance(contest_thread, discord.Thread) and contest_thread.archived:
             await contest_thread.edit(archived=False)
     except Exception as e:
-        print(f"[GET-CONTEST] could not unarchive contest thread {contest_thread_id}: {e}")
+        log_error(f"[GET-CONTEST] could not unarchive contest thread {contest_thread_id}: {e}")
 
     virtual_contest_history_log(interaction.user.id, best_slug, user_rating)
     virtual_stats_set_last_contest(interaction.user.id, best_slug)
@@ -930,7 +946,7 @@ async def practice_cmd(interaction: discord.Interaction):
             if isinstance(problem_thread, discord.Thread) and problem_thread.archived:
                 await problem_thread.edit(archived=False)
         except Exception as e:
-            print(f"[PRACTICE] could not unarchive problem thread {thread_id}: {e}")
+            log_error(f"[PRACTICE] could not unarchive problem thread {thread_id}: {e}")
 
     virtual_problem_history_log(interaction.user.id, best_slug)
 
@@ -1019,6 +1035,7 @@ async def post_setup_info(interaction: discord.Interaction):
         await thread.edit(pinned=True, locked=True)
         await interaction.followup.send("✅ Posted.", ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"❌ {e}", ephemeral=True)
 
 
@@ -1043,7 +1060,7 @@ async def _run_archive_old_contests(log_channel):
                     archived += 1
                     await asyncio.sleep(0.5)
                 except Exception as e:
-                    print(f"[ARCHIVE CONTESTS] failed {thread.id}: {e}")
+                    log_error(f"[ARCHIVE CONTESTS] failed {thread.id}: {e}")
 
             await log_channel.send(f"✅ <#{ch_id}> — archived {archived} thread(s), kept 1")
         except Exception as e:
@@ -1069,6 +1086,7 @@ async def archive_inactive_problems(interaction: discord.Interaction):
             await interaction.followup.send("❌ Not a forum channel.", ephemeral=True)
             return
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"❌ Could not fetch problems channel: {e}", ephemeral=True)
         return
 
@@ -1089,7 +1107,7 @@ async def _run_archive_inactive(log_channel, forum: discord.ForumChannel):
             else:
                 skipped += 1
         except Exception as e:
-            print(f"[ARCHIVE PROBLEMS] failed {thread.id}: {e}")
+            log_error(f"[ARCHIVE PROBLEMS] failed {thread.id}: {e}")
             failed += 1
 
     await log_channel.send(
@@ -1123,6 +1141,7 @@ async def post_rating_info(interaction: discord.Interaction):
         )
         await interaction.followup.send("✅ Posted.", ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"❌ {e}", ephemeral=True)
 
 
@@ -1191,13 +1210,13 @@ async def _run_fix_problem_embeds(log_channel: discord.abc.Messageable, revert: 
                 if t.parent_id == LEETCODE_PROBLEMS_CHANNEL_ID:
                     all_threads.append((t, False))
         except Exception as e:
-            print(f"[FIX EMBEDS] failed to list active threads: {e}")
+            log_error(f"[FIX EMBEDS] failed to list active threads: {e}")
 
     try:
         async for t in ch.archived_threads(limit=None):
             all_threads.append((t, True))
     except Exception as e:
-        print(f"[FIX EMBEDS] failed to list archived threads: {e}")
+        log_error(f"[FIX EMBEDS] failed to list archived threads: {e}")
 
     fixed = skipped = failed = 0
     for thread, was_archived in all_threads:
@@ -1235,7 +1254,7 @@ async def _run_fix_problem_embeds(log_channel: discord.abc.Messageable, revert: 
             fixed += 1
             await asyncio.sleep(1.0)
         except Exception as e:
-            print(f"[FIX EMBEDS] error on thread {thread.id}: {e}")
+            log_error(f"[FIX EMBEDS] error on thread {thread.id}: {e}")
             failed += 1
 
     await log_channel.send(f"✅ Fix complete: {fixed} updated, {skipped} unchanged, {failed} failed.")
@@ -1293,6 +1312,7 @@ async def fix_problem_embeds(interaction: discord.Interaction, question_id: int 
             action = "Reverted" if revert else "Fixed"
             await interaction.followup.send(f"✅ {action} problem #{question_id}.", ephemeral=True)
         except Exception as e:
+            log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
             await interaction.followup.send(f"❌ {e}", ephemeral=True)
         return
 
@@ -1324,6 +1344,7 @@ async def rename_stream(interaction: discord.Interaction, name: str):
         await channel.edit(name=name)
         await interaction.followup.send(f"Renamed to **{name}**.", ephemeral=True)
     except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"Failed: {e}", ephemeral=True)
 
 
