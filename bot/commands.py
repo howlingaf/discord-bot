@@ -15,7 +15,9 @@ from .config import (
     LEETCODE_PROBLEMS_CHANNEL_ID,
     LEETCODE_RECAP_CHANNEL_ID,
     SECRET_STREAMS_CHANNEL_ID,
+    TWITCH_CONSOLE_CHANNEL_ID,
 )
+from .twitchconsole import call_console
 from .spotify import dm_spotify_link
 from .leetcode import (
     post_leetcode_contest,
@@ -309,6 +311,33 @@ async def twitch_unlink(interaction: discord.Interaction, handle: str):
     else:
         await interaction.response.send_message(
             f"\u2139\ufe0f No stored link for **{handle.strip().lower()}**.", ephemeral=True)
+
+
+@bot.tree.command(name="twitch", description="(Admin) Run a console command on the Twitch bot.")
+@app_commands.describe(command="Which Twitch-bot command to run", args="Optional arguments")
+@app_commands.choices(command=[
+    app_commands.Choice(name="status", value="status"),
+    app_commands.Choice(name="clear", value="lt_clear"),
+    app_commands.Choice(name="test", value="test"),
+])
+@app_commands.checks.has_permissions(manage_messages=True)
+async def twitch_console(interaction: discord.Interaction, command: app_commands.Choice[str], args: str | None = None):
+    # Accept only in the configured twitch-bot-console channel, from mods/owner.
+    if not TWITCH_CONSOLE_CHANNEL_ID:
+        await interaction.response.send_message(
+            "\u274c Twitch console channel isn't configured (set TWITCH_CONSOLE_CHANNEL_ID).", ephemeral=True)
+        return
+    if interaction.channel_id != TWITCH_CONSOLE_CHANNEL_ID:
+        await interaction.response.send_message(
+            f"\u274c Use this in <#{TWITCH_CONSOLE_CHANNEL_ID}>.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+    ok, output = await call_console(bot.http_session, command.value, args or "")
+    text = f"{'\u2705' if ok else '\u274c'} {output}"
+    if len(text) > 1900:
+        text = text[:1900] + "\u2026"
+    await interaction.followup.send(text, allowed_mentions=discord.AllowedMentions.none())
 
 
 @bot.tree.command(name="post-solution", description="(Admin) Post a solution submission to a problem's forum thread.")

@@ -55,6 +55,14 @@ LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID = int(os.getenv("LEETCODE_BIWEEKLY_FORUM_CHAN
 RECAP_SECRET = os.getenv("RECAP_SECRET", "")
 LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490
 
+# ---------------- Twitch bot console (outbound control API) ----------------
+# Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
+CONSOLE_SECRET = os.getenv("CONSOLE_SECRET", "")
+# Base URL of the Twitch bot's inbound HTTP control API (mirrors its DISCORD_BOT_URL).
+TWITCH_BOT_URL = (os.getenv("TWITCH_BOT_URL") or "http://127.0.0.1:8788").rstrip("/")
+# The one channel where /twitch console commands are accepted (0 = disabled).
+TWITCH_CONSOLE_CHANNEL_ID = int(os.getenv("TWITCH_CONSOLE_CHANNEL_ID") or "0")
+
 # ---------------- Voice Chat Overlay ----------------
 VOICECHAT_SECRET = os.getenv("VOICECHAT_SECRET", "")
 
