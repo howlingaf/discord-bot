@@ -322,9 +322,11 @@ async def post_solution(interaction: discord.Interaction, slug: str, user: str, 
             await interaction.followup.send(f"\u274c No forum post found for '{slug}'", ephemeral=True)
             return
 
+        from .twitchlink import solution_name, maybe_prompt
         thread = bot.get_channel(existing["thread_id"]) or await bot.fetch_channel(existing["thread_id"])
-        content = f"**{user}** submitted a solution!\n<{url}>"
-        await thread.send(content)
+        await maybe_prompt(bot, user)
+        content = f"{solution_name(user)} submitted a solution!\n<{url}>"
+        await thread.send(content, allowed_mentions=discord.AllowedMentions.none())
         await interaction.followup.send(f"\u2705 Posted {user}'s solution to {slug}", ephemeral=True)
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")

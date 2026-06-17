@@ -40,18 +40,21 @@ def _clean(s: str) -> str:
 
 
 # ---------------------------------------------------------------- hot path
-def link_suffix(twitch_user: str) -> str:
-    """Returns ' (<@id>)' if this handle is LINKED, else ''. Sync, never raises."""
+def solution_name(twitch_user: str) -> str:
+    """The name markdown to show in a "submitted a solution!" line.
+
+    If the handle is LINKED, returns just the silent `<@id>` mention (renders as
+    their Discord name); otherwise the bold Twitch handle. Sync, never raises.
+    """
     try:
         h = _norm(twitch_user)
-        if not h:
-            return ""
-        row = twitch_link_get(h)
-        if row and row["status"] == "linked" and row["discord_user_id"]:
-            return f" (<@{row['discord_user_id']}>)"
+        if h:
+            row = twitch_link_get(h)
+            if row and row["status"] == "linked" and row["discord_user_id"]:
+                return f"<@{row['discord_user_id']}>"
     except Exception as e:
-        log_error(f"[TWITCHLINK] link_suffix({twitch_user!r}) failed: {e!r}")
-    return ""
+        log_error(f"[TWITCHLINK] solution_name({twitch_user!r}) failed: {e!r}")
+    return f"**{twitch_user}**"
 
 
 # ---------------------------------------------------------------- matching
