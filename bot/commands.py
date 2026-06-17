@@ -314,11 +314,12 @@ async def twitch_unlink(interaction: discord.Interaction, handle: str):
 
 
 @bot.tree.command(name="twitch", description="(Admin) Run a console command on the Twitch bot.")
-@app_commands.describe(command="Which Twitch-bot command to run", args="Optional arguments")
+@app_commands.describe(command="Which Twitch-bot command to run", args="Message to send (required for 'say'; ignored by the others)")
 @app_commands.choices(command=[
     app_commands.Choice(name="status", value="status"),
     app_commands.Choice(name="clear", value="lt_clear"),
     app_commands.Choice(name="test", value="test"),
+    app_commands.Choice(name="say", value="say"),
 ])
 @app_commands.checks.has_permissions(manage_messages=True)
 async def twitch_console(interaction: discord.Interaction, command: app_commands.Choice[str], args: str | None = None):
@@ -330,6 +331,12 @@ async def twitch_console(interaction: discord.Interaction, command: app_commands
     if interaction.channel_id != TWITCH_CONSOLE_CHANNEL_ID:
         await interaction.response.send_message(
             f"\u274c Use this in <#{TWITCH_CONSOLE_CHANNEL_ID}>.", ephemeral=True)
+        return
+
+    # 'say' posts to Twitch chat, so it needs a message \u2014 don't call the API without one.
+    if command.value == "say" and not (args and args.strip()):
+        await interaction.response.send_message(
+            "\u274c `say` needs a message \u2014 e.g. `/twitch command:say args:hello chat \ud83d\udc4b`.", ephemeral=True)
         return
 
     await interaction.response.defer()
