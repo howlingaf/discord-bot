@@ -7,6 +7,7 @@ from .config import (
     LEETCODE_SUBMISSIONS_URL,
     LEETCODE_RECAP_CHANNEL_ID,
     STREAMER_NAME,
+    STREAMER_DISCORD_ID,
 )
 from .database import leetcode_get_problem_by_slug, leetcode_save_problem
 from .leetcode import (
@@ -15,7 +16,7 @@ from .leetcode import (
     get_or_create_problem_post,
     fetch_leetcode_problem,
 )
-from .twitchlink import link_suffix, maybe_prompt
+from .twitchlink import solution_name, maybe_prompt
 
 
 async def fetch_streamer_submissions(
@@ -180,7 +181,8 @@ async def process_recap(bot, payload: dict):
         if sub and (sub.get("statusDisplay") or "").lower() == "accepted":
             sub_id = sub.get("id") or ""
             sub_url = f"{LEETCODE_BASE}/problems/{slug}/submissions/{sub_id}/" if sub_id else ""
-            line = f"**{STREAMER_NAME}** submitted a solution!"
+            streamer_name = f"<@{STREAMER_DISCORD_ID}>" if STREAMER_DISCORD_ID else f"**{STREAMER_NAME}**"
+            line = f"{streamer_name} submitted a solution!"
             if sub_url:
                 line += f"\n<{sub_url}>"
             lines.append(line)
@@ -189,7 +191,7 @@ async def process_recap(bot, payload: dict):
             twitch_user = cs.get("twitch_user") or "anonymous"
             url = cs.get("url") or ""
             await maybe_prompt(bot, twitch_user)  # new handle -> mod approval prompt
-            line = f"**{twitch_user}**{link_suffix(twitch_user)} submitted a solution!"
+            line = f"{solution_name(twitch_user)} submitted a solution!"
             if url:
                 line += f"\n<{url}>"
             lines.append(line)

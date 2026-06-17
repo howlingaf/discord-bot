@@ -37,6 +37,9 @@ MAX_EXAMPLES = int(os.getenv("LEETCODE_MAX_EXAMPLES", "3"))
 # to "howlingaf" on 2026-07-07 — update this URL then.
 LEETCODE_SUBMISSIONS_URL = "https://leetcode-api-pied.vercel.app/user/howlongfantods/submissions"
 STREAMER_NAME = "howlingaf"
+# The streamer's Discord id (= the bot owner) so streamer solution lines can show
+# a silent @mention instead of the plain name. 0 -> fall back to STREAMER_NAME.
+STREAMER_DISCORD_ID = SPOTIFY_ALLOWED_USER_ID
 
 # ---------------- LeetCode Problems Forum ----------------
 LEETCODE_PROBLEMS_CHANNEL_ID = 1472231552607064144
