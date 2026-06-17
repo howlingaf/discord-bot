@@ -15,6 +15,7 @@ from .leetcode import (
     get_or_create_problem_post,
     fetch_leetcode_problem,
 )
+from .twitchlink import link_suffix, maybe_prompt
 
 
 async def fetch_streamer_submissions(
@@ -187,7 +188,8 @@ async def process_recap(bot, payload: dict):
         for cs in entries["chatters"]:
             twitch_user = cs.get("twitch_user") or "anonymous"
             url = cs.get("url") or ""
-            line = f"**{twitch_user}** submitted a solution!"
+            await maybe_prompt(bot, twitch_user)  # new handle -> mod approval prompt
+            line = f"**{twitch_user}**{link_suffix(twitch_user)} submitted a solution!"
             if url:
                 line += f"\n<{url}>"
             lines.append(line)
