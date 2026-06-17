@@ -62,8 +62,10 @@ SECRET_STREAMS_EMPTY_NAME = "super secret streams"
 # ---------------- Command Logging ----------------
 COMMAND_LOG_CHANNEL_ID = 1473840278497525872
 
-# ---------------- Error/Failure Log (mods-only #discord-log) ----------------
+# ---------------- Error/Failure Log + Bot Console (mods-only #discord-bot-console) ----------------
 DISCORD_LOG_CHANNEL_ID = 1516295491753607268
+# Twitch-link approval prompts post to the same mod console channel.
+TWITCH_LINK_PROMPT_CHANNEL_ID = DISCORD_LOG_CHANNEL_ID
 
 # ---------------- LeetCode Premium Weekly ----------------
 LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID = 1473828703334174894

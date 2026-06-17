@@ -21,6 +21,10 @@ async def on_ready():
     # start the #discord-log error forwarder before the schedulers
     logbus_start(bot)
 
+    # register restart-safe Twitch-link approval components
+    from .twitchlink import register as twitchlink_register
+    twitchlink_register(bot)
+
     # start LeetCode schedulers once
     if not getattr(bot, "_daily_task_started", False):
         bot._daily_task_started = True

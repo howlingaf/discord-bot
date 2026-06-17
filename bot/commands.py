@@ -42,6 +42,7 @@ from .database import (
     linked_users_get_by_username,
     linked_users_set,
     linked_users_delete,
+    twitch_link_delete,
     virtual_stats_get,
     virtual_stats_set,
     virtual_stats_update_rating,
@@ -293,6 +294,21 @@ async def test_cmd(interaction: discord.Interaction, command: app_commands.Choic
     except Exception as e:
         log_error(f"[CMD /test {name}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
+
+
+@bot.tree.command(name="twitch-unlink", description="(Admin) Forget a Twitch\u2194Discord link so the handle can be re-prompted.")
+@app_commands.describe(handle="The Twitch handle to forget")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def twitch_unlink(interaction: discord.Interaction, handle: str):
+    removed = twitch_link_delete(handle.strip().lower())
+    if removed:
+        await interaction.response.send_message(
+            f"\u2705 Forgot Twitch link for **{handle.strip().lower()}** \u2014 it'll be prompted again on the next solution.",
+            ephemeral=True,
+        )
+    else:
+        await interaction.response.send_message(
+            f"\u2139\ufe0f No stored link for **{handle.strip().lower()}**.", ephemeral=True)
 
 
 @bot.tree.command(name="post-solution", description="(Admin) Post a solution submission to a problem's forum thread.")
