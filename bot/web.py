@@ -10,20 +10,25 @@ from .config import (
     SPOTIFY_REDIRECT_URI,
     SPOTIFY_ALLOWED_USER_ID,
     RECAP_SECRET,
+    CONSOLE_SECRET,
 )
 from .database import consume_state, spotify_upsert_tokens, spotify_set_runtime
 from .recap import process_recap
 from .spotify import spotify_authorize_url, spotify_exchange_code
 
 
-def _require_recap_auth(request: web.Request):
-    """Constant-time Bearer check shared by the recap/post-solution endpoints."""
+def _require_bearer(request: web.Request, secret: str):
+    """Constant-time Bearer check. Compare as bytes: hmac.compare_digest raises
+    TypeError on non-ASCII str, which would turn a malformed header into a 500."""
     auth = request.headers.get("Authorization", "")
-    expected = f"Bearer {RECAP_SECRET}"
-    # Compare as bytes: hmac.compare_digest raises TypeError on non-ASCII str,
-    # which would turn a malformed header into a 500 instead of a 401.
-    if not RECAP_SECRET or not hmac.compare_digest(auth.encode("utf-8"), expected.encode("utf-8")):
+    expected = f"Bearer {secret}"
+    if not secret or not hmac.compare_digest(auth.encode("utf-8"), expected.encode("utf-8")):
         raise web.HTTPUnauthorized(text="Invalid or missing auth token")
+
+
+def _require_recap_auth(request: web.Request):
+    """Shared by the recap/post-solution endpoints."""
+    _require_bearer(request, RECAP_SECRET)
 
 
 def make_web_app(bot_instance) -> web.Application:
@@ -159,6 +164,26 @@ def make_web_app(bot_instance) -> web.Application:
 
         asyncio.create_task(_post())
         return web.json_response({"status": "accepted"})
+
+    # ---- Twitch bot log relay ----
+    @routes.post("/twitch-log")
+    async def twitch_log(request: web.Request):
+        _require_bearer(request, CONSOLE_SECRET)
+        try:
+            payload = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(text="Invalid JSON")
+
+        lines = payload.get("lines")
+        if lines is None:
+            msg = payload.get("message")
+            lines = [msg] if msg else []
+        if not isinstance(lines, list):
+            raise web.HTTPBadRequest(text="`lines` must be a list of strings")
+
+        from .twitchlog import push
+        push([str(x) for x in lines])
+        return web.json_response({"ok": True})
 
     app = web.Application()
     app.add_routes(routes)
