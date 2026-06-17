@@ -25,6 +25,10 @@ async def on_ready():
     from .twitchlink import register as twitchlink_register
     twitchlink_register(bot)
 
+    # start the relay that posts Twitch-bot logs into #twitch-bot-console
+    from .twitchlog import start as twitchlog_start
+    twitchlog_start(bot)
+
     # start LeetCode schedulers once
     if not getattr(bot, "_daily_task_started", False):
         bot._daily_task_started = True
