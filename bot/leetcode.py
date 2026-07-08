@@ -571,13 +571,20 @@ async def leetcode_daily_scheduler(bot):
     await bot.wait_until_ready()
     await asyncio.sleep(3)
     print("\u2705 LeetCode daily scheduler started (polling every 5 min)")
+    fails = 0
     while not bot.is_closed():
         try:
             posted, msg = await post_leetcode_problem(bot, force=False)
+            fails = 0
             if posted:
                 print(f"[DAILY] {msg}")
         except Exception as e:
-            log_error("[DAILY] error:", repr(e))
+            fails += 1
+            # The daily source (pied/Vercel) flakes intermittently; the next 5-min
+            # poll usually recovers. Only surface to #discord-bot-console if it keeps
+            # failing (~15 min), not on a single transient blip.
+            note = f"[DAILY] error (attempt {fails}): {e!r}"
+            (log_error if fails >= 3 else print)(note)
 
         await asyncio.sleep(300)  # poll every 5 minutes
 
@@ -930,7 +937,10 @@ async def get_or_create_problem_post_archived(bot, slug: str) -> tuple[int | Non
                         data = await fetch_problem_by_slug_graphql(bot.http_session, slug)
                         thread_id, err = await _create_problem_forum_post(bot, data)
                     except Exception as e:
-                        log_error(f"[GRAPHQL FALLBACK] Failed to create post for '{slug}': {e}")
+                        # Brand-new contest problems aren't indexed by either API for
+                        # a while after a contest ends; this self-heals on retry, so
+                        # keep it in journalctl but off the console feed.
+                        print(f"[GRAPHQL FALLBACK] could not create post for '{slug}' (may not be indexed yet): {e}")
 
     if thread_id:
         try:
@@ -1259,7 +1269,7 @@ async def post_contest_problems(
             if thread_id_q:
                 question_thread_ids[q_slug] = thread_id_q
             elif err:
-                log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
+                print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
         except Exception as e:
             log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
@@ -1378,7 +1388,7 @@ async def post_contest_rankings(
             if thread_id_q:
                 question_thread_ids[q_slug] = thread_id_q
             elif err:
-                log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
+                print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
         except Exception as e:
             log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
@@ -1495,7 +1505,7 @@ async def post_leetcode_contest(
             if thread_id:
                 question_thread_ids[q_slug] = thread_id
             elif err:
-                log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
+                print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
         except Exception as e:
             log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
 
@@ -1701,7 +1711,14 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False, dry_run: boo
             old_thread = bot.get_channel(old_thread_id) or await bot.fetch_channel(old_thread_id)
             if isinstance(old_thread, discord.Thread):
                 new_applied = [t for t in old_thread.applied_tags if t.id != weekly_premium_tag.id]
+                # Premium threads are archived, and Discord rejects tag edits on an
+                # archived thread — unarchive, edit, then re-archive.
+                was_archived = old_thread.archived
+                if was_archived:
+                    await old_thread.edit(archived=False)
                 await old_thread.edit(applied_tags=new_applied)
+                if was_archived:
+                    await old_thread.edit(archived=True)
         except Exception as e:
             log_error(f"[PREMIUM WEEKLY] Failed to remove tag from old thread {old_thread_id}: {e}")
 
