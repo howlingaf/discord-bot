@@ -22,7 +22,6 @@ from .spotify import dm_spotify_link
 from .leetcode import (
     post_leetcode_contest,
     post_pre_contest,
-    post_contest_rankings,
     post_leetcode_problem,
     post_leetcode_weekly_premium,
     get_or_create_problem_post,
@@ -173,34 +172,6 @@ async def biweekly(interaction: discord.Interaction, force: bool = True):
         await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
-@bot.tree.command(name="weekly-rankings", description="(Admin) Post rankings for a weekly contest (manual trigger).")
-@app_commands.describe(number="Contest number (e.g. 490). Defaults to last posted contest.", force="If true, post even if already posted.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def weekly_rankings(interaction: discord.Interaction, number: int | None = None, force: bool = True):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        slug_override = f"weekly-contest-{number}" if number else None
-        posted, msg = await post_contest_rankings(bot, "weekly", force=force, slug_override=slug_override)
-        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
-
-
-@bot.tree.command(name="biweekly-rankings", description="(Admin) Post rankings for a biweekly contest (manual trigger).")
-@app_commands.describe(number="Contest number (e.g. 177). Defaults to last posted contest.", force="If true, post even if already posted.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def biweekly_rankings(interaction: discord.Interaction, number: int | None = None, force: bool = True):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        slug_override = f"biweekly-contest-{number}" if number else None
-        posted, msg = await post_contest_rankings(bot, "biweekly", force=force, slug_override=slug_override)
-        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
-
-
 @bot.tree.command(name="link", description="Link your Discord account to your LeetCode profile.")
 @app_commands.describe(username="Your LeetCode username")
 async def link(interaction: discord.Interaction, username: str):
@@ -260,18 +231,15 @@ async def premium_weekly(interaction: discord.Interaction, force: bool = True):
 @bot.tree.command(name="test", description="(Admin) Dry-run a posting command \u2014 see what it would do without posting anything.")
 @app_commands.describe(
     command="Which posting command to dry-run",
-    number="Contest number for the rankings tests (defaults to last posted).",
 )
 @app_commands.choices(command=[
     app_commands.Choice(name="daily", value="daily"),
     app_commands.Choice(name="weekly", value="weekly"),
     app_commands.Choice(name="biweekly", value="biweekly"),
-    app_commands.Choice(name="weekly-rankings", value="weekly-rankings"),
-    app_commands.Choice(name="biweekly-rankings", value="biweekly-rankings"),
     app_commands.Choice(name="premium-weekly", value="premium-weekly"),
 ])
 @app_commands.checks.has_permissions(manage_messages=True)
-async def test_cmd(interaction: discord.Interaction, command: app_commands.Choice[str], number: int | None = None):
+async def test_cmd(interaction: discord.Interaction, command: app_commands.Choice[str]):
     await interaction.response.defer(ephemeral=True)
     name = command.value
     try:
@@ -281,12 +249,6 @@ async def test_cmd(interaction: discord.Interaction, command: app_commands.Choic
             _, msg = await post_pre_contest(bot, "weekly", force=True, dry_run=True)
         elif name == "biweekly":
             _, msg = await post_pre_contest(bot, "biweekly", force=True, dry_run=True)
-        elif name == "weekly-rankings":
-            slug_override = f"weekly-contest-{number}" if number else None
-            _, msg = await post_contest_rankings(bot, "weekly", force=True, dry_run=True, slug_override=slug_override)
-        elif name == "biweekly-rankings":
-            slug_override = f"biweekly-contest-{number}" if number else None
-            _, msg = await post_contest_rankings(bot, "biweekly", force=True, dry_run=True, slug_override=slug_override)
         elif name == "premium-weekly":
             _, msg = await post_leetcode_weekly_premium(bot, force=True, dry_run=True)
         else:

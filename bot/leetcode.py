@@ -14,8 +14,6 @@ from .config import (
     LEETCODE_PROBLEMS_CHANNEL_ID,
     LEETCODE_DAILY_NOTIF_CHANNEL_ID,
     MAX_EXAMPLES,
-    LEETCODE_WEEKLY_CHANNEL_ID,
-    LEETCODE_BIWEEKLY_CHANNEL_ID,
     LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
     LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
     GUILD_ID,
@@ -33,12 +31,8 @@ from .database import (
     leetcode_contest_post_get,
     leetcode_contest_post_save,
     leetcode_contest_post_set_rated,
-    leetcode_contest_post_set_rankings_posted,
     leetcode_contest_post_set_problems_posted,
-    leetcode_contest_post_set_notif_message_id,
     leetcode_contest_posts_get_unrated,
-    leetcode_contest_posts_get_pending_rankings,
-    linked_users_all,
     zerotrac_cache_get_all,
     zerotrac_cache_updated_at,
     zerotrac_cache_upsert_all,
@@ -595,11 +589,6 @@ async def leetcode_daily_scheduler(bot):
 CONTEST_COLOR = 0xFFA116   # LeetCode orange
 CONTEST_RECAP_COLOR = 0x9B59B6  # purple
 
-CONTEST_CHANNEL_MAP: dict[str, int] = {
-    "weekly": LEETCODE_WEEKLY_CHANNEL_ID,
-    "biweekly": LEETCODE_BIWEEKLY_CHANNEL_ID,
-}
-
 CONTEST_FORUM_CHANNEL_MAP: dict[str, int] = {
     "weekly":   LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
     "biweekly": LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
@@ -814,70 +803,6 @@ def build_contest_forum_embed(
     )
 
 
-def build_contest_notif_embed(contest: dict, forum_thread_url: str, *, show_countdown: bool = False) -> discord.Embed:
-    title = contest.get("title") or "LeetCode Contest"
-    slug = contest.get("titleSlug") or ""
-    start_ts = contest.get("startTime") or 0
-
-    url = f"{LEETCODE_BASE}/contest/{slug}/" if slug else LEETCODE_BASE
-
-    desc_lines: list[str] = []
-    if show_countdown and start_ts:
-        desc_lines.append(f"\U0001f550 Starts <t:{start_ts}:R>")
-    if forum_thread_url:
-        desc_lines.append(f"\U0001f449 [View Post]({forum_thread_url})")
-
-    return discord.Embed(
-        title=title,
-        url=url,
-        description="\n\n".join(desc_lines) if desc_lines else None,
-        color=CONTEST_RECAP_COLOR,
-    )
-
-
-async def _update_notif_embed(bot, contest_type: str, slug: str) -> None:
-    """Update the pre-contest notification embed to reflect current contest phase."""
-    try:
-        post = leetcode_contest_post_get(slug)
-        if not post or not post.get("notif_message_id"):
-            return
-
-        msg_id = post["notif_message_id"]
-        start_ts = post.get("start_time") or 0
-        end_ts = start_ts + 5400  # 90 min
-        thread_id = post.get("thread_id")
-        now = int(datetime.now().timestamp())
-
-        if start_ts and now < start_ts:
-            status_line = f"\U0001f550 Starts <t:{start_ts}:R>"
-        elif start_ts and now < end_ts:
-            status_line = f"\U0001f7e2 In progress \u2014 ends <t:{end_ts}:R>"
-        else:
-            status_line = "\u2705 Contest ended"
-
-        title = slug.replace("-", " ").title()
-        url = f"{LEETCODE_BASE}/contest/{slug}/"
-        desc_lines = [status_line]
-        if thread_id:
-            forum_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-            desc_lines.append(f"\U0001f449 [View Post]({forum_url})")
-
-        embed = discord.Embed(
-            title=title, url=url,
-            description="\n\n".join(desc_lines),
-            color=CONTEST_RECAP_COLOR,
-        )
-
-        channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
-        if not channel_id:
-            return
-        channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
-        msg = await channel.fetch_message(msg_id)
-        await msg.edit(embed=embed)
-    except Exception as e:
-        log_error(f"[CONTEST/{contest_type.upper()}] notif embed update failed: {e}")
-
-
 def _apply_frontend_ids(questions: list[dict]) -> None:
     """Replace GraphQL/zerotrac internal questionIds with the frontend display IDs stored in the DB."""
     for q in questions:
@@ -951,118 +876,6 @@ async def get_or_create_problem_post_archived(bot, slug: str) -> tuple[int | Non
     return thread_id, err
 
 
-def _format_finish_time(seconds: int) -> str:
-    h = seconds // 3600
-    m = (seconds % 3600) // 60
-    s = seconds % 60
-    if h:
-        return f"{h}:{m:02d}:{s:02d}"
-    return f"{m}:{s:02d}"
-
-
-async def fetch_user_contest_history(session: ClientSession, username: str) -> dict:
-    async with session.get(f"https://leetcode-api-pied.vercel.app/user/{username}/contests") as resp:
-        if resp.status != 200:
-            return {}
-        return await resp.json()
-
-
-async def _ratings_ready(session: ClientSession, contest_title: str) -> bool:
-    """Returns True if at least one linked user has their rating for this contest."""
-    users = linked_users_all()
-    for user in users:
-        try:
-            data = await fetch_user_contest_history(session, user["leetcode_username"])
-            history = [h for h in (data.get("userContestRankingHistory") or []) if h.get("attended")]
-            if any(h.get("contest", {}).get("title") == contest_title for h in history):
-                return True
-        except Exception:
-            continue
-    return False
-
-
-async def _build_contest_rankings(bot, contest_title: str) -> list[dict]:
-    users = linked_users_all()
-    rankings = []
-
-    for user in users:
-        discord_id = user["discord_user_id"]
-        username = user["leetcode_username"]
-        try:
-            data = await fetch_user_contest_history(bot.http_session, username)
-            history = [h for h in (data.get("userContestRankingHistory") or []) if h.get("attended")]
-
-            entry = next((h for h in history if h.get("contest", {}).get("title") == contest_title), None)
-            if not entry:
-                continue
-
-            # Compute delta from previous contest entry (sorted oldest→newest)
-            sorted_history = sorted(history, key=lambda h: h.get("contest", {}).get("startTime", 0))
-            idx = next((i for i, h in enumerate(sorted_history) if h.get("contest", {}).get("title") == contest_title), None)
-            delta = None
-            if idx is not None and idx > 0:
-                prev_rating = sorted_history[idx - 1].get("rating")
-                if entry.get("rating") is not None and prev_rating is not None:
-                    delta = entry["rating"] - prev_rating
-
-            guild = bot.get_guild(GUILD_ID)
-            member = guild.get_member(discord_id) if guild else None
-            discord_handle = member.display_name if member else username
-
-            # Use .get with defaults so one malformed history entry degrades that
-            # row gracefully instead of raising KeyError and dropping the whole
-            # participant (including their rating) from the rankings.
-            rankings.append({
-                "discord_id": discord_id,
-                "username": username,
-                "discord_handle": discord_handle,
-                "solved": entry.get("problemsSolved", 0),
-                "total": entry.get("totalProblems", 0),
-                "time": _format_finish_time(entry.get("finishTimeInSeconds", 0)),
-                "rating": entry.get("rating", 0),
-                "delta": delta,
-            })
-        except Exception as e:
-            log_error(f"[RANKINGS] Error fetching {username}: {e}")
-
-    rankings.sort(key=lambda r: r["rating"], reverse=True)
-    return rankings
-
-
-def build_rankings_embed(rankings: list[dict], *, title: str = "Rankings") -> discord.Embed:
-    embed = discord.Embed(title=title, color=CONTEST_RECAP_COLOR)
-
-    if not rankings:
-        embed.description = "No linked users participated in this contest."
-        return embed
-
-    pings = "\n".join(
-        f"{i}. <@{r['discord_id']}> · [View Profile](https://leetcode.com/{r['username']}/)"
-        for i, r in enumerate(rankings, 1)
-    )
-
-    # Build fixed-width columns
-    rows = []
-    for i, r in enumerate(rankings, 1):
-        delta_str = ""
-        if r["delta"] is not None:
-            sign = "+" if r["delta"] >= 0 else ""
-            delta_str = f"{sign}{r['delta']:.0f}"
-        rows.append((str(i), r["discord_handle"], f"{r['solved']}/{r['total']}", r["time"], f"{r['rating']:.0f}", delta_str))
-
-    headers = ("Rank", "Username", "Solved", "Time", "Rating", "+/-")
-    col_widths = [max(len(h), max(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
-
-    def fmt_row(cells):
-        return "  ".join(c.ljust(w) for c, w in zip(cells, col_widths)).rstrip()
-
-    table_lines = [fmt_row(headers), "─" * sum(col_widths + [2] * (len(col_widths) - 1))]
-    table_lines.extend(fmt_row(row) for row in rows)
-
-    embed.description = f"{pings}\n```\n" + "\n".join(table_lines) + "\n```"
-    return embed
-
-
 _DIFFICULTY_TAG_WEIGHTS = [3, 4, 5, 6]  # Q1 → Q4 fallback weights
 
 
@@ -1103,7 +916,7 @@ async def post_pre_contest(
     dry_run: bool = False,
     contests: list[dict] | None = None,
 ) -> tuple[bool, str]:
-    """Phase 0: create forum thread + send notif 24h before contest starts (typically Friday).
+    """Phase 0: create the contest forum thread 24h before it starts (typically Friday).
 
     Does NOT wait for contest start — fires as soon as we're within 24h of start_ts.
     Thread is created with a countdown embed; problems are filled in by post_contest_problems.
@@ -1154,7 +967,6 @@ async def post_pre_contest(
     forum_embed = build_pre_contest_embed(contest)
 
     forum_thread_id: int | None = None
-    forum_thread_url: str = ""
     try:
         unrated_tag = await _get_or_create_forum_tag(forum_channel, "Rating Pending")
         result = await forum_channel.create_thread(
@@ -1165,7 +977,6 @@ async def post_pre_contest(
         )
         forum_thread = result.thread if hasattr(result, "thread") else result
         forum_thread_id = forum_thread.id
-        forum_thread_url = f"https://discord.com/channels/{GUILD_ID}/{forum_thread_id}"
         leetcode_contest_post_save(
             slug, contest_type, forum_thread_id,
             start_time=start_ts,
@@ -1173,21 +984,6 @@ async def post_pre_contest(
         )
     except Exception as e:
         log_error(f"[CONTEST/{contest_type.upper()}] forum thread create failed: {e}")
-
-    notif_embed = build_contest_notif_embed(contest, forum_thread_url, show_countdown=True)
-
-    channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
-    if not channel_id:
-        return False, f"no notif channel configured for {contest_type}"
-
-    channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
-    if not isinstance(channel, discord.TextChannel):
-        return False, f"{contest_type} notif channel must be a text channel"
-
-    notif_msg = await channel.send(embed=notif_embed)
-
-    if slug:
-        leetcode_contest_post_set_notif_message_id(slug, notif_msg.id)
 
     leetcode_set_contest_state(contest_type, slug, thread_id=forum_thread_id)
     return True, f"posted pre-contest {contest_type} slug={slug}"
@@ -1295,148 +1091,7 @@ async def post_contest_problems(
         log_error(f"[CONTEST/{contest_type.upper()}] failed to update thread with problems: {e}")
 
     leetcode_contest_post_set_problems_posted(slug, now)
-    await _update_notif_embed(bot, contest_type, slug)
     return True, f"{contest_type} problems posted for slug={slug}"
-
-
-async def post_contest_rankings(
-    bot,
-    contest_type: str,
-    *,
-    force: bool = False,
-    dry_run: bool = False,
-    slug_override: str | None = None,
-    contests: list[dict] | None = None,
-) -> tuple[bool, str]:
-    """Phase 2: create problem posts, update contest thread embed, post rankings.
-
-    Driven entirely from DB state — does not depend on the contests API, which
-    rolls over to the next contest as soon as the current one ends.
-
-    slug_override: explicitly target a contest slug (e.g. "weekly-contest-490"),
-    bypassing the DB state lookup. Useful when the state has moved on.
-    """
-    if not bot.http_session:
-        return False, "http session not ready"
-
-    if slug_override:
-        slug = slug_override
-    else:
-        # Phase 1 must be done — get slug from DB state
-        slug = leetcode_get_contest_state(contest_type)
-        if not slug:
-            return False, f"{contest_type} no contest posted yet (phase 1 pending)"
-
-    post = leetcode_contest_post_get(slug)
-    # post may be None if phase 1 was never run for this slug (e.g. manually specified)
-
-    start_time = (post.get("start_time") if post else None) or 0
-    end_ts = start_time + 5400  # all LeetCode contests are 90 min
-    title = slug.replace("-", " ").title()  # "Weekly Contest 490"
-
-    if not force:
-        if not post:
-            return False, f"{contest_type} no post record for slug={slug} (use force=True or run /weekly first)"
-
-        now = int(datetime.now().timestamp())
-        if start_time and now < end_ts:
-            return False, f"{contest_type} hasn't ended yet, ends <t:{end_ts}:R>"
-
-        if post.get("rankings_posted"):
-            return False, f"{contest_type} rankings already posted for slug={slug}"
-
-        # Give up 24h before the next contest of the same type
-        deadline_ts = _next_contest_deadline(contests or [], contest_type, fallback_after=end_ts)
-        if now > deadline_ts:
-            if not dry_run:
-                leetcode_contest_post_set_rankings_posted(slug)
-            return True, f"{contest_type} deadline passed, no rankings for slug={slug}"
-
-        if linked_users_all():
-            if not await _ratings_ready(bot.http_session, title):
-                return False, f"{contest_type} ratings not yet available, will retry"
-
-    if dry_run:
-        preview_questions: list[dict] = []
-        try:
-            preview_questions = await fetch_contest_questions(bot.http_session, slug)
-        except Exception:
-            pass
-        preview_ranked = await _build_contest_rankings(bot, title)
-        return False, (
-            f"🧪 DRY RUN — would post {contest_type} rankings for {slug}: "
-            f"{len(preview_questions)} problem(s), {len(preview_ranked)} ranked user(s)"
-        )
-
-    mock_contest = {"title": title, "titleSlug": slug, "startTime": start_time}
-
-    # Create individual problem posts now that the contest is over
-    questions: list[dict] = []
-    try:
-        questions = await fetch_contest_questions(bot.http_session, slug)
-    except Exception as e:
-        log_error(f"[CONTEST/{contest_type.upper()}] question fetch failed: {e}")
-
-    question_thread_ids: dict[str, int] = {}
-    for q in questions:
-        q_slug = q.get("titleSlug") or ""
-        if not q_slug:
-            continue
-        try:
-            thread_id_q, err = await get_or_create_problem_post_archived(bot, q_slug)
-            if thread_id_q:
-                question_thread_ids[q_slug] = thread_id_q
-            elif err:
-                print(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}': {err}")
-        except Exception as e:
-            log_error(f"[CONTEST/{contest_type.upper()}] forum post '{q_slug}' failed: {e}")
-
-    # Correct questionIds: GraphQL returns internal IDs; use frontend IDs from DB
-    _apply_frontend_ids(questions)
-
-    # Update the contest thread embed with Discord problem links (ratings added by phase 3)
-    if questions and post:
-        forum_thread_id = post["thread_id"]
-        try:
-            new_embed = build_contest_forum_embed(
-                mock_contest, questions, {}, question_thread_ids,
-                fallback_contest_slug=slug,
-            )
-            thread = bot.get_channel(forum_thread_id) or await bot.fetch_channel(forum_thread_id)
-            if isinstance(thread, discord.Thread):
-                try:
-                    starter = await thread.fetch_message(forum_thread_id)
-                    await starter.edit(embed=new_embed)
-                except Exception:
-                    async for msg in thread.history(limit=1, oldest_first=True):
-                        await msg.edit(embed=new_embed)
-                        break
-        except Exception as e:
-            log_error(f"[CONTEST/{contest_type.upper()}] failed to update thread embed: {e}")
-
-    rankings: list[dict] = []
-    try:
-        rankings = await _build_contest_rankings(bot, title)
-    except Exception as e:
-        log_error(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
-
-    if post:
-        leetcode_contest_post_set_rankings_posted(slug)
-        await _update_notif_embed(bot, contest_type, slug)
-
-    if not rankings:
-        return True, f"no participants for {contest_type} slug={slug}, skipping rankings post"
-
-    channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
-    if not channel_id:
-        return False, f"no notif channel configured for {contest_type}"
-
-    channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
-    if not isinstance(channel, discord.TextChannel):
-        return False, f"{contest_type} notif channel must be a text channel"
-
-    await channel.send(embed=build_rankings_embed(rankings, title=f"{title} Rankings"))
-    return True, f"posted rankings for {contest_type} slug={slug}"
 
 
 async def post_leetcode_contest(
@@ -1475,13 +1130,6 @@ async def post_leetcode_contest(
         now = int(datetime.now().timestamp())
         if start_ts and now < end_ts:
             return False, f"{contest_type} ends <t:{end_ts}:R>, too early to post recap"
-
-        # Wait for at least one linked user's rating to be available
-        # (LeetCode processes ratings 30-60 min after contest ends)
-        # After 4 hours, post regardless in case no linked users participated
-        if linked_users_all() and now < end_ts + 20 * 60:
-            if not await _ratings_ready(bot.http_session, contest.get("title") or ""):
-                return False, f"{contest_type} ratings not yet available, will retry"
 
     # Fetch contest questions via GraphQL
     questions: list[dict] = []
@@ -1527,7 +1175,6 @@ async def post_leetcode_contest(
     is_rated = tag_name != "Rating Pending"
 
     forum_thread_id: int | None = None
-    forum_thread_url: str = ""
     try:
         contest_tag = await _get_or_create_forum_tag(forum_channel, tag_name)
         result = await forum_channel.create_thread(
@@ -1538,7 +1185,6 @@ async def post_leetcode_contest(
         )
         forum_thread = result.thread if hasattr(result, "thread") else result
         forum_thread_id = forum_thread.id
-        forum_thread_url = f"https://discord.com/channels/{GUILD_ID}/{forum_thread_id}"
         leetcode_contest_post_save(
             slug, contest_type, forum_thread_id,
             start_time=start_ts,
@@ -1547,33 +1193,7 @@ async def post_leetcode_contest(
     except Exception as e:
         log_error(f"[CONTEST/{contest_type.upper()}] forum thread create failed: {e}")
 
-    # Build simplified notif embed linking to the forum post
-    notif_embed = build_contest_notif_embed(contest, forum_thread_url)
-
-    # Fetch rankings
-    rankings_embed: discord.Embed | None = None
-    try:
-        rankings = await _build_contest_rankings(bot, title)
-        if rankings:
-            rankings_embed = build_rankings_embed(rankings, title=f"{title} Rankings")
-    except Exception as e:
-        log_error(f"[CONTEST/{contest_type.upper()}] rankings fetch failed: {e}")
-
-    # Send notif + rankings to the text notification channel (no thread)
-    channel_id = CONTEST_CHANNEL_MAP.get(contest_type, 0)
-    if not channel_id:
-        return False, f"no notif channel configured for {contest_type}"
-
-    channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
-    if not isinstance(channel, discord.TextChannel):
-        return False, f"{contest_type} notif channel must be a text channel"
-
-    embeds = [notif_embed, rankings_embed] if rankings_embed else [notif_embed]
-    await channel.send(embeds=embeds)
-
     leetcode_set_contest_state(contest_type, slug, thread_id=forum_thread_id)
-    # Mark rankings as done so phase 2 doesn't re-post them
-    leetcode_contest_post_set_rankings_posted(slug)
     return True, f"posted {contest_type} slug={slug}"
 
 
@@ -1888,38 +1508,6 @@ async def leetcode_contest_scheduler(bot):
                 except Exception as e:
                     log_error(f"[CONTEST/{ctype.upper()}] problems post error:", repr(e))
 
-            # Phase 2: rankings (contest end → next contest's pre-contest window).
-            # Iterate every contest with problems posted but rankings still pending,
-            # so a contest doesn't get abandoned when the next one of the same type
-            # transitions contest_state forward.
-            now_ts = int(datetime.now().timestamp())
-            for pending in leetcode_contest_posts_get_pending_rankings():
-                slug = pending["contest_slug"]
-                ctype = pending["contest_type"]
-                start_time = pending.get("start_time") or 0
-                # Skip contests that haven't ended yet (90 min duration)
-                if start_time and now_ts < start_time + 5400:
-                    continue
-                try:
-                    posted, msg = await post_contest_rankings(
-                        bot, ctype, force=False, slug_override=slug, contests=contests,
-                    )
-                    if posted:
-                        print(f"[CONTEST/{ctype.upper()}] {msg}")
-                    else:
-                        print(f"[CONTEST/{ctype.upper()}] rankings skip slug={slug}: {msg}")
-                except Exception as e:
-                    log_error(f"[CONTEST/{ctype.upper()}] rankings post error slug={slug}:", repr(e))
-
-            # Keep notif embeds in sync (e.g. transition "In progress" → "Contest ended")
-            for ctype in ("weekly", "biweekly"):
-                slug = leetcode_get_contest_state(ctype)
-                if slug:
-                    try:
-                        await _update_notif_embed(bot, ctype, slug)
-                    except Exception:
-                        pass
-
             # Phase 3: zerotrac updates for all unrated posts
             try:
                 n = await check_and_update_contest_ratings(bot)
@@ -1932,30 +1520,18 @@ async def leetcode_contest_scheduler(bot):
             now = int(datetime.now().timestamp())
             any_polling_problems = False
             any_unrated = bool(leetcode_contest_posts_get_unrated())
-            pending_rankings = leetcode_contest_posts_get_pending_rankings()
-            any_pending_rankings = any(
-                (p.get("start_time") or 0) and now >= (p["start_time"] + 5400)
-                for p in pending_rankings
-            )
             next_wake_times: list[int] = []
 
             for ctype in ("weekly", "biweekly"):
                 slug = leetcode_get_contest_state(ctype)
                 post = leetcode_contest_post_get(slug) if slug else None
                 start_time = (post or {}).get("start_time") or 0
-                end_ts = start_time + 5400
 
                 if post and not post["problems_posted"]:
                     if start_time and now >= start_time:
                         any_polling_problems = True       # actively polling for problems
                     elif start_time > now:
                         next_wake_times.append(start_time)  # wake at contest start
-
-            # Wake at contest end for any contest with pending rankings that hasn't ended yet
-            for p in pending_rankings:
-                p_start = p.get("start_time") or 0
-                if p_start and now < p_start + 5400:
-                    next_wake_times.append(p_start + 5400)
 
             # Pre-contest: wake 24h before upcoming contest if not yet posted
             for c in contests:
@@ -1968,7 +1544,7 @@ async def leetcode_contest_scheduler(bot):
 
             if any_polling_problems:
                 sleep_time = 300
-            elif any_pending_rankings or any_unrated:
+            elif any_unrated:
                 sleep_time = 86400
             elif next_wake_times:
                 sleep_time = min(next_wake_times) - now

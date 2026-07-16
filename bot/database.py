@@ -127,7 +127,6 @@ def db_init():
           created_at         INTEGER NOT NULL DEFAULT 0,
           start_time         INTEGER NOT NULL DEFAULT 0,
           rated              INTEGER NOT NULL DEFAULT 0,
-          rankings_posted    INTEGER NOT NULL DEFAULT 0,
           problems_posted    INTEGER NOT NULL DEFAULT 0,
           problems_posted_at INTEGER
         )
@@ -137,10 +136,8 @@ def db_init():
         for col in (
             "start_time INTEGER NOT NULL DEFAULT 0",
             "rated INTEGER NOT NULL DEFAULT 0",
-            "rankings_posted INTEGER NOT NULL DEFAULT 0",
             "problems_posted INTEGER NOT NULL DEFAULT 0",
             "problems_posted_at INTEGER",
-            "notif_message_id INTEGER",
         ):
             name = col.split()[0]
             if name not in existing_cols:
@@ -200,7 +197,6 @@ def db_init():
         # The contest poller filters on these columns every cycle; leetcode_problems
         # is looked up by slug on the recap path.
         conn.execute("CREATE INDEX IF NOT EXISTS idx_contest_posts_rated ON leetcode_contest_posts(rated)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_contest_posts_pending ON leetcode_contest_posts(problems_posted, rankings_posted)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_contest_posts_type ON leetcode_contest_posts(contest_type)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_problems_slug ON leetcode_problems(title_slug)")
 
@@ -517,16 +513,15 @@ def leetcode_set_premium_weekly_state(*, question_id: str, title_slug: str, date
 def leetcode_contest_post_get(contest_slug: str) -> dict | None:
     with _db() as conn:
         row = conn.execute(
-            "SELECT contest_slug, contest_type, thread_id, created_at, start_time, rankings_posted, problems_posted, problems_posted_at, notif_message_id FROM leetcode_contest_posts WHERE contest_slug=?",
+            "SELECT contest_slug, contest_type, thread_id, created_at, start_time, problems_posted, problems_posted_at FROM leetcode_contest_posts WHERE contest_slug=?",
             (contest_slug,),
         ).fetchone()
         if not row:
             return None
         return {
             "contest_slug": row[0], "contest_type": row[1], "thread_id": row[2],
-            "created_at": row[3], "start_time": row[4], "rankings_posted": bool(row[5]),
-            "problems_posted": bool(row[6]), "problems_posted_at": row[7],
-            "notif_message_id": row[8],
+            "created_at": row[3], "start_time": row[4],
+            "problems_posted": bool(row[5]), "problems_posted_at": row[6],
         }
 
 
@@ -546,12 +541,6 @@ def leetcode_contest_post_save(contest_slug: str, contest_type: str, thread_id: 
         conn.commit()
 
 
-def leetcode_contest_post_set_rankings_posted(contest_slug: str):
-    with _db() as conn:
-        conn.execute("UPDATE leetcode_contest_posts SET rankings_posted=1 WHERE contest_slug=?", (contest_slug,))
-        conn.commit()
-
-
 def leetcode_contest_post_set_problems_posted(contest_slug: str, timestamp: int):
     """Mark problems as posted. timestamp=0 means gave up (2h timeout), nonzero = success."""
     with _db() as conn:
@@ -568,24 +557,10 @@ def leetcode_contest_post_set_rated(contest_slug: str):
         conn.commit()
 
 
-def leetcode_contest_post_set_notif_message_id(contest_slug: str, message_id: int):
-    with _db() as conn:
-        conn.execute("UPDATE leetcode_contest_posts SET notif_message_id=? WHERE contest_slug=?", (message_id, contest_slug))
-        conn.commit()
-
-
 def leetcode_contest_posts_get_unrated() -> list[dict]:
     with _db() as conn:
         rows = conn.execute(
             "SELECT contest_slug, contest_type, thread_id, start_time FROM leetcode_contest_posts WHERE rated=0"
-        ).fetchall()
-        return [{"contest_slug": r[0], "contest_type": r[1], "thread_id": r[2], "start_time": r[3]} for r in rows]
-
-
-def leetcode_contest_posts_get_pending_rankings() -> list[dict]:
-    with _db() as conn:
-        rows = conn.execute(
-            "SELECT contest_slug, contest_type, thread_id, start_time FROM leetcode_contest_posts WHERE problems_posted=1 AND rankings_posted=0"
         ).fetchall()
         return [{"contest_slug": r[0], "contest_type": r[1], "thread_id": r[2], "start_time": r[3]} for r in rows]
 
