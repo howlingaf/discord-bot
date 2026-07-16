@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 import discord
 from aiohttp import ClientSession
 
@@ -17,6 +19,32 @@ from .leetcode import (
     fetch_leetcode_problem,
 )
 from .twitchlink import solution_name, maybe_prompt
+
+
+# The recap is DSA-only: links the streamer shares on stream are dropped unless
+# they point at one of these sites.
+DSA_LINK_DOMAINS = (
+    "leetcode.com",
+    "codeforces.com",
+    "projecteuler.net",
+    "cses.fi",
+)
+
+
+def is_dsa_link(url: str) -> bool:
+    """True if url points at one of the DSA sites (subdomains included)."""
+    raw = url.strip().strip("<>")
+    if "://" not in raw:
+        raw = "https://" + raw
+    try:
+        host = (urlparse(raw).hostname or "").lower()
+    except ValueError:
+        return False
+    return any(host == d or host.endswith("." + d) for d in DSA_LINK_DOMAINS)
+
+
+def filter_dsa_links(links: list[str]) -> list[str]:
+    return [u for u in links if is_dsa_link(u)]
 
 
 async def fetch_streamer_submissions(
@@ -80,7 +108,11 @@ async def process_recap(bot, payload: dict):
     stream_end = int(payload.get("stream_end") or 0)
     stream_problems = payload.get("stream_problems") or []
     chatter_submissions = payload.get("chatter_submissions") or []
-    streamer_links = payload.get("streamer_links") or []
+    raw_links = payload.get("streamer_links") or []
+    streamer_links = filter_dsa_links(raw_links)
+    dropped = len(raw_links) - len(streamer_links)
+    if dropped:
+        print(f"[RECAP] Dropped {dropped} non-DSA link(s) from recap")
 
     if not bot.http_session:
         print("[RECAP] Bot HTTP session not ready")
