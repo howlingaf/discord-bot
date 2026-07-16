@@ -886,18 +886,9 @@ async def rename_stream(interaction: discord.Interaction, name: str):
         await interaction.followup.send(f"Failed: {e}", ephemeral=True)
 
 
-# ---- Commands-only channel ----
-
-_COMMANDS_CHANNEL_ID = 1474376865400619189
-
-
 @bot.event
 async def on_message(message: discord.Message):
     await on_chat_message(message)
-    if message.author.bot:
-        return
-    if message.channel.id == _COMMANDS_CHANNEL_ID:
-        await message.delete()
 
 
 @bot.event
