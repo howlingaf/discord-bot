@@ -72,7 +72,8 @@ SECRET_STREAMS_EMPTY_NAME = "super secret streams"
 COMMAND_LOG_CHANNEL_ID = 1473840278497525872
 
 # ---------------- Reaction interest roster (#interested-join-stream) ----------------
-# Default destination for /track-reactions rosters.
+# Where the "who reacted" roster is posted. Tracking is pointed at a post with
+# scripts/track_reactions.py; the bot then keeps the roster updated on its own.
 INTEREST_ROSTER_CHANNEL_ID = int(os.getenv("INTEREST_ROSTER_CHANNEL_ID") or "1527172397516456107")
 
 # ---------------- Error/Failure Log + Bot Console (mods-only #discord-bot-console) ----------------

@@ -75,15 +75,29 @@ async def resolve_message(bot, ref: str) -> tuple[discord.Message | None, str]:
         return None, "Give me a message link or a message id."
 
     message_id = int(ref)
-    for guild in bot.guilds:
-        for channel in guild.text_channels:
-            try:
-                return await channel.fetch_message(message_id), ""
-            except (discord.NotFound, discord.Forbidden):
-                continue
-            except Exception:
-                continue
+    for channel in await _text_channels(bot):
+        try:
+            return await channel.fetch_message(message_id), ""
+        except (discord.NotFound, discord.Forbidden):
+            continue
+        except Exception:
+            continue
     return None, "Couldn't find that message id in any channel I can read."
+
+
+async def _text_channels(bot) -> list[discord.TextChannel]:
+    """Text channels to scan for a bare message id.
+
+    bot.guilds is only populated from the gateway cache, so fall back to fetching
+    over HTTP — that's the path a one-off script without a gateway session takes.
+    """
+    if bot.guilds:
+        return [ch for guild in bot.guilds for ch in guild.text_channels]
+    try:
+        guild = await bot.fetch_guild(GUILD_ID)
+        return [ch for ch in await guild.fetch_channels() if isinstance(ch, discord.TextChannel)]
+    except Exception:
+        return []
 
 
 async def _live_reactors(message: discord.Message, key: str) -> list[int] | None:
@@ -110,15 +124,32 @@ async def start_tracking(bot, message: discord.Message, emoji: str, roster_chann
     if live is None:
         live = []
 
-    reaction_track_save(message.id, message.channel.id, key, roster_channel_id, None)
-    added, _ = reaction_reactors_sync(message.id, live)
+    # Re-pointing at a post we already track should reuse its roster rather than
+    # leave an orphaned message behind that silently stops updating.
+    prior = reaction_track_get(message.id)
+    existing_roster_id = None
+    if prior and prior["roster_message_id"] and prior["roster_channel_id"] == roster_channel_id:
+        try:
+            await roster_channel.fetch_message(prior["roster_message_id"])
+            existing_roster_id = prior["roster_message_id"]
+        except Exception:
+            existing_roster_id = None
 
-    roster_msg = await roster_channel.send(embed=await _build_embed(bot, message.id))
-    reaction_track_set_roster_message(message.id, roster_msg.id)
+    reaction_track_save(message.id, message.channel.id, key, roster_channel_id, existing_roster_id)
+    added, removed = reaction_reactors_sync(message.id, live)
 
+    if existing_roster_id:
+        await refresh_roster(bot, message.id)
+        roster_url = f"https://discord.com/channels/{GUILD_ID}/{roster_channel_id}/{existing_roster_id}"
+    else:
+        roster_msg = await roster_channel.send(embed=await _build_embed(bot, message.id))
+        reaction_track_set_roster_message(message.id, roster_msg.id)
+        roster_url = roster_msg.jump_url
+
+    total = len(reaction_reactors_get(message.id))
     return True, (
-        f"Tracking {emoji_display(key)} on that post — {added} existing reaction(s) picked up. "
-        f"Roster: {roster_msg.jump_url}"
+        f"Tracking {emoji_display(key)} on that post — {total} reactor(s) "
+        f"(+{added}/-{removed} this sync). Roster: {roster_url}"
     )
 
 

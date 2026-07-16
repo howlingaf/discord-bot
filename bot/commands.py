@@ -1,4 +1,3 @@
-import asyncio
 import re
 
 import discord
@@ -10,37 +9,14 @@ from .config import (
     SPOTIFY_REDIRECT_URI,
     SPOTIFY_ALLOWED_USER_ID,
     GUILD_ID,
-    LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
-    LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
-    LEETCODE_PROBLEMS_CHANNEL_ID,
-    LEETCODE_RECAP_CHANNEL_ID,
     SECRET_STREAMS_CHANNEL_ID,
     TWITCH_CONSOLE_CHANNEL_ID,
-    INTEREST_ROSTER_CHANNEL_ID,
 )
-from .interest import (
-    resolve_message,
-    start_tracking,
-    on_reaction_add,
-    on_reaction_remove,
-)
+from .interest import on_reaction_add, on_reaction_remove
 from .twitchconsole import call_console
 from .spotify import dm_spotify_link
-from .leetcode import (
-    post_leetcode_contest,
-    post_pre_contest,
-    post_leetcode_problem,
-    post_leetcode_weekly_premium,
-    get_or_create_problem_post,
-    _classify_contest,
-)
-from .database import (
-    leetcode_delete_problem,
-    leetcode_get_problem,
-    leetcode_get_problem_by_slug,
-    twitch_link_delete,
-    reaction_track_delete,
-)
+from .leetcode import get_or_create_problem_post
+from .database import twitch_link_delete
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
 from .logbus import log_error
 from .client import bot
@@ -92,114 +68,6 @@ async def problem(interaction: discord.Interaction, question_id: int):
         await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
 
 
-@bot.tree.command(name="delete", description="(Admin) Delete a problem post by LeetCode ID.")
-@app_commands.describe(question_id="The LeetCode problem number to delete (e.g. 67)")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def delete_problem(interaction: discord.Interaction, question_id: int):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        deleted = leetcode_delete_problem(str(question_id))
-        if not deleted:
-            await interaction.followup.send(f"\u274c Problem #{question_id} not found.", ephemeral=True)
-            return
-
-        # Delete the forum post
-        try:
-            thread = bot.get_channel(deleted["thread_id"]) or await bot.fetch_channel(deleted["thread_id"])
-            await thread.delete()
-        except Exception:
-            pass
-
-        await interaction.followup.send(f"\u2705 Deleted problem #{question_id} ({deleted['title']}).", ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
-
-
-@bot.tree.command(name="daily", description="(Admin) Post today's LeetCode daily problem (manual trigger).")
-@app_commands.describe(force="If true, post even if it was already posted.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def daily(interaction: discord.Interaction, force: bool = True):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        posted, msg = await post_leetcode_problem(bot, force=force)
-        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
-
-
-@bot.tree.command(name="weekly", description="(Admin) Post the pre-contest thread for the upcoming weekly contest.")
-@app_commands.describe(force="If true, post even if it was already posted.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def weekly(interaction: discord.Interaction, force: bool = True):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        posted, msg = await post_pre_contest(bot, "weekly", force=force)
-        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
-
-
-@bot.tree.command(name="biweekly", description="(Admin) Post the pre-contest thread for the upcoming biweekly contest.")
-@app_commands.describe(force="If true, post even if it was already posted.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def biweekly(interaction: discord.Interaction, force: bool = True):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        posted, msg = await post_pre_contest(bot, "biweekly", force=force)
-        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
-
-
-@bot.tree.command(name="premium-weekly", description="(Admin) Post this week's premium weekly problem (manual trigger).")
-@app_commands.describe(force="If true, post even if it was already posted.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def premium_weekly(interaction: discord.Interaction, force: bool = True):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        posted, msg = await post_leetcode_weekly_premium(bot, force=force)
-        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
-
-
-@bot.tree.command(name="test", description="(Admin) Dry-run a posting command \u2014 see what it would do without posting anything.")
-@app_commands.describe(
-    command="Which posting command to dry-run",
-)
-@app_commands.choices(command=[
-    app_commands.Choice(name="daily", value="daily"),
-    app_commands.Choice(name="weekly", value="weekly"),
-    app_commands.Choice(name="biweekly", value="biweekly"),
-    app_commands.Choice(name="premium-weekly", value="premium-weekly"),
-])
-@app_commands.checks.has_permissions(manage_messages=True)
-async def test_cmd(interaction: discord.Interaction, command: app_commands.Choice[str]):
-    await interaction.response.defer(ephemeral=True)
-    name = command.value
-    try:
-        if name == "daily":
-            _, msg = await post_leetcode_problem(bot, force=True, dry_run=True)
-        elif name == "weekly":
-            _, msg = await post_pre_contest(bot, "weekly", force=True, dry_run=True)
-        elif name == "biweekly":
-            _, msg = await post_pre_contest(bot, "biweekly", force=True, dry_run=True)
-        elif name == "premium-weekly":
-            _, msg = await post_leetcode_weekly_premium(bot, force=True, dry_run=True)
-        else:
-            await interaction.followup.send(f"\u274c Unknown command: {name}", ephemeral=True)
-            return
-        await interaction.followup.send(msg, ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /test {name}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
-
-
 @bot.tree.command(name="twitch-unlink", description="(Admin) Forget a Twitch\u2194Discord link so the handle can be re-prompted.")
 @app_commands.describe(handle="The Twitch handle to forget")
 @app_commands.checks.has_permissions(manage_messages=True)
@@ -247,108 +115,6 @@ async def twitch_console(interaction: discord.Interaction, command: app_commands
     if len(text) > 1900:
         text = text[:1900] + "\u2026"
     await interaction.followup.send(text, allowed_mentions=discord.AllowedMentions.none())
-
-
-@bot.tree.command(name="post-solution", description="(Admin) Post a solution submission to a problem's forum thread.")
-@app_commands.describe(slug="Problem slug (e.g. clone-graph)", user="Username to credit", url="Submission URL")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def post_solution(interaction: discord.Interaction, slug: str, user: str, url: str):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        existing = leetcode_get_problem_by_slug(slug)
-        if not existing:
-            await interaction.followup.send(f"\u274c No forum post found for '{slug}'", ephemeral=True)
-            return
-
-        from .twitchlink import solution_name, maybe_prompt
-        thread = bot.get_channel(existing["thread_id"]) or await bot.fetch_channel(existing["thread_id"])
-        await maybe_prompt(bot, user)
-        content = f"{solution_name(user)} submitted a solution!\n<{url}>"
-        await thread.send(content, allowed_mentions=discord.AllowedMentions.none())
-        await interaction.followup.send(f"\u2705 Posted {user}'s solution to {slug}", ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
-
-
-@bot.tree.command(name="update-recap", description="(Admin) Add a problem to the latest stream recap embed.")
-@app_commands.describe(slug="Problem slug (e.g. clone-graph)")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def update_recap(interaction: discord.Interaction, slug: str):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        from .recap import resolve_slug_to_question_id
-
-        session = bot.http_session
-        if not session:
-            await interaction.followup.send("\u274c Bot HTTP session not ready", ephemeral=True)
-            return
-
-        question_id = await resolve_slug_to_question_id(session, slug)
-        if not question_id:
-            await interaction.followup.send(f"\u274c Could not resolve slug '{slug}'", ephemeral=True)
-            return
-
-        thread_id, err = await get_or_create_problem_post(bot, question_id)
-        if not thread_id:
-            await interaction.followup.send(f"\u274c Could not get/create post: {err}", ephemeral=True)
-            return
-
-        channel = bot.get_channel(LEETCODE_RECAP_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_RECAP_CHANNEL_ID)
-
-        last_msg = None
-        async for msg in channel.history(limit=10):
-            if msg.author == bot.user and msg.embeds and msg.embeds[0].title == "Stream Recap":
-                last_msg = msg
-                break
-
-        if not last_msg:
-            await interaction.followup.send("\u274c No recent recap message found", ephemeral=True)
-            return
-
-        embed = last_msg.embeds[0]
-        thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-        problem_name = slug.replace("-", " ").title()
-        new_line = f"[{question_id}. {problem_name}]({thread_url})"
-
-        desc = embed.description or ""
-        if new_line in desc:
-            await interaction.followup.send(f"\u2139\ufe0f {question_id}. {problem_name} already in recap", ephemeral=True)
-            return
-
-        new_embed = discord.Embed(
-            title=embed.title,
-            description=(desc + "\n\n" + new_line).strip(),
-            color=embed.color,
-        )
-        await last_msg.edit(embed=new_embed)
-        await interaction.followup.send(f"\u2705 Added {question_id}. {problem_name} to recap", ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
-
-
-@bot.tree.command(name="contest-recap", description="(Admin) Post a recap for any contest by slug.")
-@app_commands.describe(slug="The contest slug (e.g. weekly-contest-488)")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def contest_recap(interaction: discord.Interaction, slug: str):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        contest_type = _classify_contest(slug)
-        if not contest_type:
-            await interaction.followup.send("\u274c Slug must start with 'weekly-contest-' or 'biweekly-contest-'.", ephemeral=True)
-            return
-
-        title = slug.replace("-", " ").title()
-        mock_contest = {"title": title, "titleSlug": slug, "startTime": 0, "duration": 5400}
-
-        posted, msg = await post_leetcode_contest(
-            bot, contest_type, force=True, contests=[mock_contest],
-        )
-        await interaction.followup.send(("\u2705 " if posted else "\u2139\ufe0f ") + msg, ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {repr(e)}", ephemeral=True)
 
 
 # ---- Fix problem embed superscripts ----
@@ -419,65 +185,6 @@ async def rename_stream(interaction: discord.Interaction, name: str):
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"Failed: {e}", ephemeral=True)
-
-
-# ---- Reaction interest tracking ----
-
-@bot.tree.command(name="track-reactions", description="(Admin) Track who reacts to a post with an emoji, into a roster channel.")
-@app_commands.describe(
-    message="Message link or id of the post to watch",
-    emoji="The emoji that counts (e.g. ☑️)",
-    channel="Where the roster lives. Defaults to #interested-join-stream.",
-)
-@app_commands.checks.has_permissions(manage_messages=True)
-async def track_reactions(
-    interaction: discord.Interaction,
-    message: str,
-    emoji: str,
-    channel: discord.TextChannel | None = None,
-):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        target, err = await resolve_message(bot, message)
-        if not target:
-            await interaction.followup.send(f"❌ {err}", ephemeral=True)
-            return
-
-        roster_channel_id = channel.id if channel else INTEREST_ROSTER_CHANNEL_ID
-        if not roster_channel_id:
-            await interaction.followup.send("❌ No roster channel configured or given.", ephemeral=True)
-            return
-
-        ok, msg = await start_tracking(bot, target, emoji, roster_channel_id)
-        await interaction.followup.send(("✅ " if ok else "❌ ") + msg, ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"❌ Failed: {e!r}", ephemeral=True)
-
-
-@bot.tree.command(name="untrack-reactions", description="(Admin) Stop tracking reactions on a post.")
-@app_commands.describe(message="Message link or id of the tracked post")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def untrack_reactions(interaction: discord.Interaction, message: str):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        ref = message.strip()
-        message_id = int(ref) if ref.isdigit() else 0
-        if not message_id:
-            target, err = await resolve_message(bot, ref)
-            if not target:
-                await interaction.followup.send(f"❌ {err}", ephemeral=True)
-                return
-            message_id = target.id
-
-        if reaction_track_delete(message_id):
-            await interaction.followup.send(
-                "✅ Stopped tracking. The roster message is left in place.", ephemeral=True)
-        else:
-            await interaction.followup.send("ℹ️ That post wasn't being tracked.", ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"❌ Failed: {e!r}", ephemeral=True)
 
 
 @bot.event

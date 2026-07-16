@@ -299,20 +299,6 @@ def leetcode_save_problem(*, question_id: str, title_slug: str, title: str, thre
         conn.commit()
 
 
-def leetcode_delete_problem(question_id: str) -> dict | None:
-    """Delete a problem by ID. Returns the deleted row or None if not found."""
-    with _db() as conn:
-        row = conn.execute(
-            "SELECT question_id, title_slug, title, thread_id FROM leetcode_problems WHERE question_id=?",
-            (question_id,),
-        ).fetchone()
-        if not row:
-            return None
-        conn.execute("DELETE FROM leetcode_problems WHERE question_id=?", (question_id,))
-        conn.commit()
-        return {"question_id": row[0], "title_slug": row[1], "title": row[2], "thread_id": row[3]}
-
-
 # ---- LeetCode Daily state helpers ----
 
 def leetcode_get_daily_state() -> dict | None:
@@ -358,7 +344,6 @@ def leetcode_set_contest_state(contest_type: str, last_title_slug: str, *, threa
             (contest_type, last_title_slug, now, thread_id),
         )
         conn.commit()
-
 
 
 # ---- Twitch <-> Discord link helpers ----
