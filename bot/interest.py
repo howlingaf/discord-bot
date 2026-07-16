@@ -9,6 +9,7 @@ import re
 
 import discord
 
+from .config import GUILD_ID
 from .database import (
     reaction_track_get,
     reaction_track_save,
@@ -128,8 +129,7 @@ async def _build_embed(bot, message_id: int) -> discord.Embed:
 
     post_url = ""
     if track:
-        guild_id = bot.guilds[0].id if bot.guilds else 0
-        post_url = f"https://discord.com/channels/{guild_id}/{track['channel_id']}/{message_id}"
+        post_url = f"https://discord.com/channels/{GUILD_ID}/{track['channel_id']}/{message_id}"
 
     lines = []
     for i, r in enumerate(reactors[:_MAX_LISTED], start=1):
