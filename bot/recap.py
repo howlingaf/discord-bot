@@ -1,3 +1,4 @@
+import re
 from urllib.parse import urlparse
 
 import discord
@@ -22,22 +23,35 @@ from .twitchlink import solution_name, maybe_prompt
 
 
 # The recap is DSA-only: links the streamer shares on stream are dropped unless
-# they point at one of these sites.
+# they point at one of these sites. leetcode.com is deliberately absent — the
+# twitch-bot's _RECAP_SKIP_HOSTS strips it before the payload reaches us, since
+# LeetCode problems already enter the recap as forum links via the submission
+# path and would otherwise be listed twice.
 DSA_LINK_DOMAINS = (
-    "leetcode.com",
     "codeforces.com",
     "projecteuler.net",
     "cses.fi",
 )
 
+_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
+
 
 def is_dsa_link(url: str) -> bool:
-    """True if url points at one of the DSA sites (subdomains included)."""
+    """True if url is an http(s) link to one of the DSA sites (subdomains included)."""
+    if not isinstance(url, str):
+        return False
     raw = url.strip().strip("<>")
-    if "://" not in raw:
+    if not _SCHEME_RE.match(raw):
         raw = "https://" + raw
     try:
-        host = (urlparse(raw).hostname or "").lower()
+        parts = urlparse(raw)
+        if parts.scheme not in ("http", "https"):
+            return False
+        # Reject credentials — a real DSA link never carries them, and they let
+        # a non-http scheme (mailto:me@host) survive the https:// prefix above.
+        if parts.username or parts.password:
+            return False
+        host = (parts.hostname or "").lower().rstrip(".")
     except ValueError:
         return False
     return any(host == d or host.endswith("." + d) for d in DSA_LINK_DOMAINS)
