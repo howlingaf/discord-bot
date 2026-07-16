@@ -1,5 +1,3 @@
-import re
-
 import discord
 from discord import app_commands
 
@@ -115,52 +113,6 @@ async def twitch_console(interaction: discord.Interaction, command: app_commands
     if len(text) > 1900:
         text = text[:1900] + "\u2026"
     await interaction.followup.send(text, allowed_mentions=discord.AllowedMentions.none())
-
-
-# ---- Fix problem embed superscripts ----
-
-def _fix_sup_text(text: str) -> str:
-    if not text:
-        return text
-    # 10^4 through 10^9 (e.g. 104 → 10^4). Single-digit only — two-digit
-    # would catch binary representations like 1010 in problem statements.
-    text = re.sub(r'(?<!\d)10([4-9])(?!\d)', r'10^\1', text)
-    # 2^31 (signed 32-bit int bound, e.g. -231 → -2^31)
-    text = re.sub(r'(?<!\d)2(31)(?!\d)', r'2^\1', text)
-    return text
-
-
-def _strip_sup_text(text: str) -> str:
-    """Reverse accidental caret insertions in example embeds: 10^N → 10N, 2^31 → 231."""
-    if not text:
-        return text
-    text = re.sub(r'10\^(\d+)', r'10\1', text)
-    text = re.sub(r'2\^(31)', r'231', text)
-    return text
-
-
-def _apply_embed_transform(embed: discord.Embed, fn) -> tuple[discord.Embed, bool]:
-    d = embed.to_dict()
-    changed = False
-    if d.get('description'):
-        fixed = fn(d['description'])
-        if fixed != d['description']:
-            d['description'] = fixed
-            changed = True
-    for field in d.get('fields', []):
-        fixed = fn(field.get('value', ''))
-        if fixed != field.get('value', ''):
-            field['value'] = fixed
-            changed = True
-    return discord.Embed.from_dict(d), changed
-
-
-def _fix_embed_superscripts(embed: discord.Embed) -> tuple[discord.Embed, bool]:
-    return _apply_embed_transform(embed, _fix_sup_text)
-
-
-def _strip_embed_superscripts(embed: discord.Embed) -> tuple[discord.Embed, bool]:
-    return _apply_embed_transform(embed, _strip_sup_text)
 
 
 # ---- Secret streams rename ----
