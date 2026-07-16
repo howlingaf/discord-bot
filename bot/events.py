@@ -29,6 +29,12 @@ async def on_ready():
     from .twitchlog import start as twitchlog_start
     twitchlog_start(bot)
 
+    # Reaction events aren't replayed after downtime — reconcile tracked posts.
+    if not getattr(bot, "_interest_resynced", False):
+        bot._interest_resynced = True
+        from .interest import resync_all as interest_resync
+        bot.loop.create_task(interest_resync(bot))
+
     # start LeetCode schedulers once
     if not getattr(bot, "_daily_task_started", False):
         bot._daily_task_started = True

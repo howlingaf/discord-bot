@@ -16,6 +16,13 @@ from .config import (
     LEETCODE_RECAP_CHANNEL_ID,
     SECRET_STREAMS_CHANNEL_ID,
     TWITCH_CONSOLE_CHANNEL_ID,
+    INTEREST_ROSTER_CHANNEL_ID,
+)
+from .interest import (
+    resolve_message,
+    start_tracking,
+    on_reaction_add,
+    on_reaction_remove,
 )
 from .twitchconsole import call_console
 from .spotify import dm_spotify_link
@@ -32,6 +39,7 @@ from .database import (
     leetcode_get_problem,
     leetcode_get_problem_by_slug,
     twitch_link_delete,
+    reaction_track_delete,
 )
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
 from .logbus import log_error
@@ -413,9 +421,78 @@ async def rename_stream(interaction: discord.Interaction, name: str):
         await interaction.followup.send(f"Failed: {e}", ephemeral=True)
 
 
+# ---- Reaction interest tracking ----
+
+@bot.tree.command(name="track-reactions", description="(Admin) Track who reacts to a post with an emoji, into a roster channel.")
+@app_commands.describe(
+    message="Message link or id of the post to watch",
+    emoji="The emoji that counts (e.g. ☑️)",
+    channel="Where the roster lives. Defaults to #interested-join-stream.",
+)
+@app_commands.checks.has_permissions(manage_messages=True)
+async def track_reactions(
+    interaction: discord.Interaction,
+    message: str,
+    emoji: str,
+    channel: discord.TextChannel | None = None,
+):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        target, err = await resolve_message(bot, message)
+        if not target:
+            await interaction.followup.send(f"❌ {err}", ephemeral=True)
+            return
+
+        roster_channel_id = channel.id if channel else INTEREST_ROSTER_CHANNEL_ID
+        if not roster_channel_id:
+            await interaction.followup.send("❌ No roster channel configured or given.", ephemeral=True)
+            return
+
+        ok, msg = await start_tracking(bot, target, emoji, roster_channel_id)
+        await interaction.followup.send(("✅ " if ok else "❌ ") + msg, ephemeral=True)
+    except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
+        await interaction.followup.send(f"❌ Failed: {e!r}", ephemeral=True)
+
+
+@bot.tree.command(name="untrack-reactions", description="(Admin) Stop tracking reactions on a post.")
+@app_commands.describe(message="Message link or id of the tracked post")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def untrack_reactions(interaction: discord.Interaction, message: str):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        ref = message.strip()
+        message_id = int(ref) if ref.isdigit() else 0
+        if not message_id:
+            target, err = await resolve_message(bot, ref)
+            if not target:
+                await interaction.followup.send(f"❌ {err}", ephemeral=True)
+                return
+            message_id = target.id
+
+        if reaction_track_delete(message_id):
+            await interaction.followup.send(
+                "✅ Stopped tracking. The roster message is left in place.", ephemeral=True)
+        else:
+            await interaction.followup.send("ℹ️ That post wasn't being tracked.", ephemeral=True)
+    except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
+        await interaction.followup.send(f"❌ Failed: {e!r}", ephemeral=True)
+
+
 @bot.event
 async def on_message(message: discord.Message):
     await on_chat_message(message)
+
+
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    await on_reaction_add(bot, payload)
+
+
+@bot.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    await on_reaction_remove(bot, payload)
 
 
 @bot.event
