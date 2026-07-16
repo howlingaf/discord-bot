@@ -18,7 +18,6 @@ from .config import (
     LEETCODE_BIWEEKLY_CHANNEL_ID,
     LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
     LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID,
-    LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID,
     GUILD_ID,
 )
 from .database import (
@@ -1722,46 +1721,9 @@ async def post_leetcode_weekly_premium(bot, *, force: bool = False, dry_run: boo
         except Exception as e:
             log_error(f"[PREMIUM WEEKLY] Failed to remove tag from old thread {old_thread_id}: {e}")
 
-    # Look up stored problem for difficulty
+    # Look up the stored problem for the question id recorded in state
     problem = leetcode_get_problem_by_slug(title_slug)
-    difficulty = (problem.get("difficulty") or "Unknown") if problem else "Unknown"
     stored_qid = problem["question_id"] if problem else (qid or title_slug)
-
-    # Convert date string to unix timestamp for Discord formatting
-    date_ts = 0
-    if date:
-        try:
-            date_ts = int(datetime.strptime(date, "%Y-%m-%d").timestamp())
-        except ValueError:
-            pass
-
-    # Notification card
-    try:
-        notif_channel = bot.get_channel(LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PREMIUM_WEEKLY_CHANNEL_ID)
-
-        diff_emoji = DIFF_EMOJI.get(difficulty, "\u26aa")
-        color = DIFF_COLORS.get(difficulty, 0x808080)
-        url = f"{LEETCODE_BASE}/problems/{title_slug}/"
-        notif_title = f"{qid}. {qtitle}" if qid else qtitle
-
-        desc_lines = [f"{diff_emoji} **{difficulty}** · \U0001f512 Premium"]
-        if date_ts:
-            desc_lines.append("")
-            desc_lines.append(f"\U0001f4c5 Week of <t:{date_ts}:D>")
-        if thread_id:
-            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-            desc_lines.append("")
-            desc_lines.append(f"\U0001f449 [View Post]({thread_url})")
-
-        notif_embed = discord.Embed(
-            title=notif_title,
-            url=url,
-            description="\n".join(desc_lines),
-            color=color,
-        )
-        await notif_channel.send(embed=notif_embed)
-    except Exception as e:
-        log_error(f"[PREMIUM WEEKLY] notification send failed: {e}")
 
     leetcode_set_premium_weekly_state(question_id=stored_qid, title_slug=title_slug, date=date)
     return True, f"posted premium weekly {date=} {title_slug=}"
