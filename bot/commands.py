@@ -10,7 +10,12 @@ from .config import (
     SECRET_STREAMS_CHANNEL_ID,
     TWITCH_CONSOLE_CHANNEL_ID,
 )
-from .interest import on_reaction_add, on_reaction_remove
+from .interest import (
+    on_reaction_add,
+    on_reaction_remove,
+    on_reaction_clear,
+    on_reaction_clear_emoji,
+)
 from .twitchconsole import call_console
 from .spotify import dm_spotify_link
 from .leetcode import get_or_create_problem_post
@@ -152,6 +157,16 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 @bot.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     await on_reaction_remove(bot, payload)
+
+
+@bot.event
+async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
+    await on_reaction_clear(bot, payload)
+
+
+@bot.event
+async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEvent):
+    await on_reaction_clear_emoji(bot, payload)
 
 
 @bot.event
