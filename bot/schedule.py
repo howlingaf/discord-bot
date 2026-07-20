@@ -575,8 +575,7 @@ def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
     return f"{mark} **{ev.title}** · <t:{int(ev.start.timestamp())}:t>"
 
 
-def build_week_embeds(events: list[Event], calendars: list[Calendar], now: datetime,
-                      last_synced: int, any_stale: bool,
+def build_week_embeds(events: list[Event], now: datetime,
                       badge_emoji: dict[str, str]) -> list[discord.Embed]:
     today = now.astimezone(TZ).date()
 
@@ -596,8 +595,10 @@ def build_week_embeds(events: list[Event], calendars: list[Calendar], now: datet
 
     # One embed per day: each day is its own card with its own accent color
     # (alternating shades, today in blurple) so day boundaries are unmissable.
+    # Built farthest-day-first so today sits at the BOTTOM, nearest the channel's
+    # newest messages, with tomorrow stacked directly above it.
     day_embeds: list[discord.Embed] = []
-    for i in range(7):
+    for i in range(6, -1, -1):
         day = today + timedelta(days=i)
         day_events = sorted(buckets[day], key=lambda e: e.sort_key())
         if not day_events:
@@ -622,8 +623,24 @@ def build_week_embeds(events: list[Event], calendars: list[Calendar], now: datet
             title="This Week", description="*Nothing scheduled in the next 7 days.*",
             color=WEEK_COLOR))
 
-    # add-to-calendar block + staleness indicator, kept subtle: no embed title,
-    # everything in Discord subtext (-#) so it reads as a small gray footer
+    # Discord rejects the whole edit if the embeds together exceed 6000 chars;
+    # trim event lines from the busiest days until we're safely under.
+    def total_len() -> int:
+        return sum(len(e.title or "") + len(e.description or "") for e in day_embeds)
+    while total_len() > _MESSAGE_EMBED_CAP:
+        longest = max(day_embeds, key=lambda e: len(e.description or ""))
+        head, _, _ = (longest.description or "").rpartition("\n")
+        if not head:
+            break
+        longest.description = head + "\n*…*"
+    return day_embeds
+
+
+def build_follow_embed(calendars: list[Calendar], last_synced: int, any_stale: bool,
+                       badge_emoji: dict[str, str]) -> discord.Embed:
+    """Add-to-calendar block + staleness indicator, kept subtle: no embed title,
+    everything in Discord subtext (-#) so it reads as a small gray footer. Lives
+    under the month image."""
     follow = discord.Embed(color=FOLLOW_COLOR)
     link_lines = ["-# **Add to calendar**"]
     for cal in calendars:
@@ -642,19 +659,7 @@ def build_week_embeds(events: list[Event], calendars: list[Calendar], now: datet
     if any_stale:
         tail += "\n-# ⚠️ some sources are showing cached data"
     follow.description = ("\n".join(link_lines) + "\n" + tail)[:4096]
-
-    embeds = day_embeds + [follow]
-    # Discord rejects the whole edit if the embeds together exceed 6000 chars;
-    # trim event lines from the busiest days until we're safely under.
-    def total_len() -> int:
-        return sum(len(e.title or "") + len(e.description or "") for e in embeds)
-    while total_len() > _MESSAGE_EMBED_CAP:
-        longest = max(day_embeds, key=lambda e: len(e.description or ""))
-        head, _, _ = (longest.description or "").rpartition("\n")
-        if not head:
-            break
-        longest.description = head + "\n*…*"
-    return embeds
+    return follow
 
 
 # ------------------------------------------------------------------ #
@@ -694,8 +699,8 @@ async def _pin(msg: discord.Message):
         print(f"[SCHEDULE] could not pin {msg.id}: {e}")
 
 
-async def _sync_message(channel, mid: int | None, *,
-                        embeds: list | None = None, image: bytes | None = None) -> int | None:
+async def _edit_or_recreate(channel, mid: int | None,
+                            edit_kwargs: dict, send_kwargs: dict) -> int | None:
     """Edit a pinned view in place, recreating it once if it was deleted.
 
     Returns the new message id when one was created (the caller persists it),
@@ -703,55 +708,39 @@ async def _sync_message(channel, mid: int | None, *,
     errors other than a deleted message propagate to the scheduler loop, whose
     failure counter owns alerting cadence.
     """
-    def month_file() -> discord.File:
-        return discord.File(io.BytesIO(image), filename="month.png")
-
     if mid:
         try:
-            kwargs = {"embeds": embeds} if image is None else {"attachments": [month_file()]}
             # partial message: edit without a fetch round-trip; a deleted
             # message still raises NotFound from the edit itself
-            await channel.get_partial_message(mid).edit(**kwargs)
+            await channel.get_partial_message(mid).edit(**edit_kwargs)
             return None
         except discord.NotFound:
             pass  # deleted — recreate below (once)
-    kwargs = {"embeds": embeds} if image is None else {"file": month_file()}
-    msg = await channel.send(**kwargs)
+    msg = await channel.send(**send_kwargs)
     await _pin(msg)
     return msg.id
 
 
 @dataclass
 class _MonthCache:
-    """Skip the render + upload when the month view's inputs are unchanged.
-
-    In-memory only: a restart renders and edits once, which also recreates the
-    message if it was deleted while the bot was down. Deletions during uptime
-    set `force` via on_message_delete. Only updated after a successful sync, so
-    a failed edit retries next cycle instead of wedging on stale state.
-    """
+    """Skip the render + attachment re-upload when the grid's inputs are
+    unchanged; the message still gets a cheap embeds-only edit every cycle (the
+    live "last synced" footer), which doubles as deletion detection. Only
+    updated after a successful sync, so a failed edit retries next cycle."""
     key: tuple | None = None
     png: bytes | None = None
-    force: bool = False
 
 
 _month_cache = _MonthCache()
 
 
-def on_message_delete(payload: discord.RawMessageDeleteEvent) -> None:
-    """Re-send the month view next cycle if its message was deleted (the week
-    view needs nothing here — its every-cycle edit hits NotFound and recreates)."""
-    if payload.channel_id != SCHEDULE_CHANNEL_ID:
-        return
-    if payload.message_id == schedule_state_get()["month_message_id"]:
-        _month_cache.force = True
-
-
 async def _sync_month(channel, mid: int | None, ct: datetime,
                       grid_events: list[GridEvent],
-                      legend: list[tuple[str, tuple[str, ...], str]]) -> int | None:
-    """Render and upload the month grid only when its inputs changed (or the
-    message needs recreating); the steady-state cycle costs a tuple compare."""
+                      legend: list[tuple[str, tuple[str, ...], str]],
+                      follow: discord.Embed) -> int | None:
+    """The month message: grid image on top, add-to-calendar footer under it.
+    The image re-renders/re-uploads only when its inputs changed; the footer
+    embed is patched every cycle (omitting `attachments` keeps the upload)."""
     key = (
         ct.date(),   # the today-pill moves at midnight even if events don't
         tuple((g.title, g.color, g.start_date, g.end_date, g.timed_label, g.badge)
@@ -759,16 +748,21 @@ async def _sync_month(channel, mid: int | None, ct: datetime,
         tuple(legend),
         frozenset(_badge_icons),   # a late-loading icon must trigger a re-render
     )
-    changed = key != _month_cache.key
-    if not (changed or _month_cache.force):
-        return None
-
+    changed = key != _month_cache.key or _month_cache.png is None
     png = _month_cache.png
-    if changed or png is None:
+    if changed:
         png = await asyncio.to_thread(render_month_png, ct.year, ct.month, ct.date(),
                                       grid_events, legend, _badge_icons)
-    new_id = await _sync_message(channel, mid, image=png)
-    _month_cache.key, _month_cache.png, _month_cache.force = key, png, False
+
+    def month_file() -> discord.File:
+        return discord.File(io.BytesIO(png), filename="month.png")
+
+    edit_kwargs = {"embeds": [follow]}
+    if changed:
+        edit_kwargs["attachments"] = [month_file()]
+    new_id = await _edit_or_recreate(channel, mid, edit_kwargs,
+                                     {"file": month_file(), "embeds": [follow]})
+    _month_cache.key, _month_cache.png = key, png
     return new_id
 
 
@@ -819,13 +813,20 @@ async def sync_once(bot) -> str:
     state = schedule_state_get()
     last_synced = int(time.time()) if any_fresh else state["last_synced_at"]
 
-    week_embeds = build_week_embeds(events, calendars, now, last_synced, any_stale, badge_emoji)
-    new_week = await _sync_message(channel, state["week_message_id"], embeds=week_embeds)
-
+    # month first: on a fresh channel it must be the older message so it sits on
+    # top, with the week view (today at its bottom) below it
     ct = now.astimezone(TZ)
+    follow = build_follow_embed(calendars, last_synced, any_stale, badge_emoji)
     new_month = await _sync_month(channel, state["month_message_id"], ct,
                                   _to_grid_events(events),
-                                  [(c.name, c.color, c.badge) for c in calendars])
+                                  [(c.name, c.color, c.badge) for c in calendars],
+                                  follow)
+
+    week_embeds = build_week_embeds(events, now, badge_emoji)
+    # attachments=[] clears any leftover image if the two messages ever swap roles
+    new_week = await _edit_or_recreate(channel, state["week_message_id"],
+                                       {"embeds": week_embeds, "attachments": []},
+                                       {"embeds": week_embeds})
 
     if new_week or new_month:
         schedule_set_message_ids(week_message_id=new_week, month_message_id=new_month)
