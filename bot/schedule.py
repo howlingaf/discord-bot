@@ -582,9 +582,7 @@ def _ical_link(cal: Calendar) -> str | None:
 # plain separators; a blank subtext line between events gives vertical breathing
 # room (shorter than a full blank line); a subtext divider underlines each date
 _SEP = " · "
-# the divider doubles as the width-setter: the identical line in every card
-# renders at the identical width, so all cards match without a spacer image
-_DIVIDER = "-# " + "─" * 56
+
 
 
 def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
@@ -619,6 +617,7 @@ def build_week_embeds(events: list[Event], now: datetime,
     # Built farthest-day-first so today sits at the BOTTOM, nearest the channel's
     # newest messages, with tomorrow stacked directly above it.
     day_embeds: list[discord.Embed] = []
+    line_specs: list[tuple[str, int]] = []
     for i in range(6, -1, -1):
         day = today + timedelta(days=i)
         day_events = sorted(buckets[day], key=lambda e: e.sort_key())
@@ -631,13 +630,17 @@ def build_week_embeds(events: list[Event], now: datetime,
         lines = [_event_line(ev, badge_emoji) for ev in day_events[:_MAX_PER_DAY]]
         if len(day_events) > _MAX_PER_DAY:
             lines.append(f"*+{len(day_events) - _MAX_PER_DAY} more*")
-        # divider underlines the date; a blank subtext line between events is
-        # shorter than a full blank line, keeping the gaps modest
-        value = _DIVIDER + "\n" + "\n-# \u2800\n".join(lines)
+        # blank subtext lines keep modest gaps between events; the card's
+        # bottom line image (colored per day) divides it from the next day
+        value = "\n-# \u2800\n".join(lines)
         if len(value) > _FIELD_CAP:
             value = value[:_FIELD_CAP - 20].rsplit("\n", 1)[0] + "\n*\u2026*"
         color = WEEK_COLOR if i == 0 else _DAY_COLORS[len(day_embeds) % 2]
-        day_embeds.append(discord.Embed(title=header, description=value, color=color))
+        embed = discord.Embed(title=header, description=value, color=color)
+        fname = f"line{len(day_embeds)}.png"
+        embed.set_image(url=f"attachment://{fname}")
+        line_specs.append((fname, color))
+        day_embeds.append(embed)
     if not day_embeds:
         day_embeds.append(discord.Embed(
             description="*Nothing scheduled in the next 7 days.*", color=WEEK_COLOR))
@@ -652,7 +655,7 @@ def build_week_embeds(events: list[Event], now: datetime,
         if not head:
             break
         longest.description = head + "\n*…*"
-    return day_embeds
+    return day_embeds, line_specs
 
 
 def build_follow_embed(calendars: list[Calendar], any_stale: bool,
@@ -716,6 +719,19 @@ async def _pin(msg: discord.Message):
         await msg.pin()
     except Exception as e:
         print(f"[SCHEDULE] could not pin {msg.id}: {e}")
+
+
+@functools.lru_cache(maxsize=8)
+def _line_png(color: int) -> bytes:
+    """A thin colored line, used as each week card's image: it renders at the
+    card's full width (fixing every card to the same exact width) and doubles
+    as the visible divider between days, tinted to the card's stripe color."""
+    rgb = ((color >> 16) & 255, (color >> 8) & 255, color & 255)
+    img = Image.new("RGBA", (600, 4), (0, 0, 0, 0))
+    ImageDraw.Draw(img).rounded_rectangle([0, 0, 599, 3], radius=2, fill=rgb + (255,))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
 
 
 async def _edit_or_recreate(channel, mid: int | None,
@@ -841,11 +857,12 @@ async def sync_once(bot) -> str:
                                   [(c.name, c.color, c.badge) for c in calendars],
                                   follow)
 
-    week_embeds = build_week_embeds(events, now, badge_emoji)
-    # attachments=[] clears the retired spacer image from the live message
+    week_embeds, line_specs = build_week_embeds(events, now, badge_emoji)
+    def line_files() -> list[discord.File]:
+        return [discord.File(io.BytesIO(_line_png(c)), filename=n) for n, c in line_specs]
     new_week = await _edit_or_recreate(channel, state["week_message_id"],
-                                       {"embeds": week_embeds, "attachments": []},
-                                       {"embeds": week_embeds})
+                                       {"embeds": week_embeds, "attachments": line_files()},
+                                       {"embeds": week_embeds, "files": line_files()})
 
     if new_week or new_month:
         schedule_set_message_ids(week_message_id=new_week, month_message_id=new_month)
