@@ -61,6 +61,12 @@ from .schedule_render import BADGE_SIZE, GridEvent, hex_to_rgb, render_month_png
 TZ = ZoneInfo(SCHEDULE_TZ)
 UTC = ZoneInfo("UTC")
 WEEK_COLOR = 0x5865F2
+# left-stripe colors for non-today day cards, alternated so each day boundary
+# is visible at a glance; today gets blurple
+_DAY_COLORS = (0x4E5058, 0x26272B)
+FOLLOW_COLOR = 0x2B2D31   # near-invisible stripe: the footer stays subtle
+# Discord caps the combined character count of all embeds in a message at 6000
+_MESSAGE_EMBED_CAP = 5900
 _MAX_PER_DAY = 8           # week-view entries shown per day before "+N more"
 _FIELD_CAP = 1024          # Discord embed field-value hard limit
 _BADGE_CACHE_DIR = "badge_cache"
@@ -588,8 +594,9 @@ def build_week_embeds(events: list[Event], calendars: list[Calendar], now: datet
             if day in buckets:
                 buckets[day].append(ev)
 
-    week = discord.Embed(title="This Week", color=WEEK_COLOR)
-
+    # One embed per day: each day is its own card with its own accent color
+    # (alternating shades, today in blurple) so day boundaries are unmissable.
+    day_embeds: list[discord.Embed] = []
     for i in range(7):
         day = today + timedelta(days=i)
         day_events = sorted(buckets[day], key=lambda e: e.sort_key())
@@ -605,14 +612,19 @@ def build_week_embeds(events: list[Event], calendars: list[Calendar], now: datet
         value = "\n".join(lines)
         if len(value) > _FIELD_CAP:
             value = value[:_FIELD_CAP - 20].rsplit("\n", 1)[0] + "\n*…*"
-        week.add_field(name=header, value=value, inline=False)
+        color = WEEK_COLOR if i == 0 else _DAY_COLORS[len(day_embeds) % 2]
+        day_embeds.append(discord.Embed(title=header, description=value, color=color))
 
-    if not week.fields:
-        week.description = "*Nothing scheduled in the next 7 days.*"
+    if day_embeds:
+        day_embeds[0].set_author(name="This Week")
+    else:
+        day_embeds.append(discord.Embed(
+            title="This Week", description="*Nothing scheduled in the next 7 days.*",
+            color=WEEK_COLOR))
 
     # add-to-calendar block + staleness indicator, kept subtle: no embed title,
     # everything in Discord subtext (-#) so it reads as a small gray footer
-    follow = discord.Embed(color=WEEK_COLOR)
+    follow = discord.Embed(color=FOLLOW_COLOR)
     link_lines = ["-# **Add to calendar**"]
     for cal in calendars:
         parts = []
@@ -631,7 +643,18 @@ def build_week_embeds(events: list[Event], calendars: list[Calendar], now: datet
         tail += "\n-# ⚠️ some sources are showing cached data"
     follow.description = ("\n".join(link_lines) + "\n" + tail)[:4096]
 
-    return [week, follow]
+    embeds = day_embeds + [follow]
+    # Discord rejects the whole edit if the embeds together exceed 6000 chars;
+    # trim event lines from the busiest days until we're safely under.
+    def total_len() -> int:
+        return sum(len(e.title or "") + len(e.description or "") for e in embeds)
+    while total_len() > _MESSAGE_EMBED_CAP:
+        longest = max(day_embeds, key=lambda e: len(e.description or ""))
+        head, _, _ = (longest.description or "").rpartition("\n")
+        if not head:
+            break
+        longest.description = head + "\n*…*"
+    return embeds
 
 
 # ------------------------------------------------------------------ #
