@@ -591,7 +591,7 @@ def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
         return f"{mark} **{ev.title}**{_SEP}{ev.cal_name}{_SEP}all day"
     # both tokens render per-viewer: their local clock time + a live countdown
     unix = int(ev.start.timestamp())
-    return f"{mark} **{ev.title}**{_SEP}<t:{unix}:t>{_SEP}<t:{unix}:R>"
+    return f"{mark} **{ev.title}**{_SEP}<t:{unix}:f>{_SEP}<t:{unix}:R>"
 
 
 def build_week_embeds(events: list[Event], now: datetime,
