@@ -570,9 +570,9 @@ def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
     mark = badge_emoji.get(ev.badge) or _dot_emoji(ev.color)
     if ev.all_day:
         return f"{mark} **{ev.title}** · {ev.cal_name} · all day"
-    # one time only: the dynamic timestamp renders in each viewer's local zone
-    # (time-only style — the date already lives in the day header)
-    return f"{mark} **{ev.title}** · <t:{int(ev.start.timestamp())}:t>"
+    # both tokens render per-viewer: their local clock time + a live countdown
+    unix = int(ev.start.timestamp())
+    return f"{mark} **{ev.title}** · <t:{unix}:t> · <t:{unix}:R>"
 
 
 def build_week_embeds(events: list[Event], now: datetime,
@@ -636,7 +636,7 @@ def build_week_embeds(events: list[Event], now: datetime,
     return day_embeds
 
 
-def build_follow_embed(calendars: list[Calendar], last_synced: int, any_stale: bool,
+def build_follow_embed(calendars: list[Calendar], any_stale: bool,
                        badge_emoji: dict[str, str]) -> discord.Embed:
     """Add-to-calendar block + staleness indicator, kept subtle: no embed title,
     everything in Discord subtext (-#) so it reads as a small gray footer. Lives
@@ -655,10 +655,10 @@ def build_follow_embed(calendars: list[Calendar], last_synced: int, any_stale: b
         line = f"-# {mark} {cal.name}"
         link_lines.append(f"{line} · {' · '.join(parts)}" if parts else line)
 
-    tail = f"-# Last synced <t:{last_synced}:R> · times shown in Central + your local time"
+    # no "last synced" line by design — but a degraded sync still announces itself
     if any_stale:
-        tail += "\n-# ⚠️ some sources are showing cached data"
-    follow.description = ("\n".join(link_lines) + "\n" + tail)[:4096]
+        link_lines.append("-# ⚠️ some sources are showing cached data")
+    follow.description = "\n".join(link_lines)[:4096]
     return follow
 
 
@@ -724,9 +724,9 @@ async def _edit_or_recreate(channel, mid: int | None,
 @dataclass
 class _MonthCache:
     """Skip the render + attachment re-upload when the grid's inputs are
-    unchanged; the message still gets a cheap embeds-only edit every cycle (the
-    live "last synced" footer), which doubles as deletion detection. Only
-    updated after a successful sync, so a failed edit retries next cycle."""
+    unchanged; the message still gets a cheap embeds-only edit every cycle,
+    which doubles as deletion detection (NotFound -> recreate). Only updated
+    after a successful sync, so a failed edit retries next cycle."""
     key: tuple | None = None
     png: bytes | None = None
 
@@ -816,7 +816,7 @@ async def sync_once(bot) -> str:
     # month first: on a fresh channel it must be the older message so it sits on
     # top, with the week view (today at its bottom) below it
     ct = now.astimezone(TZ)
-    follow = build_follow_embed(calendars, last_synced, any_stale, badge_emoji)
+    follow = build_follow_embed(calendars, any_stale, badge_emoji)
     new_month = await _sync_month(channel, state["month_message_id"], ct,
                                   _to_grid_events(events),
                                   [(c.name, c.color, c.badge) for c in calendars],
