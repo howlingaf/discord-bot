@@ -63,9 +63,9 @@ from .schedule_render import BADGE_SIZE, GridEvent, hex_to_rgb, render_month_png
 TZ = ZoneInfo(SCHEDULE_TZ)
 UTC = ZoneInfo("UTC")
 WEEK_COLOR = 0x5865F2
-# left-stripe colors for non-today day cards, alternated so each day boundary
-# is visible at a glance; today gets blurple
-_DAY_COLORS = (0x4E5058, 0x26272B)
+# uniform color for all card stripes and divider lines; only today's divider
+# line keeps blurple as the "you are here" marker
+_NEUTRAL_COLOR = 0x4E5058
 FOLLOW_COLOR = 0x2B2D31   # near-invisible stripe: the footer stays subtle
 # Discord caps the combined character count of all embeds in a message at 6000
 _MESSAGE_EMBED_CAP = 5900
@@ -635,15 +635,14 @@ def build_week_embeds(events: list[Event], now: datetime,
         value = "\n-# \u2800\n".join(lines)
         if len(value) > _FIELD_CAP:
             value = value[:_FIELD_CAP - 20].rsplit("\n", 1)[0] + "\n*\u2026*"
-        color = WEEK_COLOR if i == 0 else _DAY_COLORS[len(day_embeds) % 2]
-        embed = discord.Embed(title=header, description=value, color=color)
+        embed = discord.Embed(title=header, description=value, color=_NEUTRAL_COLOR)
         fname = f"line{len(day_embeds)}.png"
         embed.set_image(url=f"attachment://{fname}")
-        line_specs.append((fname, color))
+        line_specs.append((fname, WEEK_COLOR if i == 0 else _NEUTRAL_COLOR))
         day_embeds.append(embed)
     if not day_embeds:
         day_embeds.append(discord.Embed(
-            description="*Nothing scheduled in the next 7 days.*", color=WEEK_COLOR))
+            description="*Nothing scheduled in the next 7 days.*", color=_NEUTRAL_COLOR))
 
     # Discord rejects the whole edit if the embeds together exceed 6000 chars;
     # trim event lines from the busiest days until we're safely under.
