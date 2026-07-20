@@ -6,3 +6,5 @@ overlay.db-wal
 overlay.db-shm
 __pycache__/
 *.pyc
+schedule_calendars.json
+badge_cache/

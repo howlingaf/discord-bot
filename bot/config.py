@@ -81,3 +81,19 @@ DISCORD_LOG_CHANNEL_ID = 1516295491753607268
 # Twitch-link approval prompts post to the same mod console channel.
 TWITCH_LINK_PROMPT_CHANNEL_ID = DISCORD_LOG_CHANNEL_ID
 
+# ---------------- #schedule (calendar aggregator) ----------------
+# The channel that holds the two pinned, edit-in-place schedule messages.
+SCHEDULE_CHANNEL_ID = int(os.getenv("SCHEDULE_CHANNEL_ID") or "0")
+# All display is anchored to this IANA timezone; timed entries also render in each
+# viewer's local time via Discord dynamic timestamps.
+SCHEDULE_TZ = os.getenv("SCHEDULE_TZ", "America/Chicago")
+# Google Calendar API key, restricted to the Calendar API. Public calendars need
+# no OAuth. Without it the sync falls back to any per-calendar ICS urls.
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+# Seconds between sync cycles. A calendar edit should surface within ~1 min.
+SCHEDULE_POLL_SECONDS = int(os.getenv("SCHEDULE_POLL_SECONDS") or "60")
+# JSON file listing the calendars to aggregate (source of truth is config, not
+# code). See schedule_calendars.example.json for the shape.
+SCHEDULE_CALENDARS_FILE = os.getenv("SCHEDULE_CALENDARS_FILE", "schedule_calendars.json")
+# A fully-failed sync cycle alerts privately via log_error() -> #discord-bot-console.
+

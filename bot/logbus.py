@@ -33,6 +33,19 @@ def log_error(*args) -> None:
         pass
 
 
+_ESCALATE_AFTER = 3
+
+
+def log_if_persistent(count: int, *args) -> None:
+    """Route a repeating failure: print() while it might be a blip, log_error()
+    once it has persisted for `_ESCALATE_AFTER` consecutive occurrences.
+
+    Callers keep their own consecutive-failure counters; this only owns the
+    threshold and the routing so the policy can't drift between modules.
+    """
+    (log_error if count >= _ESCALATE_AFTER else print)(*args)
+
+
 def start(bot) -> None:
     """Launch the background flush task once (idempotent across reconnects)."""
     if getattr(bot, "_logbus_started", False):

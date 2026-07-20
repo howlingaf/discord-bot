@@ -8,4 +8,5 @@ dependencies = [
     "aiohttp>=3.13.3",
     "discord>=2.3.2",
     "dotenv>=0.9.9",
+    "pillow>=12.3.0",
 ]

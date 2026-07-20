@@ -1,0 +1,25 @@
+{
+  "_comment": "Calendars aggregated into #schedule. Copy to schedule_calendars.json and fill in your own. Order = display/legend order. 'id' is a public Google Calendar id (works with GOOGLE_API_KEY, no OAuth); 'ics' is an optional fallback feed tried when the API fails. 'color' is a hex string, or a list of hexes for a gradient (used on month-grid bars and the legend). 'badge' names an icon from the top-level 'badges' map: either a url to a square image (fetched once, cached in badge_cache/) or 'discord-avatar:<user_id>' for a user's live Discord avatar (circle-cropped, tracks avatar changes). Badges are drawn in the month grid/legend and uploaded as app emojis for the week view — colored dots are the fallback. 'rules' override color/badge per event by case-insensitive title substring; first match wins.",
+  "badges": {
+    "twitch": "https://icons.duckduckgo.com/ip3/twitch.tv.ico",
+    "leetcode": "https://leetcode.com/favicon-96x96.png"
+  },
+  "calendars": [
+    {
+      "name": "My Streams",
+      "id": "your-calendar-id@group.calendar.google.com",
+      "color": "#9146FF",
+      "badge": "twitch",
+      "ics": "",
+      "rules": [
+        {"match": "substack", "color": "#FF6719", "badge": "substack"}
+      ]
+    },
+    {
+      "name": "LeetCode",
+      "id": "leetcode-contests-calendar-id@group.calendar.google.com",
+      "color": ["#FFA116", "#FFC01E"],
+      "badge": "leetcode"
+    }
+  ]
+}

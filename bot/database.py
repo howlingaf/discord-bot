@@ -169,6 +169,20 @@ def db_init():
         )
         """)
 
+        # ---- #schedule (two pinned, edit-in-place messages) ----
+        # Singleton row holding the message ids we keep editing and the last time
+        # a sync cycle succeeded. No per-event state is stored — the views are
+        # regenerated from source every cycle so they can never drift.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS schedule_state (
+          id                INTEGER PRIMARY KEY CHECK (id = 1),
+          week_message_id   INTEGER,
+          month_message_id  INTEGER,
+          last_synced_at    INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+        conn.execute("INSERT OR IGNORE INTO schedule_state(id) VALUES(1)")
+
         # ---- Indexes for hot query paths ----
         # The contest poller filters on these columns every cycle; leetcode_problems
         # is looked up by slug on the recap path.
@@ -642,3 +656,40 @@ def reaction_reactors_sync(message_id: int, user_ids: list[int]) -> tuple[int, i
             )
         conn.commit()
         return len(added), len(removed)
+
+
+# ---- #schedule state helpers ----
+
+def schedule_state_get() -> dict:
+    """Return the pinned message ids and last successful sync time.
+
+    The singleton row is seeded in db_init, so it always exists; ids are None
+    until the messages have been created.
+    """
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT week_message_id, month_message_id, last_synced_at FROM schedule_state WHERE id=1"
+        ).fetchone()
+        return {"week_message_id": row[0], "month_message_id": row[1], "last_synced_at": row[2]}
+
+
+def schedule_set_message_ids(*, week_message_id: int | None = None, month_message_id: int | None = None):
+    """Persist one or both message ids without clobbering the other.
+
+    Pass only the id(s) that changed; a None argument leaves that column as-is.
+    """
+    with _db() as conn:
+        conn.execute(
+            """UPDATE schedule_state SET
+                 week_message_id=COALESCE(?, week_message_id),
+                 month_message_id=COALESCE(?, month_message_id)
+               WHERE id=1""",
+            (week_message_id, month_message_id),
+        )
+        conn.commit()
+
+
+def schedule_set_last_synced(ts: int):
+    with _db() as conn:
+        conn.execute("UPDATE schedule_state SET last_synced_at=? WHERE id=1", (ts,))
+        conn.commit()

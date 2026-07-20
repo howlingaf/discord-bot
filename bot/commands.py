@@ -176,4 +176,6 @@ async def on_message_edit(_before: discord.Message, after: discord.Message):
 
 @bot.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
+    from .schedule import on_message_delete as schedule_on_message_delete
+    schedule_on_message_delete(payload)
     await on_chat_delete(payload)
