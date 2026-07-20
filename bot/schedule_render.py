@@ -49,15 +49,6 @@ def _font(bold: bool, size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 
-_MEASURE = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-
-
-def measure_text(text: str, *, bold: bool, size: int) -> float:
-    """Pixel width of text in the bundled font — a proxy for Discord's own font
-    (close enough for relative comparisons between lines)."""
-    return _MEASURE.textlength(text, font=_font(bold, size))
-
-
 def hex_to_rgb(h: str) -> tuple[int, int, int]:
     """Parse "#rgb"/"#rrggbb" to an RGB tuple; blurple on garbage. Shared with
     schedule.py's emoji-dot matching so the two can't drift."""

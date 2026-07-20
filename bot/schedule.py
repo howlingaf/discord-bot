@@ -58,13 +58,7 @@ from .database import (
     schedule_state_get,
 )
 from .logbus import log_if_persistent
-from .schedule_render import (
-    BADGE_SIZE,
-    GridEvent,
-    hex_to_rgb,
-    measure_text,
-    render_month_png,
-)
+from .schedule_render import BADGE_SIZE, GridEvent, hex_to_rgb, render_month_png
 
 TZ = ZoneInfo(SCHEDULE_TZ)
 UTC = ZoneInfo("UTC")
@@ -585,33 +579,10 @@ def _ical_link(cal: Calendar) -> str | None:
     return None
 
 
-# plain separators; vertical breathing room comes from blank lines between events
+# plain separators; a blank subtext line between events gives vertical breathing
+# room (shorter than a full blank line); a subtext divider underlines each date
 _SEP = " · "
-# Card widths are equalized by appending invisible braille blanks to each day
-# title — a line that already exists, so no vertical cost (a spacer image added
-# bottom margin inside every card). The pad is ADAPTIVE: Discord sizes a card
-# to its longest rendered line, so each title is padded until its estimated
-# width matches the widest card's. Estimates use bundled-font metrics with
-# typical widths for the per-viewer bits Discord substitutes client-side.
-_PAD_CHAR = "⠀"
-_HAIR = " "            # hair space: fine-grained width adjustment (~2px)
-_EMOJI_W = 22.0             # custom emoji / colored dot render size
-_TIMESTAMP_SAMPLES = {"t": "8:00 PM", "R": "in 3 hours"}
-# pad titles up to (at most) this estimated width — just under Discord's real
-# max embed width so padding never wraps onto a phantom second title line
-_MAX_CARD_W = 500.0
-
-
-def _visual_width(line: str, *, bold_size: int = 15) -> float:
-    """Estimated rendered pixel width of one embed line."""
-    n_emoji = len(re.findall(r"<:\w+:\d+>", line))
-    line = re.sub(r"<:\w+:\d+>", "", line)
-    line = re.sub(r"<t:\d+:(\w)>",
-                  lambda m: " " + _TIMESTAMP_SAMPLES.get(m.group(1), "8:00 PM") + " ",
-                  line)
-    n_emoji += len([c for c in line if ord(c) > 0x1F000])   # unicode emoji dots
-    line = "".join(c for c in line if ord(c) <= 0x1F000).replace("**", "")
-    return n_emoji * _EMOJI_W + measure_text(line, bold=True, size=bold_size)
+_DIVIDER = "-# " + "─" * 40
 
 
 def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
@@ -645,7 +616,7 @@ def build_week_embeds(events: list[Event], now: datetime,
     # (alternating shades, today in blurple) so day boundaries are unmissable.
     # Built farthest-day-first so today sits at the BOTTOM, nearest the channel's
     # newest messages, with tomorrow stacked directly above it.
-    cards: list[tuple[str, str, int]] = []   # (header, value, color)
+    day_embeds: list[discord.Embed] = []
     for i in range(6, -1, -1):
         day = today + timedelta(days=i)
         day_events = sorted(buckets[day], key=lambda e: e.sort_key())
@@ -653,41 +624,22 @@ def build_week_embeds(events: list[Event], now: datetime,
             continue  # omit empty days (matches the mock)
         header = day.strftime("%a, %b %-d")
         if i == 0:
-            header += "  ← today"
+            header += "  \u2190 today"
 
         lines = [_event_line(ev, badge_emoji) for ev in day_events[:_MAX_PER_DAY]]
         if len(day_events) > _MAX_PER_DAY:
             lines.append(f"*+{len(day_events) - _MAX_PER_DAY} more*")
-        value = "\n\n".join(lines)
+        # divider underlines the date; a blank subtext line between events is
+        # shorter than a full blank line, keeping the gaps modest
+        value = _DIVIDER + "\n" + "\n-# \u2800\n".join(lines)
         if len(value) > _FIELD_CAP:
-            value = value[:_FIELD_CAP - 20].rsplit("\n", 1)[0] + "\n*…*"
-        color = WEEK_COLOR if i == 0 else _DAY_COLORS[len(cards) % 2]
-        cards.append((header, value, color))
-
-    # second pass: pad every title so each card's widest line matches the
-    # widest card in the whole stack
-    target = _MAX_CARD_W
-    if cards:
-        target = min(_MAX_CARD_W, max(
-            max([_visual_width(header, bold_size=16)] +
-                [_visual_width(ln) for ln in value.split("\n") if ln])
-            for header, value, _ in cards))
-    pad_w = measure_text(_PAD_CHAR, bold=True, size=16)
-    hair_w = max(0.5, measure_text(_HAIR, bold=True, size=16))
-    day_embeds: list[discord.Embed] = []
-    for header, value, color in cards:
-        # pad the title itself out to the target: the title becomes each card's
-        # width-setting line. Coarse braille steps + hair-space fine tuning; a
-        # trailing braille guards the hair spaces from end-of-line trimming.
-        title_w = _visual_width(header, bold_size=16)
-        gap = target - title_w - pad_w   # reserve the trailing guard braille
-        title = header
-        if gap > 0:
-            n = int(gap // pad_w)
-            h = int((gap - n * pad_w) // hair_w)
-            title = header + _PAD_CHAR * n + _HAIR * h + _PAD_CHAR
-        day_embeds.append(discord.Embed(title=title, description=value, color=color))
-
+            value = value[:_FIELD_CAP - 20].rsplit("\n", 1)[0] + "\n*\u2026*"
+        color = WEEK_COLOR if i == 0 else _DAY_COLORS[len(day_embeds) % 2]
+        embed = discord.Embed(title=header, description=value, color=color)
+        # identical invisible spacer image in every card: the one mechanism that
+        # renders all cards at exactly the same (full) width
+        embed.set_image(url="attachment://spacer.png")
+        day_embeds.append(embed)
     if not day_embeds:
         day_embeds.append(discord.Embed(
             description="*Nothing scheduled in the next 7 days.*", color=WEEK_COLOR))
@@ -766,6 +718,15 @@ async def _pin(msg: discord.Message):
         await msg.pin()
     except Exception as e:
         print(f"[SCHEDULE] could not pin {msg.id}: {e}")
+
+
+@functools.lru_cache(maxsize=1)
+def _spacer_png() -> bytes:
+    """Transparent strip referenced by every week card as its image — the one
+    mechanism that renders all cards at exactly the same full width."""
+    buf = io.BytesIO()
+    Image.new("RGBA", (600, 2), (0, 0, 0, 0)).save(buf, "PNG")
+    return buf.getvalue()
 
 
 async def _edit_or_recreate(channel, mid: int | None,
@@ -892,11 +853,11 @@ async def sync_once(bot) -> str:
                                   follow)
 
     week_embeds = build_week_embeds(events, now, badge_emoji)
-    # attachments=[] clears the retired spacer image (and any leftover from the
-    # messages ever swapping roles)
+    def spacer_file() -> discord.File:
+        return discord.File(io.BytesIO(_spacer_png()), filename="spacer.png")
     new_week = await _edit_or_recreate(channel, state["week_message_id"],
-                                       {"embeds": week_embeds, "attachments": []},
-                                       {"embeds": week_embeds})
+                                       {"embeds": week_embeds, "attachments": [spacer_file()]},
+                                       {"embeds": week_embeds, "file": spacer_file()})
 
     if new_week or new_month:
         schedule_set_message_ids(week_message_id=new_week, month_message_id=new_month)
