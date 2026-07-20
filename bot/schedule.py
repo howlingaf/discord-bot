@@ -581,6 +581,10 @@ def _ical_link(cal: Calendar) -> str | None:
 
 # plain separators; vertical breathing room comes from blank lines between events
 _SEP = " · "
+# invisible braille blanks appended to each day title: stretches every card to
+# the same width using a line that already exists, costing no vertical space
+# (unlike a spacer image, which added bottom margin inside every card)
+_TITLE_PAD = "⠀" * 26
 
 
 def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
@@ -631,17 +635,12 @@ def build_week_embeds(events: list[Event], now: datetime,
         if len(value) > _FIELD_CAP:
             value = value[:_FIELD_CAP - 20].rsplit("\n", 1)[0] + "\n*…*"
         color = WEEK_COLOR if i == 0 else _DAY_COLORS[len(day_embeds) % 2]
-        day_embeds.append(discord.Embed(title=header, description=value, color=color))
+        day_embeds.append(discord.Embed(title=header + _TITLE_PAD,
+                                        description=value, color=color))
 
     if not day_embeds:
         day_embeds.append(discord.Embed(
             description="*Nothing scheduled in the next 7 days.*", color=WEEK_COLOR))
-
-    # identical invisible spacer image -> cards render at the same (full) width
-    # instead of hugging their own content. The bottom-most card skips it: with
-    # nothing below, its spacer would just be dead bottom margin.
-    for e in day_embeds[:-1]:
-        e.set_image(url="attachment://spacer.png")
 
     # Discord rejects the whole edit if the embeds together exceed 6000 chars;
     # trim event lines from the busiest days until we're safely under.
@@ -717,15 +716,6 @@ async def _pin(msg: discord.Message):
         await msg.pin()
     except Exception as e:
         print(f"[SCHEDULE] could not pin {msg.id}: {e}")
-
-
-@functools.lru_cache(maxsize=1)
-def _spacer_png() -> bytes:
-    """Transparent strip referenced by every week card as its image — Discord
-    then renders all cards at the same full width instead of hugging content."""
-    buf = io.BytesIO()
-    Image.new("RGBA", (600, 2), (0, 0, 0, 0)).save(buf, "PNG")
-    return buf.getvalue()
 
 
 async def _edit_or_recreate(channel, mid: int | None,
@@ -852,13 +842,11 @@ async def sync_once(bot) -> str:
                                   follow)
 
     week_embeds = build_week_embeds(events, now, badge_emoji)
-    # the spacer replaces whatever attachments the message had, so a leftover
-    # image from the messages ever swapping roles also gets cleared
-    def spacer_file() -> discord.File:
-        return discord.File(io.BytesIO(_spacer_png()), filename="spacer.png")
+    # attachments=[] clears the retired spacer image (and any leftover from the
+    # messages ever swapping roles)
     new_week = await _edit_or_recreate(channel, state["week_message_id"],
-                                       {"embeds": week_embeds, "attachments": [spacer_file()]},
-                                       {"embeds": week_embeds, "file": spacer_file()})
+                                       {"embeds": week_embeds, "attachments": []},
+                                       {"embeds": week_embeds})
 
     if new_week or new_month:
         schedule_set_message_ids(week_message_id=new_week, month_message_id=new_month)
