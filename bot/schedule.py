@@ -58,7 +58,13 @@ from .database import (
     schedule_state_get,
 )
 from .logbus import log_if_persistent
-from .schedule_render import BADGE_SIZE, GridEvent, hex_to_rgb, render_month_png
+from .schedule_render import (
+    BADGE_SIZE,
+    GridEvent,
+    hex_to_rgb,
+    measure_text,
+    render_month_png,
+)
 
 TZ = ZoneInfo(SCHEDULE_TZ)
 UTC = ZoneInfo("UTC")
@@ -581,10 +587,28 @@ def _ical_link(cal: Calendar) -> str | None:
 
 # plain separators; vertical breathing room comes from blank lines between events
 _SEP = " · "
-# invisible braille blanks appended to each day title: stretches every card to
-# the same width using a line that already exists, costing no vertical space
-# (unlike a spacer image, which added bottom margin inside every card)
-_TITLE_PAD = "⠀" * 26
+# Card widths are equalized by appending invisible braille blanks to each day
+# title — a line that already exists, so no vertical cost (a spacer image added
+# bottom margin inside every card). The pad is ADAPTIVE: Discord sizes a card
+# to its longest rendered line, so each title is padded until its estimated
+# width matches the widest card's. Estimates use bundled-font metrics with
+# typical widths for the per-viewer bits Discord substitutes client-side.
+_PAD_CHAR = "⠀"
+_EMOJI_W = 22.0             # custom emoji / colored dot render size
+_TIMESTAMP_SAMPLES = {"t": "8:00 PM", "R": "in 3 hours"}
+_MAX_CARD_W = 420.0         # don't pad past Discord's own max embed width
+
+
+def _visual_width(line: str, *, bold_size: int = 15) -> float:
+    """Estimated rendered pixel width of one embed line."""
+    n_emoji = len(re.findall(r"<:\w+:\d+>", line))
+    line = re.sub(r"<:\w+:\d+>", "", line)
+    line = re.sub(r"<t:\d+:(\w)>",
+                  lambda m: " " + _TIMESTAMP_SAMPLES.get(m.group(1), "8:00 PM") + " ",
+                  line)
+    n_emoji += len([c for c in line if ord(c) > 0x1F000])   # unicode emoji dots
+    line = "".join(c for c in line if ord(c) <= 0x1F000).replace("**", "")
+    return n_emoji * _EMOJI_W + measure_text(line, bold=True, size=bold_size)
 
 
 def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
@@ -618,7 +642,7 @@ def build_week_embeds(events: list[Event], now: datetime,
     # (alternating shades, today in blurple) so day boundaries are unmissable.
     # Built farthest-day-first so today sits at the BOTTOM, nearest the channel's
     # newest messages, with tomorrow stacked directly above it.
-    day_embeds: list[discord.Embed] = []
+    cards: list[tuple[str, str, int]] = []   # (header, value, color)
     for i in range(6, -1, -1):
         day = today + timedelta(days=i)
         day_events = sorted(buckets[day], key=lambda e: e.sort_key())
@@ -634,8 +658,25 @@ def build_week_embeds(events: list[Event], now: datetime,
         value = "\n\n".join(lines)
         if len(value) > _FIELD_CAP:
             value = value[:_FIELD_CAP - 20].rsplit("\n", 1)[0] + "\n*…*"
-        color = WEEK_COLOR if i == 0 else _DAY_COLORS[len(day_embeds) % 2]
-        day_embeds.append(discord.Embed(title=header + _TITLE_PAD,
+        color = WEEK_COLOR if i == 0 else _DAY_COLORS[len(cards) % 2]
+        cards.append((header, value, color))
+
+    # second pass: pad every title so each card's widest line matches the
+    # widest card in the whole stack
+    target = _MAX_CARD_W
+    if cards:
+        target = min(_MAX_CARD_W, max(
+            max([_visual_width(header, bold_size=16)] +
+                [_visual_width(ln) for ln in value.split("\n") if ln])
+            for header, value, _ in cards))
+    pad_w = measure_text(_PAD_CHAR, bold=True, size=16)
+    day_embeds: list[discord.Embed] = []
+    for header, value, color in cards:
+        # pad the title itself out to the target: the title becomes each card's
+        # width-setting line whenever its content lines are narrower
+        title_w = _visual_width(header, bold_size=16)
+        n = max(0, round((target - title_w) / pad_w))
+        day_embeds.append(discord.Embed(title=header + _PAD_CHAR * n,
                                         description=value, color=color))
 
     if not day_embeds:
