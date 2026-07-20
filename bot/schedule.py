@@ -30,6 +30,7 @@ fails).
 
 import asyncio
 import base64
+import functools
 import io
 import json
 import os
@@ -566,13 +567,18 @@ def _ical_link(cal: Calendar) -> str | None:
     return None
 
 
+# separator with non-breaking padding: Discord renders NBSPs faithfully, giving
+# the inline elements (badge / title / time / countdown) room to breathe
+_SEP = "  ·  "
+
+
 def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
     mark = badge_emoji.get(ev.badge) or _dot_emoji(ev.color)
     if ev.all_day:
-        return f"{mark} **{ev.title}** · {ev.cal_name} · all day"
+        return f"{mark}  **{ev.title}**{_SEP}{ev.cal_name}{_SEP}all day"
     # both tokens render per-viewer: their local clock time + a live countdown
     unix = int(ev.start.timestamp())
-    return f"{mark} **{ev.title}** · <t:{unix}:t> · <t:{unix}:R>"
+    return f"{mark}  **{ev.title}**{_SEP}<t:{unix}:t>{_SEP}<t:{unix}:R>"
 
 
 def build_week_embeds(events: list[Event], now: datetime,
@@ -616,12 +622,14 @@ def build_week_embeds(events: list[Event], now: datetime,
         color = WEEK_COLOR if i == 0 else _DAY_COLORS[len(day_embeds) % 2]
         day_embeds.append(discord.Embed(title=header, description=value, color=color))
 
-    if day_embeds:
-        day_embeds[0].set_author(name="This Week")
-    else:
+    if not day_embeds:
         day_embeds.append(discord.Embed(
-            title="This Week", description="*Nothing scheduled in the next 7 days.*",
-            color=WEEK_COLOR))
+            description="*Nothing scheduled in the next 7 days.*", color=WEEK_COLOR))
+
+    # identical invisible spacer image in every card -> every card renders at
+    # the same (full) width instead of hugging its own content
+    for e in day_embeds:
+        e.set_image(url="attachment://spacer.png")
 
     # Discord rejects the whole edit if the embeds together exceed 6000 chars;
     # trim event lines from the busiest days until we're safely under.
@@ -697,6 +705,15 @@ async def _pin(msg: discord.Message):
         await msg.pin()
     except Exception as e:
         print(f"[SCHEDULE] could not pin {msg.id}: {e}")
+
+
+@functools.lru_cache(maxsize=1)
+def _spacer_png() -> bytes:
+    """Transparent strip referenced by every week card as its image — Discord
+    then renders all cards at the same full width instead of hugging content."""
+    buf = io.BytesIO()
+    Image.new("RGBA", (600, 2), (0, 0, 0, 0)).save(buf, "PNG")
+    return buf.getvalue()
 
 
 async def _edit_or_recreate(channel, mid: int | None,
@@ -823,10 +840,13 @@ async def sync_once(bot) -> str:
                                   follow)
 
     week_embeds = build_week_embeds(events, now, badge_emoji)
-    # attachments=[] clears any leftover image if the two messages ever swap roles
+    # the spacer replaces whatever attachments the message had, so a leftover
+    # image from the messages ever swapping roles also gets cleared
+    def spacer_file() -> discord.File:
+        return discord.File(io.BytesIO(_spacer_png()), filename="spacer.png")
     new_week = await _edit_or_recreate(channel, state["week_message_id"],
-                                       {"embeds": week_embeds, "attachments": []},
-                                       {"embeds": week_embeds})
+                                       {"embeds": week_embeds, "attachments": [spacer_file()]},
+                                       {"embeds": week_embeds, "file": spacer_file()})
 
     if new_week or new_month:
         schedule_set_message_ids(week_message_id=new_week, month_message_id=new_month)
