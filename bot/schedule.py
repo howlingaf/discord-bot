@@ -65,7 +65,7 @@ UTC = ZoneInfo("UTC")
 WEEK_COLOR = 0x5865F2
 # uniform color for all card stripes and divider lines; only today's divider
 # line keeps blurple as the "you are here" marker
-_NEUTRAL_COLOR = 0x4E5058
+_NEUTRAL_COLOR = 0x26272B
 FOLLOW_COLOR = 0x2B2D31   # near-invisible stripe: the footer stays subtle
 # Discord caps the combined character count of all embeds in a message at 6000
 _MESSAGE_EMBED_CAP = 5900
