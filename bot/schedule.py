@@ -594,9 +594,12 @@ _SEP = " · "
 # width matches the widest card's. Estimates use bundled-font metrics with
 # typical widths for the per-viewer bits Discord substitutes client-side.
 _PAD_CHAR = "⠀"
+_HAIR = " "            # hair space: fine-grained width adjustment (~2px)
 _EMOJI_W = 22.0             # custom emoji / colored dot render size
 _TIMESTAMP_SAMPLES = {"t": "8:00 PM", "R": "in 3 hours"}
-_MAX_CARD_W = 420.0         # don't pad past Discord's own max embed width
+# pad titles up to (at most) this estimated width — just under Discord's real
+# max embed width so padding never wraps onto a phantom second title line
+_MAX_CARD_W = 500.0
 
 
 def _visual_width(line: str, *, bold_size: int = 15) -> float:
@@ -670,14 +673,20 @@ def build_week_embeds(events: list[Event], now: datetime,
                 [_visual_width(ln) for ln in value.split("\n") if ln])
             for header, value, _ in cards))
     pad_w = measure_text(_PAD_CHAR, bold=True, size=16)
+    hair_w = max(0.5, measure_text(_HAIR, bold=True, size=16))
     day_embeds: list[discord.Embed] = []
     for header, value, color in cards:
         # pad the title itself out to the target: the title becomes each card's
-        # width-setting line whenever its content lines are narrower
+        # width-setting line. Coarse braille steps + hair-space fine tuning; a
+        # trailing braille guards the hair spaces from end-of-line trimming.
         title_w = _visual_width(header, bold_size=16)
-        n = max(0, round((target - title_w) / pad_w))
-        day_embeds.append(discord.Embed(title=header + _PAD_CHAR * n,
-                                        description=value, color=color))
+        gap = target - title_w - pad_w   # reserve the trailing guard braille
+        title = header
+        if gap > 0:
+            n = int(gap // pad_w)
+            h = int((gap - n * pad_w) // hair_w)
+            title = header + _PAD_CHAR * n + _HAIR * h + _PAD_CHAR
+        day_embeds.append(discord.Embed(title=title, description=value, color=color))
 
     if not day_embeds:
         day_embeds.append(discord.Embed(
