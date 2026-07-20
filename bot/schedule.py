@@ -635,10 +635,11 @@ def build_week_embeds(events: list[Event], now: datetime,
         value = "\n-# \u2800\n".join(lines)
         if len(value) > _FIELD_CAP:
             value = value[:_FIELD_CAP - 20].rsplit("\n", 1)[0] + "\n*\u2026*"
-        embed = discord.Embed(title=header, description=value, color=_NEUTRAL_COLOR)
+        embed = discord.Embed(title=header, description=value,
+                              color=WEEK_COLOR if i == 0 else _NEUTRAL_COLOR)
         fname = f"line{len(day_embeds)}.png"
         embed.set_image(url=f"attachment://{fname}")
-        line_specs.append((fname, WEEK_COLOR if i == 0 else _NEUTRAL_COLOR))
+        line_specs.append((fname, _NEUTRAL_COLOR))
         day_embeds.append(embed)
     if not day_embeds:
         day_embeds.append(discord.Embed(
