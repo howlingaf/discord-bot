@@ -31,6 +31,7 @@ fails).
 import asyncio
 import base64
 import functools
+import hashlib
 import io
 import json
 import os
@@ -431,8 +432,9 @@ async def _fetch_calendar(session, cal: Calendar, lo: datetime, hi: datetime) ->
 _badge_icons: dict[str, Image.Image] = {}   # name -> BADGE_SIZE RGBA, for the grid
 _badge_png: dict[str, bytes] = {}           # name -> emoji-sized PNG, for upload
 _badge_failed: set[str] = set()             # don't refetch/relog every cycle
-# emoji-name override per badge; discord-avatar badges embed the avatar hash so
-# an avatar change mints a fresh emoji instead of serving the stale image
+# emoji name per badge, suffixed with a content hash of the icon: any icon
+# change (new avatar, reshaped logo, swapped url) mints a fresh emoji instead
+# of serving the stale image; older versions are deleted on creation
 _badge_emoji_names: dict[str, str] = {}
 
 _emoji_strs: dict[str, str] = {}            # name -> "<:sched_x:id>"
@@ -454,6 +456,9 @@ def _store_badge(name: str, im: Image.Image) -> None:
     buf = io.BytesIO()
     im.resize((_EMOJI_UPLOAD_SIZE, _EMOJI_UPLOAD_SIZE), Image.LANCZOS).save(buf, "PNG")
     _badge_png[name] = buf.getvalue()
+    slug = re.sub(r"[^a-zA-Z0-9_]", "_", name)[:17]
+    digest = hashlib.sha256(_badge_png[name]).hexdigest()[:8]
+    _badge_emoji_names[name] = f"sched_{slug}_{digest}"
 
 
 async def _ensure_badge_icons(bot, badge_urls: dict[str, str], needed: set[str]) -> None:
@@ -478,14 +483,18 @@ async def _ensure_badge_icons(bot, badge_urls: dict[str, str], needed: set[str])
         if url.startswith("discord-avatar:"):
             try:
                 user = await bot.fetch_user(int(url.split(":", 1)[1]))
-                avatar = user.display_avatar.with_size(_EMOJI_UPLOAD_SIZE)
-                data = await avatar.read()
+                data = await user.display_avatar.with_size(_EMOJI_UPLOAD_SIZE).read()
                 _store_badge(name, _circle_crop(Image.open(io.BytesIO(data))))
-                _badge_emoji_names[name] = f"sched_{name}_{avatar.key[:8]}"
             except Exception as e:
                 _badge_failed.add(name)
                 print(f"[SCHEDULE] avatar badge '{name}' failed: {e!r} — using color fallback")
             continue
+
+        # "circle:<url>" -> circle-crop the fetched icon (square logos like
+        # Substack's that should render round)
+        circle = url.startswith("circle:")
+        if circle:
+            url = url[len("circle:"):]
 
         path = os.path.join(_BADGE_CACHE_DIR, f"{re.sub(r'[^a-zA-Z0-9_-]', '_', name)}.png")
         data = None
@@ -508,7 +517,8 @@ async def _ensure_badge_icons(bot, badge_urls: dict[str, str], needed: set[str])
                 print(f"[SCHEDULE] badge fetch failed for '{name}': {e!r} — using color fallback")
                 continue
         try:
-            _store_badge(name, Image.open(io.BytesIO(data)).convert("RGBA"))
+            im = Image.open(io.BytesIO(data)).convert("RGBA")
+            _store_badge(name, _circle_crop(im) if circle else im)
         except Exception as e:
             _badge_failed.add(name)
             print(f"[SCHEDULE] badge decode failed for '{name}': {e!r} — using color fallback")
@@ -532,14 +542,16 @@ async def _badge_emoji(bot, name: str) -> str:
         if emoji is None:
             emoji = await bot.create_application_emoji(name=ename, image=_badge_png[name])
             _app_emojis[ename] = emoji
-            # a hash-suffixed (avatar) emoji replaces its older versions
-            if name in _badge_emoji_names:
-                prefix = f"sched_{name}_"
-                for stale in [n for n in _app_emojis if n.startswith(prefix) and n != ename]:
-                    try:
-                        await _app_emojis.pop(stale).delete()
-                    except Exception:
-                        pass
+            # a freshly minted emoji replaces older versions of the same badge
+            # (both hash-suffixed predecessors and legacy un-hashed names)
+            base = ename.rsplit("_", 1)[0]
+            stale_names = [n for n in _app_emojis
+                           if n != ename and (n == base or n.startswith(base + "_"))]
+            for stale in stale_names:
+                try:
+                    await _app_emojis.pop(stale).delete()
+                except Exception:
+                    pass
         _emoji_strs[name] = str(emoji)
         return _emoji_strs[name]
     except Exception as e:
@@ -625,9 +637,10 @@ def build_week_embeds(events: list[Event], now: datetime,
         day_embeds.append(discord.Embed(
             description="*Nothing scheduled in the next 7 days.*", color=WEEK_COLOR))
 
-    # identical invisible spacer image in every card -> every card renders at
-    # the same (full) width instead of hugging its own content
-    for e in day_embeds:
+    # identical invisible spacer image -> cards render at the same (full) width
+    # instead of hugging their own content. The bottom-most card skips it: with
+    # nothing below, its spacer would just be dead bottom margin.
+    for e in day_embeds[:-1]:
         e.set_image(url="attachment://spacer.png")
 
     # Discord rejects the whole edit if the embeds together exceed 6000 chars;
