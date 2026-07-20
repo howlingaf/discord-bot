@@ -567,18 +567,17 @@ def _ical_link(cal: Calendar) -> str | None:
     return None
 
 
-# separator with non-breaking padding: Discord renders NBSPs faithfully, giving
-# the inline elements (badge / title / time / countdown) room to breathe
-_SEP = "  ·  "
+# plain separators; vertical breathing room comes from blank lines between events
+_SEP = " · "
 
 
 def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
     mark = badge_emoji.get(ev.badge) or _dot_emoji(ev.color)
     if ev.all_day:
-        return f"{mark}  **{ev.title}**{_SEP}{ev.cal_name}{_SEP}all day"
+        return f"{mark} **{ev.title}**{_SEP}{ev.cal_name}{_SEP}all day"
     # both tokens render per-viewer: their local clock time + a live countdown
     unix = int(ev.start.timestamp())
-    return f"{mark}  **{ev.title}**{_SEP}<t:{unix}:t>{_SEP}<t:{unix}:R>"
+    return f"{mark} **{ev.title}**{_SEP}<t:{unix}:t>{_SEP}<t:{unix}:R>"
 
 
 def build_week_embeds(events: list[Event], now: datetime,
@@ -616,7 +615,7 @@ def build_week_embeds(events: list[Event], now: datetime,
         lines = [_event_line(ev, badge_emoji) for ev in day_events[:_MAX_PER_DAY]]
         if len(day_events) > _MAX_PER_DAY:
             lines.append(f"*+{len(day_events) - _MAX_PER_DAY} more*")
-        value = "\n".join(lines)
+        value = "\n\n".join(lines)
         if len(value) > _FIELD_CAP:
             value = value[:_FIELD_CAP - 20].rsplit("\n", 1)[0] + "\n*…*"
         color = WEEK_COLOR if i == 0 else _DAY_COLORS[len(day_embeds) % 2]
