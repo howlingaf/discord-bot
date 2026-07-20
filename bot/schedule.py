@@ -564,9 +564,9 @@ def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
     mark = badge_emoji.get(ev.badge) or _dot_emoji(ev.color)
     if ev.all_day:
         return f"{mark} **{ev.title}** · {ev.cal_name} · all day"
-    unix = int(ev.start.timestamp())
-    ct = ev.start.astimezone(TZ).strftime("%-I:%M %p")
-    return f"{mark} **{ev.title}** · {ct} CT · <t:{unix}:f>"
+    # one time only: the dynamic timestamp renders in each viewer's local zone
+    # (time-only style — the date already lives in the day header)
+    return f"{mark} **{ev.title}** · <t:{int(ev.start.timestamp())}:t>"
 
 
 def build_week_embeds(events: list[Event], calendars: list[Calendar], now: datetime,
