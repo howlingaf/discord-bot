@@ -67,10 +67,7 @@ WEEK_COLOR = 0x5865F2
 # line keeps blurple as the "you are here" marker
 _NEUTRAL_COLOR = 0x26272B
 FOLLOW_COLOR = 0x2B2D31   # near-invisible stripe: the footer stays subtle
-# Discord caps the combined character count of all embeds in a message at 6000
-_MESSAGE_EMBED_CAP = 5900
-_MAX_PER_DAY = 8           # week-view entries shown per day before "+N more"
-_FIELD_CAP = 1024          # Discord embed field-value hard limit
+_MAX_CARDS = 10            # Discord: max 10 embeds (and 10 attachments) per message
 _BADGE_CACHE_DIR = "badge_cache"
 _EMOJI_UPLOAD_SIZE = 128   # px; app-emoji upload size (icons upscale fine)
 
@@ -585,76 +582,70 @@ _SEP = " · "
 
 
 
-def _event_line(ev: Event, badge_emoji: dict[str, str]) -> str:
-    mark = badge_emoji.get(ev.badge) or _dot_emoji(ev.color)
-    if ev.all_day:
-        return f"{mark} **{ev.title}**{_SEP}{ev.cal_name}{_SEP}all day"
-    # both tokens render per-viewer: their local clock time + a live countdown
-    unix = int(ev.start.timestamp())
-    return f"{mark} **{ev.title}**{_SEP}<t:{unix}:f>{_SEP}<t:{unix}:R>"
-
-
 def build_week_embeds(events: list[Event], now: datetime,
-                      badge_emoji: dict[str, str]) -> list[discord.Embed]:
+                      badge_emoji: dict[str, str]) -> tuple[list[discord.Embed], list[tuple[str, int]]]:
+    """Upcoming events for the next 7 Central days, ONE CARD PER EVENT, ordered
+    soonest-at-the-bottom. Every date/time on a card is a dynamic timestamp, so
+    each card is timezone-coherent for every viewer: no shared day grouping to
+    disagree about — the bottom card is simply the next thing happening, for
+    everyone at once. (Embed titles can't render timestamp tokens, so the event
+    name is a heading in the body with the dynamic date/time under it.)"""
     today = now.astimezone(TZ).date()
+    horizon = today + timedelta(days=6)
 
-    # bucket events onto Central dates for the next 7 days
-    buckets: dict[date, list[Event]] = {today + timedelta(days=i): [] for i in range(7)}
+    def noon_ct(d: date) -> int:
+        # a midday-Central instant lands on the right calendar date for nearly
+        # every viewer timezone; used to render all-day dates dynamically
+        return int(datetime(d.year, d.month, d.day, 12, tzinfo=TZ).timestamp())
+
+    sel: list[tuple[int, Event]] = []
     for ev in events:
         if ev.all_day:
-            day = ev.start_date
-            while day <= ev.end_date:
-                if day in buckets:
-                    buckets[day].append(ev)
-                day += timedelta(days=1)
+            if ev.end_date < today or ev.start_date > horizon:
+                continue
+            sel.append((noon_ct(max(ev.start_date, today)) - 43200, ev))
         else:
-            day = ev.start.astimezone(TZ).date()
-            if day in buckets:
-                buckets[day].append(ev)
+            d = ev.start.astimezone(TZ).date()
+            if today <= d <= horizon:
+                sel.append((int(ev.start.timestamp()), ev))
+    sel.sort(key=lambda t: t[0])
 
-    # One embed per day: each day is its own card with its own accent color
-    # (alternating shades, today in blurple) so day boundaries are unmissable.
-    # Built farthest-day-first so today sits at the BOTTOM, nearest the channel's
-    # newest messages, with tomorrow stacked directly above it.
+    overflow = 0
+    if len(sel) > _MAX_CARDS:
+        overflow = len(sel) - (_MAX_CARDS - 1)
+        sel = sel[:_MAX_CARDS - 1]
+
     day_embeds: list[discord.Embed] = []
     line_specs: list[tuple[str, int]] = []
-    for i in range(6, -1, -1):
-        day = today + timedelta(days=i)
-        day_events = sorted(buckets[day], key=lambda e: e.sort_key())
-        if not day_events:
-            continue  # omit empty days (matches the mock)
-        header = day.strftime("%a, %b %-d")
-        if i == 0:
-            header += "  \u2190 today"
 
-        lines = [_event_line(ev, badge_emoji) for ev in day_events[:_MAX_PER_DAY]]
-        if len(day_events) > _MAX_PER_DAY:
-            lines.append(f"*+{len(day_events) - _MAX_PER_DAY} more*")
-        # blank subtext lines keep modest gaps between events; the card's
-        # bottom line image (colored per day) divides it from the next day
-        value = "\n-# \u2800\n".join(lines)
-        if len(value) > _FIELD_CAP:
-            value = value[:_FIELD_CAP - 20].rsplit("\n", 1)[0] + "\n*\u2026*"
-        embed = discord.Embed(title=header, description=value,
-                              color=WEEK_COLOR if i == 0 else _NEUTRAL_COLOR)
+    def add_card(desc: str, color: int) -> None:
+        embed = discord.Embed(description=desc[:4096], color=color)
         fname = f"line{len(day_embeds)}.png"
         embed.set_image(url=f"attachment://{fname}")
         line_specs.append((fname, _NEUTRAL_COLOR))
         day_embeds.append(embed)
-    if not day_embeds:
-        day_embeds.append(discord.Embed(
-            description="*Nothing scheduled in the next 7 days.*", color=_NEUTRAL_COLOR))
 
-    # Discord rejects the whole edit if the embeds together exceed 6000 chars;
-    # trim event lines from the busiest days until we're safely under.
-    def total_len() -> int:
-        return sum(len(e.title or "") + len(e.description or "") for e in day_embeds)
-    while total_len() > _MESSAGE_EMBED_CAP:
-        longest = max(day_embeds, key=lambda e: len(e.description or ""))
-        head, _, _ = (longest.description or "").rpartition("\n")
-        if not head:
-            break
-        longest.description = head + "\n*…*"
+    if overflow:
+        add_card(f"-# +{overflow} more this week", _NEUTRAL_COLOR)
+
+    for _, ev in reversed(sel):   # farthest at top, soonest at bottom
+        mark = badge_emoji.get(ev.badge) or _dot_emoji(ev.color)
+        if ev.all_day:
+            when = f"<t:{noon_ct(ev.start_date)}:D>"
+            if ev.end_date != ev.start_date:
+                when += f" \u2013 <t:{noon_ct(ev.end_date)}:D>"
+            when += f"{_SEP}all day"
+        else:
+            unix = int(ev.start.timestamp())
+            when = f"<t:{unix}:D>{_SEP}<t:{unix}:t>{_SEP}<t:{unix}:R>"
+        add_card(f"### {mark} {ev.title}\n{when}", _NEUTRAL_COLOR)
+
+    if day_embeds:
+        # the soonest (bottom) card carries the blurple "next up" stripe
+        day_embeds[-1].color = discord.Colour(WEEK_COLOR)
+    else:
+        add_card("*Nothing scheduled in the next 7 days.*", WEEK_COLOR)
+
     return day_embeds, line_specs
 
 
