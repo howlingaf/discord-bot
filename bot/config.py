@@ -71,11 +71,6 @@ SECRET_STREAMS_EMPTY_NAME = "super secret streams"
 # ---------------- Command Logging ----------------
 COMMAND_LOG_CHANNEL_ID = 1473840278497525872
 
-# ---------------- Reaction interest roster (#interested-join-stream) ----------------
-# Where the "who reacted" roster is posted. Tracking is pointed at a post with
-# scripts/track_reactions.py; the bot then keeps the roster updated on its own.
-INTEREST_ROSTER_CHANNEL_ID = int(os.getenv("INTEREST_ROSTER_CHANNEL_ID") or "1527172397516456107")
-
 # ---------------- Error/Failure Log + Bot Console (mods-only #discord-bot-console) ----------------
 DISCORD_LOG_CHANNEL_ID = 1516295491753607268
 # Twitch-link approval prompts post to the same mod console channel.
