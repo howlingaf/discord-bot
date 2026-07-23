@@ -71,8 +71,9 @@ from .logbus import log_error, log_if_persistent
 _SWEEP_SECONDS = 300
 _FEED_LIMIT = 15
 # component budget on the panel message: 5 rows x 5 buttons
-_MAX_WL_BUTTONS = 15
-_MAX_RELEASE_BUTTONS = 10
+_MAX_WL_BUTTONS = 12
+_MAX_RELEASE_BUTTONS = 8
+_MAX_RESET_BUTTONS = 5
 
 # the exact overwrite we own: deny ViewChannel+Connect, allow nothing, member type
 _DENY_VALUE = discord.Permissions(view_channel=True, connect=True).value
@@ -364,6 +365,28 @@ async def whitelist_seed(bot, seeded_by: int) -> tuple[bool, str]:
     return True, f"Seeded {added} member(s) from @{role.name}."
 
 
+async def session_reset(bot, user_id: int, reset_by: int) -> tuple[bool, str]:
+    """Zero a user's current session tally. If they're connected right now, a
+    fresh window opens immediately so tracking continues from zero."""
+    async with _lock:
+        w = fairaccess_window_open_for(user_id)
+        if not w:
+            return False, "No open session tally for that user."
+        now = _now()
+        rooms = json.loads(w["room_seconds"])
+        was_connected = (w["last_join_at"], w["last_join_channel_id"])
+        _close_window(w, now)
+        if was_connected[0]:
+            wid = fairaccess_window_create(user_id, now)
+            fairaccess_window_update(wid, last_join_at=now,
+                                     last_join_channel_id=was_connected[1],
+                                     last_activity_at=now)
+    await _log(bot, f"🔄 Session tally reset: <@{user_id}> — was "
+                    f"{_fmt_minutes(bot, rooms)} (by <@{reset_by}>)")
+    await render_panel(bot)
+    return True, f"Reset <@{user_id}>'s tally (was {_fmt_minutes(bot, rooms)})."
+
+
 async def cooldown_release(bot, user_id: int, released_by: int) -> tuple[bool, str]:
     async with _lock:
         cd = fairaccess_cooldown_active_for(user_id)
@@ -443,6 +466,28 @@ class ReleaseButton(discord.ui.DynamicItem[discord.ui.Button],
         await interaction.response.send_message(msg, ephemeral=True)
 
 
+class SessionResetButton(discord.ui.DynamicItem[discord.ui.Button],
+                         template=r"fa:rst:(?P<uid>\d+)"):
+    def __init__(self, uid: int, name: str = ""):
+        super().__init__(discord.ui.Button(
+            label=f"Reset {name}"[:80] if name else "Reset tally",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"fa:rst:{uid}",
+        ))
+        self.uid = uid
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["uid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _staff_check(interaction):
+            await interaction.response.send_message("❌ Staff only.", ephemeral=True)
+            return
+        _, msg = await session_reset(interaction.client, self.uid, interaction.user.id)
+        await interaction.response.send_message(msg, ephemeral=True)
+
+
 _render_lock = asyncio.Lock()
 
 
@@ -499,6 +544,11 @@ def _build_panel(bot) -> tuple[list[discord.Embed], discord.ui.View]:
         if slots <= 0:
             break
         view.add_item(ReleaseButton(c["user_id"], _display_name(bot, c["user_id"])))
+        slots -= 1
+    for w in fairaccess_windows_open()[:_MAX_RESET_BUTTONS]:
+        if slots <= 0:
+            break
+        view.add_item(SessionResetButton(w["user_id"], _display_name(bot, w["user_id"])))
         slots -= 1
     for r in wl[:_MAX_WL_BUTTONS]:
         if slots <= 0:
@@ -617,5 +667,5 @@ def start(bot) -> None:
     if getattr(bot, "_fairaccess_started", False):
         return
     bot._fairaccess_started = True
-    bot.add_dynamic_items(WhitelistRemoveButton, ReleaseButton)
+    bot.add_dynamic_items(WhitelistRemoveButton, ReleaseButton, SessionResetButton)
     bot.loop.create_task(_loop(bot))
