@@ -114,6 +114,67 @@ async def twitch_console(interaction: discord.Interaction, command: app_commands
     await interaction.followup.send(text, allowed_mentions=discord.AllowedMentions.none())
 
 
+# ---- Fair-access cooldown system ----
+
+from . import fairaccess as _fa
+
+fa_whitelist = app_commands.Group(
+    name="whitelist", description="(Admin) Fair-access whitelist",
+    default_permissions=discord.Permissions(manage_messages=True))
+fa_cooldown = app_commands.Group(
+    name="cooldown", description="(Admin) Fair-access cooldowns",
+    default_permissions=discord.Permissions(manage_messages=True))
+
+
+@fa_whitelist.command(name="add", description="Exempt a user from fair-access cooldowns.")
+@app_commands.describe(user="Who to whitelist")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def fa_wl_add(interaction: discord.Interaction, user: discord.User):
+    await interaction.response.defer(ephemeral=True)
+    _, msg = await _fa.whitelist_add(bot, user.id, interaction.user.id)
+    await interaction.followup.send(msg, ephemeral=True)
+
+
+@fa_whitelist.command(name="remove", description="Remove a user from the whitelist (their tally resets).")
+@app_commands.describe(user="Who to remove")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def fa_wl_remove(interaction: discord.Interaction, user: discord.User):
+    await interaction.response.defer(ephemeral=True)
+    _, msg = await _fa.whitelist_remove(bot, user.id, interaction.user.id)
+    await interaction.followup.send(msg, ephemeral=True)
+
+
+@fa_whitelist.command(name="seed", description="One-time import of the Verified role's current members.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def fa_wl_seed(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    _, msg = await _fa.whitelist_seed(bot, interaction.user.id)
+    await interaction.followup.send(msg, ephemeral=True)
+
+
+@fa_cooldown.command(name="release", description="End a user's cooldown early (silent).")
+@app_commands.describe(user="Whose cooldown to release")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def fa_cd_release(interaction: discord.Interaction, user: discord.User):
+    await interaction.response.defer(ephemeral=True)
+    _, msg = await _fa.cooldown_release(bot, user.id, interaction.user.id)
+    await interaction.followup.send(msg, ephemeral=True)
+
+
+@fa_cooldown.command(name="apply", description="Manually apply a cooldown.")
+@app_commands.describe(user="Who to cool down", days="Duration in days (default 7)")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def fa_cd_apply(interaction: discord.Interaction, user: discord.User,
+                      days: app_commands.Range[int, 1, 90] | None = None):
+    await interaction.response.defer(ephemeral=True)
+    _, msg = await _fa.cooldown_apply(bot, user.id, interaction.user.id, days)
+    await interaction.followup.send(msg, ephemeral=True)
+
+
+bot.tree.add_command(fa_whitelist)
+bot.tree.add_command(fa_cooldown)
+
+
 # ---- Secret streams rename ----
 
 @bot.tree.command(name="rename", description="(Admin) Rename the secret streams voice channel.")

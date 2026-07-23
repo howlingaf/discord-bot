@@ -148,6 +148,62 @@ def db_init():
         )
         """)
 
+        # ---- Fair-access cooldown system ----
+        # Singleton runtime state: when the tracked rooms last all went empty
+        # (drives the session-window reset) and the pinned admin panel message.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS fairaccess_state (
+          id               INTEGER PRIMARY KEY CHECK (id = 1),
+          all_empty_since  INTEGER,
+          panel_message_id INTEGER
+        )
+        """)
+        conn.execute("INSERT OR IGNORE INTO fairaccess_state(id) VALUES(1)")
+
+        # Exempt users: pure internal state, no Discord artifact of any kind.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS fairaccess_whitelist (
+          user_id  INTEGER PRIMARY KEY,
+          added_by INTEGER NOT NULL,
+          added_at INTEGER NOT NULL
+        )
+        """)
+
+        # One row per user per session window; doubles as the visitor feed.
+        # room_seconds is a JSON object {channel_id: seconds}. status: 'open'
+        # while the window can still accrue, then 'ok' | 'exempt' | 'flagged'.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS fairaccess_windows (
+          id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id              INTEGER NOT NULL,
+          started_at           INTEGER NOT NULL,
+          last_activity_at     INTEGER NOT NULL,
+          last_join_at         INTEGER,
+          last_join_channel_id INTEGER,
+          room_seconds         TEXT NOT NULL DEFAULT '{}',
+          status               TEXT NOT NULL DEFAULT 'open'
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_fa_windows_status ON fairaccess_windows(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_fa_windows_activity ON fairaccess_windows(last_activity_at)")
+
+        # Historical rows are kept forever (they back the visitor feed's flagged
+        # entries). Active = released_at, expired_at both NULL and not yet due.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS fairaccess_cooldowns (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id      INTEGER NOT NULL,
+          applied_at   INTEGER NOT NULL,
+          expires_at   INTEGER NOT NULL,
+          room_seconds TEXT NOT NULL DEFAULT '{}',
+          applied_by   INTEGER,
+          released_by  INTEGER,
+          released_at  INTEGER,
+          expired_at   INTEGER
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_fa_cooldowns_user ON fairaccess_cooldowns(user_id)")
+
         # ---- Indexes for hot query paths ----
         # The contest poller filters on these columns every cycle; leetcode_problems
         # is looked up by slug on the recap path.
@@ -497,5 +553,188 @@ def zerotrac_cache_upsert_all(entries: list[dict]):
                  problem_index=excluded.problem_index,
                  updated_at=excluded.updated_at""",
             [(e["title_slug"], e["rating"], e["contest_slug"], e["problem_index"], now) for e in entries],
+        )
+        conn.commit()
+
+
+# ---- Fair-access helpers ----
+
+def fairaccess_state_get() -> dict:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT all_empty_since, panel_message_id FROM fairaccess_state WHERE id=1"
+        ).fetchone()
+        return {"all_empty_since": row[0], "panel_message_id": row[1]}
+
+
+def fairaccess_set_all_empty_since(ts: int | None):
+    with _db() as conn:
+        conn.execute("UPDATE fairaccess_state SET all_empty_since=? WHERE id=1", (ts,))
+        conn.commit()
+
+
+def fairaccess_set_panel_message(message_id: int):
+    with _db() as conn:
+        conn.execute("UPDATE fairaccess_state SET panel_message_id=? WHERE id=1", (message_id,))
+        conn.commit()
+
+
+def fairaccess_whitelist_add(user_id: int, added_by: int) -> bool:
+    """True if newly added, False if already present."""
+    with _db() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO fairaccess_whitelist(user_id, added_by, added_at) VALUES(?,?,?)",
+            (user_id, added_by, int(time.time())),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def fairaccess_whitelist_remove(user_id: int) -> bool:
+    with _db() as conn:
+        cur = conn.execute("DELETE FROM fairaccess_whitelist WHERE user_id=?", (user_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def fairaccess_whitelist_has(user_id: int) -> bool:
+    with _db() as conn:
+        return conn.execute(
+            "SELECT 1 FROM fairaccess_whitelist WHERE user_id=?", (user_id,)
+        ).fetchone() is not None
+
+
+def fairaccess_whitelist_all() -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT user_id, added_by, added_at FROM fairaccess_whitelist ORDER BY added_at"
+        ).fetchall()
+        return [{"user_id": r[0], "added_by": r[1], "added_at": r[2]} for r in rows]
+
+
+def _fa_window_row(r) -> dict:
+    return {
+        "id": r[0], "user_id": r[1], "started_at": r[2], "last_activity_at": r[3],
+        "last_join_at": r[4], "last_join_channel_id": r[5],
+        "room_seconds": r[6], "status": r[7],
+    }
+
+
+_FA_WINDOW_COLS = ("id, user_id, started_at, last_activity_at, last_join_at, "
+                   "last_join_channel_id, room_seconds, status")
+
+
+def fairaccess_window_open_for(user_id: int) -> dict | None:
+    with _db() as conn:
+        r = conn.execute(
+            f"SELECT {_FA_WINDOW_COLS} FROM fairaccess_windows WHERE user_id=? AND status='open'",
+            (user_id,),
+        ).fetchone()
+        return _fa_window_row(r) if r else None
+
+
+def fairaccess_window_create(user_id: int, now: int) -> int:
+    with _db() as conn:
+        cur = conn.execute(
+            "INSERT INTO fairaccess_windows(user_id, started_at, last_activity_at) VALUES(?,?,?)",
+            (user_id, now, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def fairaccess_window_update(window_id: int, **fields):
+    """Partial update; pass only the columns to change (None writes NULL)."""
+    assert fields
+    cols = ", ".join(f"{k}=?" for k in fields)
+    with _db() as conn:
+        conn.execute(f"UPDATE fairaccess_windows SET {cols} WHERE id=?",
+                     (*fields.values(), window_id))
+        conn.commit()
+
+
+def fairaccess_windows_open() -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute(
+            f"SELECT {_FA_WINDOW_COLS} FROM fairaccess_windows WHERE status='open'"
+        ).fetchall()
+        return [_fa_window_row(r) for r in rows]
+
+
+def fairaccess_windows_recent(limit: int = 15) -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute(
+            f"SELECT {_FA_WINDOW_COLS} FROM fairaccess_windows "
+            "ORDER BY last_activity_at DESC LIMIT ?", (limit,),
+        ).fetchall()
+        return [_fa_window_row(r) for r in rows]
+
+
+def _fa_cooldown_row(r) -> dict:
+    return {
+        "id": r[0], "user_id": r[1], "applied_at": r[2], "expires_at": r[3],
+        "room_seconds": r[4], "applied_by": r[5], "released_by": r[6],
+        "released_at": r[7], "expired_at": r[8],
+    }
+
+
+_FA_COOLDOWN_COLS = ("id, user_id, applied_at, expires_at, room_seconds, "
+                     "applied_by, released_by, released_at, expired_at")
+
+
+def fairaccess_cooldown_create(user_id: int, applied_at: int, expires_at: int,
+                               room_seconds: str, applied_by: int | None) -> int:
+    with _db() as conn:
+        cur = conn.execute(
+            "INSERT INTO fairaccess_cooldowns(user_id, applied_at, expires_at, room_seconds, applied_by) "
+            "VALUES(?,?,?,?,?)",
+            (user_id, applied_at, expires_at, room_seconds, applied_by),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def fairaccess_cooldown_active_for(user_id: int) -> dict | None:
+    with _db() as conn:
+        r = conn.execute(
+            f"SELECT {_FA_COOLDOWN_COLS} FROM fairaccess_cooldowns "
+            "WHERE user_id=? AND released_at IS NULL AND expired_at IS NULL AND expires_at>? ",
+            (user_id, int(time.time())),
+        ).fetchone()
+        return _fa_cooldown_row(r) if r else None
+
+
+def fairaccess_cooldowns_active() -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute(
+            f"SELECT {_FA_COOLDOWN_COLS} FROM fairaccess_cooldowns "
+            "WHERE released_at IS NULL AND expired_at IS NULL AND expires_at>?",
+            (int(time.time()),),
+        ).fetchall()
+        return [_fa_cooldown_row(r) for r in rows]
+
+
+def fairaccess_cooldowns_due() -> list[dict]:
+    """Active-until-now cooldowns whose expiry has passed (needs overwrite removal)."""
+    with _db() as conn:
+        rows = conn.execute(
+            f"SELECT {_FA_COOLDOWN_COLS} FROM fairaccess_cooldowns "
+            "WHERE released_at IS NULL AND expired_at IS NULL AND expires_at<=?",
+            (int(time.time()),),
+        ).fetchall()
+        return [_fa_cooldown_row(r) for r in rows]
+
+
+def fairaccess_cooldown_mark_expired(cooldown_id: int, now: int):
+    with _db() as conn:
+        conn.execute("UPDATE fairaccess_cooldowns SET expired_at=? WHERE id=?", (now, cooldown_id))
+        conn.commit()
+
+
+def fairaccess_cooldown_release(cooldown_id: int, released_by: int, now: int):
+    with _db() as conn:
+        conn.execute(
+            "UPDATE fairaccess_cooldowns SET released_by=?, released_at=? WHERE id=?",
+            (released_by, now, cooldown_id),
         )
         conn.commit()

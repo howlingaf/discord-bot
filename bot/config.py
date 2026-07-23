@@ -75,3 +75,22 @@ COMMAND_LOG_CHANNEL_ID = 1473840278497525872
 DISCORD_LOG_CHANNEL_ID = 1516295491753607268
 # Twitch-link approval prompts post to the same mod console channel.
 TWITCH_LINK_PROMPT_CHANNEL_ID = DISCORD_LOG_CHANNEL_ID
+
+# ---------------- Fair-access cooldown (tracked voice rooms) ----------------
+# Staff-only channel holding the pinned admin panel + append-only action log.
+FAIRACCESS_ADMIN_CHANNEL_ID = int(os.getenv("FAIRACCESS_ADMIN_CHANNEL_ID") or "1529992719697449143")
+# Voice channels subject to the fair-access rules, comma-separated ids. Default
+# is the development/test room; swap in the real 1:1 + streams rooms here.
+FAIRACCESS_TRACKED_ROOMS = [
+    int(x) for x in (os.getenv("FAIRACCESS_TRACKED_ROOMS") or "1528837173275787415").replace(" ", "").split(",") if x
+]
+# A user accruing this many cumulative minutes across ALL tracked rooms (within
+# one session window) is cooled down on their next exit.
+FAIRACCESS_THRESHOLD_MINUTES = int(os.getenv("FAIRACCESS_THRESHOLD_MINUTES") or "30")
+# The tally window resets once all tracked rooms have been empty this long.
+FAIRACCESS_WINDOW_RESET_HOURS = float(os.getenv("FAIRACCESS_WINDOW_RESET_HOURS") or "2")
+FAIRACCESS_COOLDOWN_DAYS = int(os.getenv("FAIRACCESS_COOLDOWN_DAYS") or "7")
+# Members with this role (and the server owner) are exempt from tallying. 0 = owner only.
+FAIRACCESS_MOD_ROLE_ID = int(os.getenv("FAIRACCESS_MOD_ROLE_ID") or "0")
+# Role whose current members /whitelist seed imports (one-time snapshot; no auto-sync).
+FAIRACCESS_VERIFIED_ROLE_ID = int(os.getenv("FAIRACCESS_VERIFIED_ROLE_ID") or "0")
