@@ -499,38 +499,3 @@ def zerotrac_cache_upsert_all(entries: list[dict]):
             [(e["title_slug"], e["rating"], e["contest_slug"], e["problem_index"], now) for e in entries],
         )
         conn.commit()
-# ---- #schedule state helpers ----
-
-def schedule_state_get() -> dict:
-    """Return the pinned message ids and last successful sync time.
-
-    The singleton row is seeded in db_init, so it always exists; ids are None
-    until the messages have been created.
-    """
-    with _db() as conn:
-        row = conn.execute(
-            "SELECT week_message_id, month_message_id, last_synced_at FROM schedule_state WHERE id=1"
-        ).fetchone()
-        return {"week_message_id": row[0], "month_message_id": row[1], "last_synced_at": row[2]}
-
-
-def schedule_set_message_ids(*, week_message_id: int | None = None, month_message_id: int | None = None):
-    """Persist one or both message ids without clobbering the other.
-
-    Pass only the id(s) that changed; a None argument leaves that column as-is.
-    """
-    with _db() as conn:
-        conn.execute(
-            """UPDATE schedule_state SET
-                 week_message_id=COALESCE(?, week_message_id),
-                 month_message_id=COALESCE(?, month_message_id)
-               WHERE id=1""",
-            (week_message_id, month_message_id),
-        )
-        conn.commit()
-
-
-def schedule_set_last_synced(ts: int):
-    with _db() as conn:
-        conn.execute("UPDATE schedule_state SET last_synced_at=? WHERE id=1", (ts,))
-        conn.commit()

@@ -42,11 +42,6 @@ async def on_ready():
         bot._premium_weekly_task_started = True
         bot.loop.create_task(leetcode_premium_weekly_scheduler(bot))
 
-    # #schedule calendar aggregator (two pinned, edit-in-place messages);
-    # owns its own start-once guard like logbus/twitchlog
-    from .schedule import start as schedule_start
-    schedule_start(bot)
-
 
 
 @bot.event
