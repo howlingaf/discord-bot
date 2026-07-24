@@ -39,6 +39,7 @@ import discord
 from .config import (
     FAIRACCESS_ADMIN_CHANNEL_ID,
     FAIRACCESS_COOLDOWN_DAYS,
+    FAIRACCESS_ENFORCED_ROOMS,
     FAIRACCESS_MOD_ROLE_ID,
     FAIRACCESS_THRESHOLD_MINUTES,
     FAIRACCESS_TRACKED_ROOMS,
@@ -162,7 +163,7 @@ async def _remove_overwrite(bot, channel_id: int, user_id: int) -> None:
 
 
 async def _apply_all(bot, user_id: int) -> None:
-    for cid in FAIRACCESS_TRACKED_ROOMS:
+    for cid in FAIRACCESS_ENFORCED_ROOMS:
         try:
             await _apply_overwrite(bot, cid, user_id)
         except Exception as e:
@@ -170,7 +171,7 @@ async def _apply_all(bot, user_id: int) -> None:
 
 
 async def _remove_all(bot, user_id: int) -> None:
-    for cid in FAIRACCESS_TRACKED_ROOMS:
+    for cid in FAIRACCESS_ENFORCED_ROOMS:
         try:
             await _remove_overwrite(bot, cid, user_id)
         except Exception as e:
@@ -499,9 +500,11 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     view.add_item(discord.ui.Container(
         discord.ui.TextDisplay(f"### Recent voice sessions (last {_FEED_LIMIT})"),
         discord.ui.TextDisplay("\n".join(feed_lines) or "*no sessions yet*"),
-        discord.ui.TextDisplay(f"-# Tracked: {rooms_line} · threshold "
-                               f"{FAIRACCESS_THRESHOLD_MINUTES} min · cooldown "
-                               f"{FAIRACCESS_COOLDOWN_DAYS} d · reset tallies via `/cooldown reset`"),
+        discord.ui.TextDisplay(
+            f"-# Accrues: {rooms_line} · cooldown hides: "
+            + ", ".join(f"#{_room_name(bot, c)}" for c in FAIRACCESS_ENFORCED_ROOMS)
+            + f" · {FAIRACCESS_THRESHOLD_MINUTES} min → {FAIRACCESS_COOLDOWN_DAYS} d"
+            + " · reset via `/cooldown reset`"),
         accent_color=0x4E5058))
 
     return view
@@ -556,7 +559,7 @@ async def _sweep(bot) -> bool:
     # reconcile: DB is truth. Re-apply missing overwrites; drop orphans that
     # exactly match our signature.
     active_ids = {c["user_id"] for c in fairaccess_cooldowns_active()}
-    for cid in FAIRACCESS_TRACKED_ROOMS:
+    for cid in FAIRACCESS_ENFORCED_ROOMS:
         ch = bot.get_channel(cid)
         if ch is None:
             continue

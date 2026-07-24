@@ -81,6 +81,11 @@ FAIRACCESS_ADMIN_CHANNEL_ID = int(os.getenv("FAIRACCESS_ADMIN_CHANNEL_ID") or "1
 FAIRACCESS_TRACKED_ROOMS = [
     int(x) for x in (os.getenv("FAIRACCESS_TRACKED_ROOMS") or "1528837173275787415").replace(" ", "").split(",") if x
 ]
+# Rooms a cooldown actually hides (ViewChannel+Connect deny). Defaults to the
+# tracked list; set narrower so some rooms accrue time but stay enterable.
+FAIRACCESS_ENFORCED_ROOMS = [
+    int(x) for x in (os.getenv("FAIRACCESS_ENFORCED_ROOMS") or "").replace(" ", "").split(",") if x
+] or list(FAIRACCESS_TRACKED_ROOMS)
 # A user accruing this many cumulative minutes across ALL tracked rooms (within
 # one session window) is cooled down on their next exit.
 FAIRACCESS_THRESHOLD_MINUTES = int(os.getenv("FAIRACCESS_THRESHOLD_MINUTES") or "30")
