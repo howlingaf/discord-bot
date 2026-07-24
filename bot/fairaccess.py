@@ -478,13 +478,21 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     view = discord.ui.LayoutView(timeout=None)
 
     # ---- whitelist (text only; managed via /whitelist add|remove) ----
-    # two names per row: halves the section height (Discord has no real columns)
+    # Two equal-width columns: monospace code block with padded display names
+    # (mention pills can't be aligned). Width tracks the longest current name,
+    # clamped at 24 (Discord names cap at 32; most are far shorter).
     shown = wl[:40]
-    wl_lines = ["\u2003".join(f"<@{r['user_id']}>" for r in shown[i:i + 2])
-                for i in range(0, len(shown), 2)]
+    names = []
+    for r in shown:
+        n = _display_name(bot, r["user_id"])
+        names.append(n[:23] + "…" if len(n) > 24 else n)
+    width = max((len(n) for n in names), default=0)
+    wl_lines = [names[i].ljust(width) + "  " + names[i + 1] if i + 1 < len(names)
+                else names[i]
+                for i in range(0, len(names), 2)]
+    body = ("```\n" + "\n".join(wl_lines) + "\n```") if wl_lines else "*empty*"
     if len(wl) > 40:
-        wl_lines.append(f"-# …and {len(wl) - 40} more")
-    body = "\n".join(wl_lines) if wl_lines else "*empty*"
+        body += f"\n-# …and {len(wl) - 40} more"
     view.add_item(discord.ui.Container(
         discord.ui.TextDisplay("### Fair access — whitelist"),
         discord.ui.TextDisplay(body + "\n-# manage via `/whitelist add` · `/whitelist remove`"),
