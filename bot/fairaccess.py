@@ -47,6 +47,13 @@ from .config import (
     GUILD_ID,
 )
 from .database import (
+    voice_visit_close,
+    voice_visit_open_for,
+    voice_visit_recent_same_channel,
+    voice_visit_resume,
+    voice_visit_start,
+    voice_visits_open,
+    voice_visits_recent,
     fairaccess_cooldown_active_for,
     fairaccess_cooldown_create,
     fairaccess_cooldown_mark_expired,
@@ -64,12 +71,13 @@ from .database import (
     fairaccess_window_open_for,
     fairaccess_window_update,
     fairaccess_windows_open,
-    fairaccess_windows_recent,
 )
 from .logbus import log_error, log_if_persistent
 
 _SWEEP_SECONDS = 300
 _FEED_LIMIT = 15
+# rejoining the same voice channel within this gap resumes the visit row
+_VISIT_MERGE_SECONDS = 300
 # component budget on the panel message: 5 rows x 5 buttons
 
 # the exact overwrite we own: deny ViewChannel+Connect, allow nothing, member type
@@ -238,7 +246,7 @@ async def on_voice_state(bot, member: discord.Member,
                          before: discord.VoiceState, after: discord.VoiceState) -> None:
     """Entry point from events.py. Never raises."""
     try:
-        if member.bot or not FAIRACCESS_TRACKED_ROOMS:
+        if member.bot:
             return
         b = before.channel.id if before.channel else None
         a = after.channel.id if after.channel else None
@@ -247,14 +255,39 @@ async def on_voice_state(bot, member: discord.Member,
         tracked = set(FAIRACCESS_TRACKED_ROOMS)
         left = b if b in tracked else None
         joined = a if a in tracked else None
-        if left is None and joined is None:
-            return
         async with _lock:
-            changed = await _handle_voice(bot, member, left, joined)
+            now = _now()
+            changed = _visit_transition(member.id, b, a, now)
+            if left is not None or joined is not None:
+                changed |= await _handle_voice(bot, member, left, joined)
         if changed:
             await render_panel(bot)
     except Exception as e:
         log_error(f"[FAIRACCESS] voice handler failed: {e!r}")
+
+
+def _visit_transition(user_id: int, left_cid: int | None,
+                      joined_cid: int | None, now: int) -> bool:
+    """General presence log, every voice channel, everyone (staff included).
+    One open row per user; moving channels closes one stint and opens another;
+    a rejoin to the same channel within the merge gap resumes the row."""
+    changed = False
+    if left_cid is not None:
+        v = voice_visit_open_for(user_id)
+        if v and v["channel_id"] == left_cid:
+            voice_visit_close(v["id"], now)
+            changed = True
+    if joined_cid is not None:
+        v = voice_visit_open_for(user_id)
+        if v is None:
+            merge = voice_visit_recent_same_channel(
+                user_id, joined_cid, now - _VISIT_MERGE_SECONDS)
+            if merge is not None:
+                voice_visit_resume(merge, now)
+            else:
+                voice_visit_start(user_id, joined_cid, now)
+            changed = True
+    return changed
 
 
 async def _handle_voice(bot, member, left_cid: int | None, joined_cid: int | None) -> bool:
@@ -418,7 +451,7 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     components (staff actions are slash commands)."""
     wl = fairaccess_whitelist_all()
     actives = fairaccess_cooldowns_active()
-    recent = fairaccess_windows_recent(_FEED_LIMIT)
+    recent = voice_visits_recent(_FEED_LIMIT)
 
     view = discord.ui.LayoutView(timeout=None)
 
@@ -451,20 +484,20 @@ def _build_panel(bot) -> discord.ui.LayoutView:
         discord.ui.TextDisplay(cd_body + "\n-# release via `/cooldown release`"),
         accent_color=0xED4245))
 
-    # ---- visitor feed (text only; tallies reset via /cooldown reset) ----
+    # ---- voice sessions feed: every voice channel, everyone ----
     feed_lines = []
-    for w in recent:
-        rooms = json.loads(w["room_seconds"])
-        if w["status"] == "open" and w["last_join_at"]:
-            state = "in room"
+    now = _now()
+    for v in recent:
+        chan = f"#{_room_name(bot, v['channel_id'])}"
+        if v["left_at"] is None:
+            mins = (v["seconds"] + now - v["last_join_at"]) // 60
+            feed_lines.append(f"<@{v['user_id']}> · {chan} · {mins} min · in room")
         else:
-            state = {"open": "tallying", "ok": "ok", "exempt": "exempt",
-                     "flagged": "🚫 flagged"}.get(w["status"], w["status"])
-        feed_lines.append(
-            f"<@{w['user_id']}> · {_fmt_minutes(bot, rooms)} · {state} · <t:{w['last_activity_at']}:R>")
+            feed_lines.append(
+                f"<@{v['user_id']}> · {chan} · {v['seconds'] // 60} min · <t:{v['left_at']}:R>")
     rooms_line = ", ".join(f"#{_room_name(bot, cid)}" for cid in FAIRACCESS_TRACKED_ROOMS)
     view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"### Recent visitors (last {_FEED_LIMIT} sessions)"),
+        discord.ui.TextDisplay(f"### Recent voice sessions (last {_FEED_LIMIT})"),
         discord.ui.TextDisplay("\n".join(feed_lines) or "*no sessions yet*"),
         discord.ui.TextDisplay(f"-# Tracked: {rooms_line} · threshold "
                                f"{FAIRACCESS_THRESHOLD_MINUTES} min · cooldown "
@@ -552,6 +585,13 @@ def _startup_fixups(bot, now: int) -> None:
         if not still_there:
             fairaccess_window_update(w["id"], last_join_at=None, last_join_channel_id=None)
             print(f"[FAIRACCESS] cleared dangling join for {w['user_id']} (left during downtime)")
+    for v in voice_visits_open():
+        ch = bot.get_channel(v["channel_id"])
+        still_there = ch is not None and any(
+            m.id == v["user_id"] for m in getattr(ch, "members", []))
+        if not still_there:
+            # left during downtime: close at the accrued time (in-flight lost)
+            voice_visit_close(v["id"], _now(), add_elapsed=False)
 
 
 async def _loop(bot) -> None:

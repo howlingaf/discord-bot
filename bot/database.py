@@ -204,6 +204,24 @@ def db_init():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_fa_cooldowns_user ON fairaccess_cooldowns(user_id)")
 
+        # ---- Voice visit log (who was in which voice channel, how long) ----
+        # One row per stint; sub-5-min rejoins to the same channel resume the
+        # row instead of opening a new one. Feeds the admin panel's sessions
+        # section. Fully decoupled from fair-access tallies.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS voice_visits (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id      INTEGER NOT NULL,
+          channel_id   INTEGER NOT NULL,
+          started_at   INTEGER NOT NULL,
+          last_join_at INTEGER NOT NULL,
+          left_at      INTEGER,
+          seconds      INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_visits_open ON voice_visits(user_id) WHERE left_at IS NULL")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_visits_recency ON voice_visits(left_at, last_join_at)")
+
         # ---- Indexes for hot query paths ----
         # The contest poller filters on these columns every cycle; leetcode_problems
         # is looked up by slug on the recap path.
@@ -738,3 +756,78 @@ def fairaccess_cooldown_release(cooldown_id: int, released_by: int, now: int):
             (released_by, now, cooldown_id),
         )
         conn.commit()
+
+
+# ---- Voice visit log (general presence tracking, decoupled from cooldowns) ----
+
+def voice_visit_open_for(user_id: int) -> dict | None:
+    with _db() as conn:
+        r = conn.execute(
+            "SELECT id, user_id, channel_id, started_at, last_join_at, left_at, seconds "
+            "FROM voice_visits WHERE user_id=? AND left_at IS NULL", (user_id,),
+        ).fetchone()
+        if not r:
+            return None
+        return {"id": r[0], "user_id": r[1], "channel_id": r[2], "started_at": r[3],
+                "last_join_at": r[4], "left_at": r[5], "seconds": r[6]}
+
+
+def voice_visit_recent_same_channel(user_id: int, channel_id: int, since: int) -> int | None:
+    """Id of this user's most recent CLOSED visit to `channel_id` ending after
+    `since` — the rejoin-merge target."""
+    with _db() as conn:
+        r = conn.execute(
+            "SELECT id FROM voice_visits WHERE user_id=? AND channel_id=? "
+            "AND left_at IS NOT NULL AND left_at>=? ORDER BY left_at DESC LIMIT 1",
+            (user_id, channel_id, since),
+        ).fetchone()
+        return r[0] if r else None
+
+
+def voice_visit_start(user_id: int, channel_id: int, now: int) -> int:
+    with _db() as conn:
+        cur = conn.execute(
+            "INSERT INTO voice_visits(user_id, channel_id, started_at, last_join_at, seconds) "
+            "VALUES(?,?,?,?,0)", (user_id, channel_id, now, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def voice_visit_resume(visit_id: int, now: int):
+    with _db() as conn:
+        conn.execute("UPDATE voice_visits SET left_at=NULL, last_join_at=? WHERE id=?",
+                     (now, visit_id))
+        conn.commit()
+
+
+def voice_visit_close(visit_id: int, now: int, *, add_elapsed: bool = True):
+    with _db() as conn:
+        if add_elapsed:
+            conn.execute(
+                "UPDATE voice_visits SET seconds=seconds+(?-last_join_at), left_at=? WHERE id=?",
+                (now, now, visit_id))
+        else:
+            conn.execute("UPDATE voice_visits SET left_at=? WHERE id=?", (now, visit_id))
+        conn.commit()
+
+
+def voice_visits_open() -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, channel_id, started_at, last_join_at, left_at, seconds "
+            "FROM voice_visits WHERE left_at IS NULL").fetchall()
+        return [{"id": r[0], "user_id": r[1], "channel_id": r[2], "started_at": r[3],
+                 "last_join_at": r[4], "left_at": r[5], "seconds": r[6]} for r in rows]
+
+
+def voice_visits_recent(limit: int = 15) -> list[dict]:
+    """Open visits first (people in rooms now), then most recently ended."""
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, channel_id, started_at, last_join_at, left_at, seconds "
+            "FROM voice_visits ORDER BY (left_at IS NULL) DESC, "
+            "COALESCE(left_at, last_join_at) DESC LIMIT ?", (limit,),
+        ).fetchall()
+        return [{"id": r[0], "user_id": r[1], "channel_id": r[2], "started_at": r[3],
+                 "last_join_at": r[4], "left_at": r[5], "seconds": r[6]} for r in rows]
