@@ -512,9 +512,7 @@ def _build_panel(bot) -> tuple[list[discord.Embed], discord.ui.View]:
     e_cd = discord.Embed(
         title="Active cooldowns",
         description="\n".join(
-            f"• <@{c['user_id']}> · {_fmt_minutes(bot, json.loads(c['room_seconds']))}"
-            f" · applied <t:{c['applied_at']}:d> · expires <t:{c['expires_at']}:R>"
-            + (f" · by <@{c['applied_by']}>" if c["applied_by"] else "")
+            f"• <@{c['user_id']}> · releases <t:{c['expires_at']}:R>"
             for c in actives
         ) or "*none*",
         color=0xED4245,
