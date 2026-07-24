@@ -331,8 +331,7 @@ async def whitelist_add(bot, user_id: int, added_by: int) -> tuple[bool, str]:
     async with _lock:
         if not fairaccess_whitelist_add(user_id, added_by):
             return False, "Already whitelisted."
-    await _log(bot, f"➕ Whitelisted: <@{user_id}> (by <@{added_by}>)")
-    await render_panel(bot)
+    await render_panel(bot)   # silent: the list row appearing is the signal
     return True, f"Whitelisted <@{user_id}>."
 
 
@@ -344,8 +343,7 @@ async def whitelist_remove(bot, user_id: int, removed_by: int) -> tuple[bool, st
         w = fairaccess_window_open_for(user_id)
         if w:
             _close_window(w, _now(), status="exempt")
-    await _log(bot, f"➖ Removed from whitelist: <@{user_id}> (by <@{removed_by}>, tally reset)")
-    await render_panel(bot)
+    await render_panel(bot)   # silent: the list row disappearing is the signal
     return True, f"Removed <@{user_id}> from the whitelist (tally reset)."
 
 
@@ -359,9 +357,7 @@ async def whitelist_seed(bot, seeded_by: int) -> tuple[bool, str]:
         return False, "Verified role not found."
     async with _lock:
         added = sum(1 for m in role.members if fairaccess_whitelist_add(m.id, seeded_by))
-    await _log(bot, f"📥 Whitelist seeded from @{role.name}: {added} added, "
-                    f"{len(role.members) - added} already present (by <@{seeded_by}>)")
-    await render_panel(bot)
+    await render_panel(bot)   # silent: the whitelist section shows the result
     return True, f"Seeded {added} member(s) from @{role.name}."
 
 
