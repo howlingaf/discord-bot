@@ -71,8 +71,6 @@ from .logbus import log_error, log_if_persistent
 _SWEEP_SECONDS = 300
 _FEED_LIMIT = 15
 # component budget on the panel message: 5 rows x 5 buttons
-# inline Section rows cost 3 components each (40-component message cap)
-_MAX_RELEASE_INLINE = 5
 
 # the exact overwrite we own: deny ViewChannel+Connect, allow nothing, member type
 _DENY_VALUE = discord.Permissions(view_channel=True, connect=True).value
@@ -412,55 +410,6 @@ async def cooldown_apply(bot, user_id: int, applied_by: int,
 #  Admin panel (one pinned message, rebuilt wholesale from state)    #
 # ------------------------------------------------------------------ #
 
-def _staff_check(interaction: discord.Interaction) -> bool:
-    perms = getattr(interaction.user, "guild_permissions", None)
-    return bool(perms and (perms.administrator or perms.manage_messages))
-
-
-class ReleaseButton(discord.ui.DynamicItem[discord.ui.Button],
-                    template=r"fa:rel:(?P<uid>\d+)"):
-    def __init__(self, uid: int, name: str = ""):
-        super().__init__(discord.ui.Button(
-            label=f"Release {name}"[:80] if name else "Release",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"fa:rel:{uid}",
-        ))
-        self.uid = uid
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["uid"]))
-
-    async def callback(self, interaction: discord.Interaction):
-        if not _staff_check(interaction):
-            await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-            return
-        _, msg = await cooldown_release(interaction.client, self.uid, interaction.user.id)
-        await interaction.response.send_message(msg, ephemeral=True)
-
-
-class SessionResetButton(discord.ui.DynamicItem[discord.ui.Button],
-                         template=r"fa:rst:(?P<uid>\d+)"):
-    def __init__(self, uid: int, name: str = ""):
-        super().__init__(discord.ui.Button(
-            label=f"Reset {name}"[:80] if name else "Reset tally",
-            style=discord.ButtonStyle.primary,
-            custom_id=f"fa:rst:{uid}",
-        ))
-        self.uid = uid
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["uid"]))
-
-    async def callback(self, interaction: discord.Interaction):
-        if not _staff_check(interaction):
-            await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-            return
-        _, msg = await session_reset(interaction.client, self.uid, interaction.user.id)
-        await interaction.response.send_message(msg, ephemeral=True)
-
-
 _render_lock = asyncio.Lock()
 
 
@@ -497,20 +446,13 @@ def _build_panel(bot) -> discord.ui.LayoutView:
         discord.ui.TextDisplay(body + "\n-# manage via `/whitelist add` · `/whitelist remove`"),
         accent_color=0x43B581))
 
-    # ---- active cooldowns (name + release time + inline Release) ----
-    cd_items = [discord.ui.TextDisplay("### Active cooldowns")]
-    for c in actives[:_MAX_RELEASE_INLINE]:
-        cd_items.append(discord.ui.Section(
-            f"<@{c['user_id']}> · releases <t:{c['expires_at']}:R>",
-            accessory=discord.ui.Button(label="Release", style=discord.ButtonStyle.danger,
-                                        custom_id=f"fa:rel:{c['user_id']}")))
-    if len(actives) > _MAX_RELEASE_INLINE:
-        cd_items.append(discord.ui.TextDisplay("\n".join(
-            f"<@{c['user_id']}> · releases <t:{c['expires_at']}:R>"
-            for c in actives[_MAX_RELEASE_INLINE:]) + "\n-# release via `/cooldown release`"))
-    if not actives:
-        cd_items.append(discord.ui.TextDisplay("*none*"))
-    view.add_item(discord.ui.Container(*cd_items, accent_color=0xED4245))
+    # ---- active cooldowns (text only; released via /cooldown release) ----
+    cd_body = "\n".join(f"<@{c['user_id']}> · releases <t:{c['expires_at']}:R>"
+                        for c in actives) or "*none*"
+    view.add_item(discord.ui.Container(
+        discord.ui.TextDisplay("### Active cooldowns"),
+        discord.ui.TextDisplay(cd_body + "\n-# release via `/cooldown release`"),
+        accent_color=0xED4245))
 
     # ---- visitor feed (text only; tallies reset via /cooldown reset) ----
     feed_lines = []
@@ -649,5 +591,4 @@ def start(bot) -> None:
     if getattr(bot, "_fairaccess_started", False):
         return
     bot._fairaccess_started = True
-    bot.add_dynamic_items(ReleaseButton, SessionResetButton)
     bot.loop.create_task(_loop(bot))
