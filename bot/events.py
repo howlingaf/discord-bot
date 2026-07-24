@@ -9,7 +9,6 @@ from .config import (
 )
 from .spotify import count_humans_in_channel, handle_spotify_auto_pause
 from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler, leetcode_premium_weekly_scheduler
-from .voicechat import on_voice_update
 from .logbus import start as logbus_start
 from .fairaccess import start as fairaccess_start, on_voice_state as fairaccess_voice
 from .client import bot
@@ -47,7 +46,6 @@ async def on_ready():
     fairaccess_start(bot)
 
 
-
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     before_id = before.channel.id if before and before.channel else None
@@ -69,11 +67,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     # --- Fair-access tracked-room tally/cooldowns ---
     await fairaccess_voice(bot, member, before, after)
 
-    # --- Broadcast to any active voice-chat overlay sessions ---
-    if before_id:
-        await on_voice_update(bot, before_id)
-    if after_id and after_id != before_id:
-        await on_voice_update(bot, after_id)
 
 
 async def _check_secret_streams_rename(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):

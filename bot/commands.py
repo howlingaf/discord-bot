@@ -14,12 +14,8 @@ from .twitchconsole import call_console
 from .spotify import dm_spotify_link
 from .leetcode import get_or_create_problem_post
 from .database import twitch_link_delete
-from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
 from .logbus import log_error
 from .client import bot
-
-vc_register_command(bot)
-
 
 @bot.tree.command(name="spotifylink", description="(Owner) DM yourself the Spotify link so the bot can auto pause/resume.")
 async def spotifylink(interaction: discord.Interaction):
@@ -206,18 +202,3 @@ async def rename_stream(interaction: discord.Interaction, name: str):
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"Failed: {e}", ephemeral=True)
-
-
-@bot.event
-async def on_message(message: discord.Message):
-    await on_chat_message(message)
-
-
-@bot.event
-async def on_message_edit(_before: discord.Message, after: discord.Message):
-    await on_chat_edit(after)
-
-
-@bot.event
-async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
-    await on_chat_delete(payload)

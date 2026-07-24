@@ -61,9 +61,6 @@ TWITCH_BOT_URL = (os.getenv("TWITCH_BOT_URL") or "http://127.0.0.1:8788").rstrip
 # The one channel where /twitch console commands are accepted (0 = disabled).
 TWITCH_CONSOLE_CHANNEL_ID = int(os.getenv("TWITCH_CONSOLE_CHANNEL_ID") or "0")
 
-# ---------------- Voice Chat Overlay ----------------
-VOICECHAT_SECRET = os.getenv("VOICECHAT_SECRET", "")
-
 # ---------------- Secret Streams ----------------
 SECRET_STREAMS_CHANNEL_ID = 1409455382564180009
 SECRET_STREAMS_EMPTY_NAME = "super secret streams"
