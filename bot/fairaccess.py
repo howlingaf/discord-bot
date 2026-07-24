@@ -478,8 +478,7 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     view = discord.ui.LayoutView(timeout=None)
 
     # ---- whitelist (text only; managed via /whitelist add|remove) ----
-    wl_lines = [f"<@{r['user_id']}> · added <t:{r['added_at']}:d> by <@{r['added_by']}>"
-                for r in wl[:40]]
+    wl_lines = [f"<@{r['user_id']}>" for r in wl[:40]]
     if len(wl) > 40:
         wl_lines.append(f"-# …and {len(wl) - 40} more")
     body = "\n".join(wl_lines) if wl_lines else "*empty*"
