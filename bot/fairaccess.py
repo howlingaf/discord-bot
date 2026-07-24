@@ -71,9 +71,9 @@ from .logbus import log_error, log_if_persistent
 _SWEEP_SECONDS = 300
 _FEED_LIMIT = 15
 # component budget on the panel message: 5 rows x 5 buttons
-_MAX_WL_BUTTONS = 12
-_MAX_RELEASE_BUTTONS = 8
-_MAX_RESET_BUTTONS = 5
+# inline Section rows cost 3 components each (40-component message cap)
+_MAX_WL_INLINE = 4
+_MAX_RELEASE_INLINE = 5
 
 # the exact overwrite we own: deny ViewChannel+Connect, allow nothing, member type
 _DENY_VALUE = discord.Permissions(view_channel=True, connect=True).value
@@ -491,33 +491,52 @@ class SessionResetButton(discord.ui.DynamicItem[discord.ui.Button],
 _render_lock = asyncio.Lock()
 
 
-def _build_panel(bot) -> tuple[list[discord.Embed], discord.ui.View]:
-    now = _now()
+def _build_panel(bot) -> discord.ui.LayoutView:
+    """Components-V2 layout: each actionable row carries its button inline
+    (Section accessory), so the panel spends no vertical space on button rows.
+    Buttons are plain items whose custom_ids match the registered DynamicItem
+    templates — routing works regardless of which render created the message.
+    Budget: Discord caps a message at 40 components; a Section row costs 3."""
     wl = fairaccess_whitelist_all()
     actives = fairaccess_cooldowns_active()
     recent = fairaccess_windows_recent(_FEED_LIMIT)
 
-    rooms_line = ", ".join(f"#{_room_name(bot, cid)}" for cid in FAIRACCESS_TRACKED_ROOMS)
-    e_wl = discord.Embed(
-        title="Fair access — whitelist",
-        description="\n".join(
-            f"• <@{r['user_id']}> · added <t:{r['added_at']}:d> by <@{r['added_by']}>"
-            for r in wl[:40]
-        ) + (f"\n*…and {len(wl) - 40} more*" if len(wl) > 40 else "") or "*empty*",
-        color=0x43B581,
-    )
-    e_wl.set_footer(text=f"Tracked rooms: {rooms_line} · threshold "
-                         f"{FAIRACCESS_THRESHOLD_MINUTES} min · cooldown {FAIRACCESS_COOLDOWN_DAYS} d")
+    view = discord.ui.LayoutView(timeout=None)
 
-    e_cd = discord.Embed(
-        title="Active cooldowns",
-        description="\n".join(
-            f"• <@{c['user_id']}> · releases <t:{c['expires_at']}:R>"
-            for c in actives
-        ) or "*none*",
-        color=0xED4245,
-    )
+    # ---- whitelist (inline Remove for the first few; rest text + command) ----
+    wl_items = [discord.ui.TextDisplay("### Fair access — whitelist")]
+    for r in wl[:_MAX_WL_INLINE]:
+        wl_items.append(discord.ui.Section(
+            f"<@{r['user_id']}> · added <t:{r['added_at']}:d> by <@{r['added_by']}>",
+            accessory=discord.ui.Button(label="Remove", style=discord.ButtonStyle.secondary,
+                                        custom_id=f"fa:wlrm:{r['user_id']}")))
+    if len(wl) > _MAX_WL_INLINE:
+        extra = "\n".join(f"<@{r['user_id']}> · added <t:{r['added_at']}:d>"
+                          for r in wl[_MAX_WL_INLINE:_MAX_WL_INLINE + 20])
+        more = len(wl) - _MAX_WL_INLINE - 20
+        wl_items.append(discord.ui.TextDisplay(
+            extra + (f"\n-# …and {more} more" if more > 0 else "")
+            + "\n-# remove via `/whitelist remove`"))
+    if not wl:
+        wl_items.append(discord.ui.TextDisplay("*empty*"))
+    view.add_item(discord.ui.Container(*wl_items, accent_color=0x43B581))
 
+    # ---- active cooldowns (name + release time + inline Release) ----
+    cd_items = [discord.ui.TextDisplay("### Active cooldowns")]
+    for c in actives[:_MAX_RELEASE_INLINE]:
+        cd_items.append(discord.ui.Section(
+            f"<@{c['user_id']}> · releases <t:{c['expires_at']}:R>",
+            accessory=discord.ui.Button(label="Release", style=discord.ButtonStyle.danger,
+                                        custom_id=f"fa:rel:{c['user_id']}")))
+    if len(actives) > _MAX_RELEASE_INLINE:
+        cd_items.append(discord.ui.TextDisplay("\n".join(
+            f"<@{c['user_id']}> · releases <t:{c['expires_at']}:R>"
+            for c in actives[_MAX_RELEASE_INLINE:]) + "\n-# release via `/cooldown release`"))
+    if not actives:
+        cd_items.append(discord.ui.TextDisplay("*none*"))
+    view.add_item(discord.ui.Container(*cd_items, accent_color=0xED4245))
+
+    # ---- visitor feed (text only; tallies reset via /cooldown reset) ----
     feed_lines = []
     for w in recent:
         rooms = json.loads(w["room_seconds"])
@@ -527,50 +546,40 @@ def _build_panel(bot) -> tuple[list[discord.Embed], discord.ui.View]:
             state = {"open": "tallying", "ok": "ok", "exempt": "exempt",
                      "flagged": "🚫 flagged"}.get(w["status"], w["status"])
         feed_lines.append(
-            f"• <@{w['user_id']}> · {_fmt_minutes(bot, rooms)} · {state} · <t:{w['last_activity_at']}:R>")
-    e_feed = discord.Embed(
-        title=f"Recent visitors (last {_FEED_LIMIT} sessions)",
-        description="\n".join(feed_lines) or "*no sessions yet*",
-        color=0x4E5058,
-        timestamp=discord.utils.utcnow(),
-    )
-    e_feed.set_footer(text="Panel rebuilds from state on every change")
+            f"<@{w['user_id']}> · {_fmt_minutes(bot, rooms)} · {state} · <t:{w['last_activity_at']}:R>")
+    rooms_line = ", ".join(f"#{_room_name(bot, cid)}" for cid in FAIRACCESS_TRACKED_ROOMS)
+    view.add_item(discord.ui.Container(
+        discord.ui.TextDisplay(f"### Recent visitors (last {_FEED_LIMIT} sessions)"),
+        discord.ui.TextDisplay("\n".join(feed_lines) or "*no sessions yet*"),
+        discord.ui.TextDisplay(f"-# Tracked: {rooms_line} · threshold "
+                               f"{FAIRACCESS_THRESHOLD_MINUTES} min · cooldown "
+                               f"{FAIRACCESS_COOLDOWN_DAYS} d · reset tallies via `/cooldown reset`"),
+        accent_color=0x4E5058))
 
-    view = discord.ui.View(timeout=None)
-    slots = 25
-    for c in actives[:_MAX_RELEASE_BUTTONS]:
-        if slots <= 0:
-            break
-        view.add_item(ReleaseButton(c["user_id"], _display_name(bot, c["user_id"])))
-        slots -= 1
-    for w in fairaccess_windows_open()[:_MAX_RESET_BUTTONS]:
-        if slots <= 0:
-            break
-        view.add_item(SessionResetButton(w["user_id"], _display_name(bot, w["user_id"])))
-        slots -= 1
-    for r in wl[:_MAX_WL_BUTTONS]:
-        if slots <= 0:
-            break
-        view.add_item(WhitelistRemoveButton(r["user_id"], _display_name(bot, r["user_id"])))
-        slots -= 1
-
-    return [e_wl, e_cd, e_feed], view
+    return view
 
 
 async def render_panel(bot) -> None:
-    """Re-render the pinned panel wholesale; recreate it once if deleted."""
+    """Re-render the pinned panel wholesale; recreate it once if deleted (or if
+    the stored message predates the layout format and can't be edited into it)."""
     async with _render_lock:
         try:
             channel = await _admin_channel(bot)
-            embeds, view = _build_panel(bot)
+            view = _build_panel(bot)
             mid = fairaccess_state_get()["panel_message_id"]
             if mid:
                 try:
-                    await channel.get_partial_message(mid).edit(embeds=embeds, view=view)
+                    await channel.get_partial_message(mid).edit(view=view)
                     return
                 except discord.NotFound:
                     pass  # deleted — recreate below (once)
-            msg = await channel.send(embeds=embeds, view=view)
+                except discord.HTTPException:
+                    # legacy embed message can't convert to components-v2 in place
+                    try:
+                        await channel.get_partial_message(mid).delete()
+                    except Exception:
+                        pass
+            msg = await channel.send(view=view)
             fairaccess_set_panel_message(msg.id)
             try:
                 await msg.pin()
