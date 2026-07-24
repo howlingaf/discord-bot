@@ -478,7 +478,10 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     view = discord.ui.LayoutView(timeout=None)
 
     # ---- whitelist (text only; managed via /whitelist add|remove) ----
-    wl_lines = [f"<@{r['user_id']}>" for r in wl[:40]]
+    # two names per row: halves the section height (Discord has no real columns)
+    shown = wl[:40]
+    wl_lines = ["\u2003".join(f"<@{r['user_id']}>" for r in shown[i:i + 2])
+                for i in range(0, len(shown), 2)]
     if len(wl) > 40:
         wl_lines.append(f"-# …and {len(wl) - 40} more")
     body = "\n".join(wl_lines) if wl_lines else "*empty*"
