@@ -26,8 +26,8 @@ Design contract:
     removing one from the whitelist closes their open tally so exempt minutes
     can't flag them.
   * The admin panel is one bot-owned pinned message, re-rendered wholesale from
-    state on every change and at startup. Buttons are DynamicItems (restart-safe
-    with no stored ids), mirrored by /whitelist and /cooldown slash commands.
+    state on every change and at startup — purely informational; all staff
+    actions go through the /whitelist and /cooldown slash commands.
 """
 
 import asyncio
@@ -414,11 +414,8 @@ _render_lock = asyncio.Lock()
 
 
 def _build_panel(bot) -> discord.ui.LayoutView:
-    """Components-V2 layout: each actionable row carries its button inline
-    (Section accessory), so the panel spends no vertical space on button rows.
-    Buttons are plain items whose custom_ids match the registered DynamicItem
-    templates — routing works regardless of which render created the message.
-    Budget: Discord caps a message at 40 components; a Section row costs 3."""
+    """Components-V2 layout, three informational sections; no interactive
+    components (staff actions are slash commands)."""
     wl = fairaccess_whitelist_all()
     actives = fairaccess_cooldowns_active()
     recent = fairaccess_windows_recent(_FEED_LIMIT)
