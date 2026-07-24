@@ -318,8 +318,7 @@ async def _flag(bot, user_id: int, rooms: dict, now: int,
         fairaccess_window_update(window_id, status="flagged")
     await _apply_all(bot, user_id)
     by = f" by <@{applied_by}>" if applied_by else ""
-    await _log(bot, f"🚫 Cooldown applied{by}: <@{user_id}> — "
-                    f"{_fmt_minutes(bot, rooms)} · expires <t:{expires}:R>")
+    await _log(bot, f"🚫 Cooldown applied{by}: <@{user_id}>")
 
 
 # ------------------------------------------------------------------ #
