@@ -126,7 +126,7 @@ fa_cooldown = app_commands.Group(
     default_permissions=discord.Permissions(manage_messages=True))
 
 
-@fa_whitelist.command(name="add", description="Exempt a user from fair-access cooldowns.")
+@fa_whitelist.command(name="add", description="(Admin) Exempt a user from fair-access cooldowns.")
 @app_commands.describe(user="Who to whitelist")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def fa_wl_add(interaction: discord.Interaction, user: discord.User):
@@ -135,7 +135,7 @@ async def fa_wl_add(interaction: discord.Interaction, user: discord.User):
     await interaction.followup.send(msg, ephemeral=True)
 
 
-@fa_whitelist.command(name="remove", description="Remove a user from the whitelist (their tally resets).")
+@fa_whitelist.command(name="remove", description="(Admin) Remove a user from the whitelist (their tally resets).")
 @app_commands.describe(user="Who to remove")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def fa_wl_remove(interaction: discord.Interaction, user: discord.User):
@@ -144,7 +144,7 @@ async def fa_wl_remove(interaction: discord.Interaction, user: discord.User):
     await interaction.followup.send(msg, ephemeral=True)
 
 
-@fa_whitelist.command(name="seed", description="One-time import of the Verified role's current members.")
+@fa_whitelist.command(name="seed", description="(Admin) One-time import of the Verified role's current members.")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def fa_wl_seed(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -152,7 +152,7 @@ async def fa_wl_seed(interaction: discord.Interaction):
     await interaction.followup.send(msg, ephemeral=True)
 
 
-@fa_cooldown.command(name="release", description="End a user's cooldown early (silent).")
+@fa_cooldown.command(name="release", description="(Admin) End a user's cooldown early (silent).")
 @app_commands.describe(user="Whose cooldown to release")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def fa_cd_release(interaction: discord.Interaction, user: discord.User):
@@ -161,7 +161,7 @@ async def fa_cd_release(interaction: discord.Interaction, user: discord.User):
     await interaction.followup.send(msg, ephemeral=True)
 
 
-@fa_cooldown.command(name="reset", description="Zero a user's current session tally.")
+@fa_cooldown.command(name="reset", description="(Admin) Zero a user's current session tally.")
 @app_commands.describe(user="Whose tally to reset")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def fa_cd_reset(interaction: discord.Interaction, user: discord.User):
@@ -170,7 +170,7 @@ async def fa_cd_reset(interaction: discord.Interaction, user: discord.User):
     await interaction.followup.send(msg, ephemeral=True)
 
 
-@fa_cooldown.command(name="apply", description="Manually apply a cooldown.")
+@fa_cooldown.command(name="apply", description="(Admin) Manually apply a cooldown.")
 @app_commands.describe(user="Who to cool down", days="Duration in days (default 7)")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def fa_cd_apply(interaction: discord.Interaction, user: discord.User,
