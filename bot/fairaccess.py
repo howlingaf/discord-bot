@@ -394,7 +394,8 @@ async def cooldown_release(bot, user_id: int, released_by: int) -> tuple[bool, s
             return False, "No active cooldown for that user."
         fairaccess_cooldown_release(cd["id"], released_by, _now())
     await _remove_all(bot, user_id)
-    await _log(bot, f"🔓 Early release: <@{user_id}> (by <@{released_by}>)")
+    # no log message: the row disappearing from the panel is the signal
+    # (released_by is still recorded on the cooldown row for the audit trail)
     await render_panel(bot)
     return True, f"Released <@{user_id}>."
 
@@ -601,8 +602,7 @@ async def _sweep(bot) -> bool:
     for cd in fairaccess_cooldowns_due():
         fairaccess_cooldown_mark_expired(cd["id"], now)
         await _remove_all(bot, cd["user_id"])
-        await _log(bot, f"✅ Cooldown expired: <@{cd['user_id']}>")
-        changed = True
+        changed = True   # silent: the panel row disappearing is the signal
 
     changed |= _reset_stale_windows(now)
 
