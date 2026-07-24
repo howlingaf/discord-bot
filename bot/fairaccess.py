@@ -72,7 +72,6 @@ _SWEEP_SECONDS = 300
 _FEED_LIMIT = 15
 # component budget on the panel message: 5 rows x 5 buttons
 # inline Section rows cost 3 components each (40-component message cap)
-_MAX_WL_INLINE = 4
 _MAX_RELEASE_INLINE = 5
 
 # the exact overwrite we own: deny ViewChannel+Connect, allow nothing, member type
@@ -419,28 +418,6 @@ def _staff_check(interaction: discord.Interaction) -> bool:
     return bool(perms and (perms.administrator or perms.manage_messages))
 
 
-class WhitelistRemoveButton(discord.ui.DynamicItem[discord.ui.Button],
-                            template=r"fa:wlrm:(?P<uid>\d+)"):
-    def __init__(self, uid: int, name: str = ""):
-        super().__init__(discord.ui.Button(
-            label=f"WL − {name}"[:80] if name else "WL remove",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"fa:wlrm:{uid}",
-        ))
-        self.uid = uid
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["uid"]))
-
-    async def callback(self, interaction: discord.Interaction):
-        if not _staff_check(interaction):
-            await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-            return
-        _, msg = await whitelist_remove(interaction.client, self.uid, interaction.user.id)
-        await interaction.response.send_message(msg, ephemeral=True)
-
-
 class ReleaseButton(discord.ui.DynamicItem[discord.ui.Button],
                     template=r"fa:rel:(?P<uid>\d+)"):
     def __init__(self, uid: int, name: str = ""):
@@ -500,23 +477,16 @@ def _build_panel(bot) -> discord.ui.LayoutView:
 
     view = discord.ui.LayoutView(timeout=None)
 
-    # ---- whitelist (inline Remove for the first few; rest text + command) ----
-    wl_items = [discord.ui.TextDisplay("### Fair access — whitelist")]
-    for r in wl[:_MAX_WL_INLINE]:
-        wl_items.append(discord.ui.Section(
-            f"<@{r['user_id']}> · added <t:{r['added_at']}:d> by <@{r['added_by']}>",
-            accessory=discord.ui.Button(label="Remove", style=discord.ButtonStyle.secondary,
-                                        custom_id=f"fa:wlrm:{r['user_id']}")))
-    if len(wl) > _MAX_WL_INLINE:
-        extra = "\n".join(f"<@{r['user_id']}> · added <t:{r['added_at']}:d>"
-                          for r in wl[_MAX_WL_INLINE:_MAX_WL_INLINE + 20])
-        more = len(wl) - _MAX_WL_INLINE - 20
-        wl_items.append(discord.ui.TextDisplay(
-            extra + (f"\n-# …and {more} more" if more > 0 else "")
-            + "\n-# remove via `/whitelist remove`"))
-    if not wl:
-        wl_items.append(discord.ui.TextDisplay("*empty*"))
-    view.add_item(discord.ui.Container(*wl_items, accent_color=0x43B581))
+    # ---- whitelist (text only; managed via /whitelist add|remove) ----
+    wl_lines = [f"<@{r['user_id']}> · added <t:{r['added_at']}:d> by <@{r['added_by']}>"
+                for r in wl[:40]]
+    if len(wl) > 40:
+        wl_lines.append(f"-# …and {len(wl) - 40} more")
+    body = "\n".join(wl_lines) if wl_lines else "*empty*"
+    view.add_item(discord.ui.Container(
+        discord.ui.TextDisplay("### Fair access — whitelist"),
+        discord.ui.TextDisplay(body + "\n-# manage via `/whitelist add` · `/whitelist remove`"),
+        accent_color=0x43B581))
 
     # ---- active cooldowns (name + release time + inline Release) ----
     cd_items = [discord.ui.TextDisplay("### Active cooldowns")]
@@ -670,5 +640,5 @@ def start(bot) -> None:
     if getattr(bot, "_fairaccess_started", False):
         return
     bot._fairaccess_started = True
-    bot.add_dynamic_items(WhitelistRemoveButton, ReleaseButton, SessionResetButton)
+    bot.add_dynamic_items(ReleaseButton, SessionResetButton)
     bot.loop.create_task(_loop(bot))
