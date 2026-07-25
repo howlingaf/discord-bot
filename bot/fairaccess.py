@@ -502,17 +502,11 @@ def _build_panel(bot) -> discord.ui.LayoutView:
         discord.ui.TextDisplay(cd_body + "\n-# release via `/cooldown release`"),
         accent_color=0xED4245))
 
-    # ---- total time per member across the tracked rooms ----
+    # ---- attendance: total time per member across the logged rooms ----
     feed_lines = [f"<@{t['user_id']}> · {t['seconds'] // 60} min" for t in totals]
-    rooms_line = " + ".join(f"#{_room_name(bot, cid)}" for cid in VOICE_TIME_ROOMS)
     view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"### Total time in {rooms_line}"),
+        discord.ui.TextDisplay("### Discord Stream Attendance"),
         discord.ui.TextDisplay("\n".join(feed_lines) or "*no time logged yet*"),
-        discord.ui.TextDisplay(
-            f"-# Top {_FEED_LIMIT}, all-time, both rooms combined · cooldown hides: "
-            + ", ".join(f"#{_room_name(bot, c)}" for c in FAIRACCESS_ENFORCED_ROOMS)
-            + f" · {FAIRACCESS_THRESHOLD_MINUTES} min → {FAIRACCESS_COOLDOWN_DAYS} d"
-            + " · reset via `/cooldown reset`"),
         accent_color=0x4E5058))
 
     return view
