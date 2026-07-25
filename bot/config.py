@@ -61,6 +61,9 @@ TWITCH_BOT_URL = (os.getenv("TWITCH_BOT_URL") or "http://127.0.0.1:8788").rstrip
 # The one channel where /twitch console commands are accepted (0 = disabled).
 TWITCH_CONSOLE_CHANNEL_ID = int(os.getenv("TWITCH_CONSOLE_CHANNEL_ID") or "0")
 
+# ---------------- Voice Chat Overlay ----------------
+VOICECHAT_SECRET = os.getenv("VOICECHAT_SECRET", "")
+
 # ---------------- Secret Streams ----------------
 SECRET_STREAMS_CHANNEL_ID = 1409455382564180009
 SECRET_STREAMS_EMPTY_NAME = "super secret streams"
@@ -86,6 +89,12 @@ FAIRACCESS_TRACKED_ROOMS = [
 FAIRACCESS_ENFORCED_ROOMS = [
     int(x) for x in (os.getenv("FAIRACCESS_ENFORCED_ROOMS") or "").replace(" ", "").split(",") if x
 ] or list(FAIRACCESS_TRACKED_ROOMS)
+# Rooms the panel totals time for — and the only rooms the session log records.
+# Deliberately separate from FAIRACCESS_TRACKED_ROOMS (which drives cooldowns):
+# this is just "how long has each member spent in co-working + streams".
+VOICE_TIME_ROOMS = [
+    int(x) for x in (os.getenv("VOICE_TIME_ROOMS") or "").replace(" ", "").split(",") if x
+] or [1482589316520739077, SECRET_STREAMS_CHANNEL_ID]
 # A user accruing this many cumulative minutes across ALL tracked rooms (within
 # one session window) is cooled down on their next exit.
 FAIRACCESS_THRESHOLD_MINUTES = int(os.getenv("FAIRACCESS_THRESHOLD_MINUTES") or "30")

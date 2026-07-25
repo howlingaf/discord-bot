@@ -46,15 +46,17 @@ from .config import (
     FAIRACCESS_VERIFIED_ROLE_ID,
     FAIRACCESS_WINDOW_RESET_HOURS,
     GUILD_ID,
+    VOICE_TIME_ROOMS,
 )
 from .database import (
+    voice_name_get,
+    voice_time_totals,
     voice_visit_close,
     voice_visit_open_for,
-    voice_visit_recent_same_channel,
+    voice_visit_recent_for,
     voice_visit_resume,
     voice_visit_start,
     voice_visits_open,
-    voice_visits_recent,
     fairaccess_cooldown_active_for,
     fairaccess_cooldown_create,
     fairaccess_cooldown_mark_expired,
@@ -105,6 +107,10 @@ def _is_staff_exempt(member: discord.Member) -> bool:
 
 
 def _room_name(bot, channel_id: int) -> str:
+    """The room's default name — a temporary /rename must not rewrite the panel."""
+    row = voice_name_get(channel_id)
+    if row:
+        return row["default_name"]
     ch = bot.get_channel(channel_id)
     return ch.name if ch else str(channel_id)
 
@@ -269,26 +275,35 @@ async def on_voice_state(bot, member: discord.Member,
 
 def _visit_transition(user_id: int, left_cid: int | None,
                       joined_cid: int | None, now: int) -> bool:
-    """General presence log, every voice channel, everyone (staff included).
-    One open row per user; moving channels closes one stint and opens another;
-    a rejoin to the same channel within the merge gap resumes the row."""
-    changed = False
-    if left_cid is not None:
-        v = voice_visit_open_for(user_id)
-        if v and v["channel_id"] == left_cid:
-            voice_visit_close(v["id"], now)
-            changed = True
-    if joined_cid is not None:
-        v = voice_visit_open_for(user_id)
+    """Session log for the tracked rooms only, everyone (staff included).
+
+    One open row per user, aggregated across rooms: hopping between tracked
+    rooms is the same session, so only entering/leaving the tracked set opens
+    or closes a row. A rejoin within the merge gap resumes the row.
+    """
+    tracked = set(VOICE_TIME_ROOMS)
+    left = left_cid if left_cid in tracked else None
+    joined = joined_cid if joined_cid in tracked else None
+    if left is None and joined is None:
+        return False
+    if left is not None and joined is not None:
+        return False  # room-to-room inside the tracked set: same session
+
+    v = voice_visit_open_for(user_id)
+    if left is not None:
         if v is None:
-            merge = voice_visit_recent_same_channel(
-                user_id, joined_cid, now - _VISIT_MERGE_SECONDS)
-            if merge is not None:
-                voice_visit_resume(merge, now)
-            else:
-                voice_visit_start(user_id, joined_cid, now)
-            changed = True
-    return changed
+            return False
+        voice_visit_close(v["id"], now)
+        return True
+
+    if v is not None:
+        return False
+    merge = voice_visit_recent_for(user_id, now - _VISIT_MERGE_SECONDS)
+    if merge is not None:
+        voice_visit_resume(merge, now)
+    else:
+        voice_visit_start(user_id, joined, now)
+    return True
 
 
 async def _handle_voice(bot, member, left_cid: int | None, joined_cid: int | None) -> bool:
@@ -452,7 +467,7 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     components (staff actions are slash commands)."""
     wl = fairaccess_whitelist_all()
     actives = fairaccess_cooldowns_active()
-    recent = voice_visits_recent(_FEED_LIMIT)
+    totals = voice_time_totals(VOICE_TIME_ROOMS, _now(), _FEED_LIMIT)
 
     view = discord.ui.LayoutView(timeout=None)
 
@@ -485,23 +500,14 @@ def _build_panel(bot) -> discord.ui.LayoutView:
         discord.ui.TextDisplay(cd_body + "\n-# release via `/cooldown release`"),
         accent_color=0xED4245))
 
-    # ---- voice sessions feed: every voice channel, everyone ----
-    feed_lines = []
-    now = _now()
-    for v in recent:
-        chan = f"#{_room_name(bot, v['channel_id'])}"
-        if v["left_at"] is None:
-            mins = (v["seconds"] + now - v["last_join_at"]) // 60
-            feed_lines.append(f"<@{v['user_id']}> · {chan} · {mins} min · in room")
-        else:
-            feed_lines.append(
-                f"<@{v['user_id']}> · {chan} · {v['seconds'] // 60} min · <t:{v['left_at']}:R>")
-    rooms_line = ", ".join(f"#{_room_name(bot, cid)}" for cid in FAIRACCESS_TRACKED_ROOMS)
+    # ---- total time per member across the tracked rooms ----
+    feed_lines = [f"<@{t['user_id']}> · {t['seconds'] // 60} min" for t in totals]
+    rooms_line = " + ".join(f"#{_room_name(bot, cid)}" for cid in VOICE_TIME_ROOMS)
     view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"### Recent voice sessions (last {_FEED_LIMIT})"),
-        discord.ui.TextDisplay("\n".join(feed_lines) or "*no sessions yet*"),
+        discord.ui.TextDisplay(f"### Total time in {rooms_line}"),
+        discord.ui.TextDisplay("\n".join(feed_lines) or "*no time logged yet*"),
         discord.ui.TextDisplay(
-            f"-# Accrues: {rooms_line} · cooldown hides: "
+            f"-# Top {_FEED_LIMIT}, all-time, both rooms combined · cooldown hides: "
             + ", ".join(f"#{_room_name(bot, c)}" for c in FAIRACCESS_ENFORCED_ROOMS)
             + f" · {FAIRACCESS_THRESHOLD_MINUTES} min → {FAIRACCESS_COOLDOWN_DAYS} d"
             + " · reset via `/cooldown reset`"),
@@ -589,9 +595,14 @@ def _startup_fixups(bot, now: int) -> None:
             fairaccess_window_update(w["id"], last_join_at=None, last_join_channel_id=None)
             print(f"[FAIRACCESS] cleared dangling join for {w['user_id']} (left during downtime)")
     for v in voice_visits_open():
-        ch = bot.get_channel(v["channel_id"])
-        still_there = ch is not None and any(
-            m.id == v["user_id"] for m in getattr(ch, "members", []))
+        # a session spans the tracked rooms, so "still there" means still in
+        # any of them — they may have moved rooms during the downtime
+        still_there = False
+        for cid in VOICE_TIME_ROOMS:
+            ch = bot.get_channel(cid)
+            if ch is not None and any(m.id == v["user_id"] for m in getattr(ch, "members", [])):
+                still_there = True
+                break
         if not still_there:
             # left during downtime: close at the accrued time (in-flight lost)
             voice_visit_close(v["id"], _now(), add_elapsed=False)

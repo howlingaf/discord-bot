@@ -7,15 +7,19 @@ from .config import (
     SPOTIFY_REDIRECT_URI,
     SPOTIFY_ALLOWED_USER_ID,
     GUILD_ID,
-    SECRET_STREAMS_CHANNEL_ID,
     TWITCH_CONSOLE_CHANNEL_ID,
 )
 from .twitchconsole import call_console
 from .spotify import dm_spotify_link
 from .leetcode import get_or_create_problem_post
 from .database import twitch_link_delete
+from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
+from .voicenames import rename as vc_rename
 from .logbus import log_error
 from .client import bot
+
+vc_register_command(bot)
+
 
 @bot.tree.command(name="spotifylink", description="(Owner) DM yourself the Spotify link so the bot can auto pause/resume.")
 async def spotifylink(interaction: discord.Interaction):
@@ -180,25 +184,38 @@ bot.tree.add_command(fa_whitelist)
 bot.tree.add_command(fa_cooldown)
 
 
-# ---- Secret streams rename ----
+# ---- Temporary voice channel rename ----
 
-@bot.tree.command(name="rename", description="(Admin) Rename the secret streams voice channel.")
+@bot.tree.command(name="rename", description="(Admin) Rename your current voice channel until it empties.")
 @app_commands.describe(name="New name for the channel")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def rename_stream(interaction: discord.Interaction, name: str):
-    if not SECRET_STREAMS_CHANNEL_ID:
-        await interaction.response.send_message("Channel not configured.", ephemeral=True)
-        return
-
-    channel = bot.get_channel(SECRET_STREAMS_CHANNEL_ID)
+async def rename_stream(interaction: discord.Interaction, name: app_commands.Range[str, 1, 100]):
+    member = interaction.user
+    voice = member.voice if isinstance(member, discord.Member) else None
+    channel = voice.channel if voice else None
     if not isinstance(channel, discord.VoiceChannel):
-        await interaction.response.send_message("Channel not found.", ephemeral=True)
+        await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
     try:
-        await channel.edit(name=name)
-        await interaction.followup.send(f"Renamed to **{name}**.", ephemeral=True)
+        msg = await vc_rename(channel, name, member.id)
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"Failed: {e}", ephemeral=True)
+        msg = f"Failed: {e}"
+    await interaction.followup.send(msg, ephemeral=True)
+
+
+@bot.event
+async def on_message(message: discord.Message):
+    await on_chat_message(message)
+
+
+@bot.event
+async def on_message_edit(_before: discord.Message, after: discord.Message):
+    await on_chat_edit(after)
+
+
+@bot.event
+async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
+    await on_chat_delete(payload)

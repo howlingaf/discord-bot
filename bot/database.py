@@ -222,6 +222,20 @@ def db_init():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_visits_open ON voice_visits(user_id) WHERE left_at IS NULL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_visits_recency ON voice_visits(left_at, last_join_at)")
 
+        # ---- Temporary voice channel names (/rename) ----
+        # A row exists only while a channel carries a custom name; default_name
+        # is the name it had before the first rename, and the row is deleted
+        # once the channel empties and the default is restored.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS voice_channel_names (
+          channel_id   INTEGER PRIMARY KEY,
+          default_name TEXT NOT NULL,
+          custom_name  TEXT NOT NULL,
+          set_by       INTEGER NOT NULL,
+          set_at       INTEGER NOT NULL
+        )
+        """)
+
         # ---- Indexes for hot query paths ----
         # The contest poller filters on these columns every cycle; leetcode_problems
         # is looked up by slug on the recap path.
@@ -772,14 +786,14 @@ def voice_visit_open_for(user_id: int) -> dict | None:
                 "last_join_at": r[4], "left_at": r[5], "seconds": r[6]}
 
 
-def voice_visit_recent_same_channel(user_id: int, channel_id: int, since: int) -> int | None:
-    """Id of this user's most recent CLOSED visit to `channel_id` ending after
-    `since` — the rejoin-merge target."""
+def voice_visit_recent_for(user_id: int, since: int) -> int | None:
+    """Id of this user's most recent CLOSED session ending after `since` — the
+    rejoin-merge target. Channel-agnostic: a session spans the tracked rooms."""
     with _db() as conn:
         r = conn.execute(
-            "SELECT id FROM voice_visits WHERE user_id=? AND channel_id=? "
+            "SELECT id FROM voice_visits WHERE user_id=? "
             "AND left_at IS NOT NULL AND left_at>=? ORDER BY left_at DESC LIMIT 1",
-            (user_id, channel_id, since),
+            (user_id, since),
         ).fetchone()
         return r[0] if r else None
 
@@ -821,13 +835,60 @@ def voice_visits_open() -> list[dict]:
                  "last_join_at": r[4], "left_at": r[5], "seconds": r[6]} for r in rows]
 
 
-def voice_visits_recent(limit: int = 15) -> list[dict]:
-    """Open visits first (people in rooms now), then most recently ended."""
+def _voice_name_row(r) -> dict:
+    return {"channel_id": r[0], "default_name": r[1], "custom_name": r[2],
+            "set_by": r[3], "set_at": r[4]}
+
+
+def voice_name_get(channel_id: int) -> dict | None:
+    with _db() as conn:
+        r = conn.execute(
+            "SELECT channel_id, default_name, custom_name, set_by, set_at "
+            "FROM voice_channel_names WHERE channel_id=?", (channel_id,),
+        ).fetchone()
+        return _voice_name_row(r) if r else None
+
+
+def voice_names_all() -> list[dict]:
     with _db() as conn:
         rows = conn.execute(
-            "SELECT id, user_id, channel_id, started_at, last_join_at, left_at, seconds "
-            "FROM voice_visits ORDER BY (left_at IS NULL) DESC, "
-            "COALESCE(left_at, last_join_at) DESC LIMIT ?", (limit,),
+            "SELECT channel_id, default_name, custom_name, set_by, set_at "
+            "FROM voice_channel_names").fetchall()
+        return [_voice_name_row(r) for r in rows]
+
+
+def voice_name_set(channel_id: int, default_name: str, custom_name: str, set_by: int, now: int):
+    """Record an active override. The stored default_name is never overwritten
+    by a second rename — the first one captured the real default."""
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO voice_channel_names(channel_id, default_name, custom_name, set_by, set_at) "
+            "VALUES(?,?,?,?,?) ON CONFLICT(channel_id) DO UPDATE SET "
+            "custom_name=excluded.custom_name, set_by=excluded.set_by, set_at=excluded.set_at",
+            (channel_id, default_name, custom_name, set_by, now),
+        )
+        conn.commit()
+
+
+def voice_name_clear(channel_id: int):
+    with _db() as conn:
+        conn.execute("DELETE FROM voice_channel_names WHERE channel_id=?", (channel_id,))
+        conn.commit()
+
+
+def voice_time_totals(channel_ids: list[int], now: int, limit: int = 15) -> list[dict]:
+    """One row per user: their all-time total seconds in `channel_ids`, longest
+    first. Open sessions include the time accrued since the last join, so
+    someone in a room right now keeps climbing."""
+    if not channel_ids:
+        return []
+    marks = ",".join("?" * len(channel_ids))
+    with _db() as conn:
+        rows = conn.execute(
+            f"SELECT user_id, SUM(seconds) + SUM(CASE WHEN left_at IS NULL "
+            f"THEN MAX(0, ?-last_join_at) ELSE 0 END) AS total "
+            f"FROM voice_visits WHERE channel_id IN ({marks}) "
+            f"GROUP BY user_id ORDER BY total DESC LIMIT ?",
+            (now, *channel_ids, limit),
         ).fetchall()
-        return [{"id": r[0], "user_id": r[1], "channel_id": r[2], "started_at": r[3],
-                 "last_join_at": r[4], "left_at": r[5], "seconds": r[6]} for r in rows]
+        return [{"user_id": r[0], "seconds": r[1] or 0} for r in rows]
