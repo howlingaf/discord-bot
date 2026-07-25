@@ -876,19 +876,22 @@ def voice_name_clear(channel_id: int):
         conn.commit()
 
 
-def voice_time_totals(channel_ids: list[int], now: int, limit: int = 15) -> list[dict]:
+def voice_time_totals(channel_ids: list[int], now: int, limit: int = 15,
+                      exclude_user_ids: list[int] | None = None) -> list[dict]:
     """One row per user: their all-time total seconds in `channel_ids`, longest
     first. Open sessions include the time accrued since the last join, so
     someone in a room right now keeps climbing."""
     if not channel_ids:
         return []
     marks = ",".join("?" * len(channel_ids))
+    skip = list(exclude_user_ids or [])
+    skip_clause = f" AND user_id NOT IN ({','.join('?' * len(skip))})" if skip else ""
     with _db() as conn:
         rows = conn.execute(
             f"SELECT user_id, SUM(seconds) + SUM(CASE WHEN left_at IS NULL "
             f"THEN MAX(0, ?-last_join_at) ELSE 0 END) AS total "
-            f"FROM voice_visits WHERE channel_id IN ({marks}) "
+            f"FROM voice_visits WHERE channel_id IN ({marks}){skip_clause} "
             f"GROUP BY user_id ORDER BY total DESC LIMIT ?",
-            (now, *channel_ids, limit),
+            (now, *channel_ids, *skip, limit),
         ).fetchall()
         return [{"user_id": r[0], "seconds": r[1] or 0} for r in rows]

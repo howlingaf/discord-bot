@@ -46,6 +46,7 @@ from .config import (
     FAIRACCESS_VERIFIED_ROLE_ID,
     FAIRACCESS_WINDOW_RESET_HOURS,
     GUILD_ID,
+    VOICE_TIME_EXCLUDE_IDS,
     VOICE_TIME_ROOMS,
 )
 from .database import (
@@ -467,7 +468,8 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     components (staff actions are slash commands)."""
     wl = fairaccess_whitelist_all()
     actives = fairaccess_cooldowns_active()
-    totals = voice_time_totals(VOICE_TIME_ROOMS, _now(), _FEED_LIMIT)
+    totals = voice_time_totals(VOICE_TIME_ROOMS, _now(), _FEED_LIMIT,
+                               exclude_user_ids=VOICE_TIME_EXCLUDE_IDS)
 
     view = discord.ui.LayoutView(timeout=None)
 

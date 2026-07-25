@@ -95,6 +95,10 @@ FAIRACCESS_ENFORCED_ROOMS = [
 VOICE_TIME_ROOMS = [
     int(x) for x in (os.getenv("VOICE_TIME_ROOMS") or "").replace(" ", "").split(",") if x
 ] or [1482589316520739077, SECRET_STREAMS_CHANNEL_ID]
+# Members left off that list — the host's own hours aren't what the panel is for.
+VOICE_TIME_EXCLUDE_IDS = [
+    int(x) for x in (os.getenv("VOICE_TIME_EXCLUDE_IDS") or "").replace(" ", "").split(",") if x
+] or [1236756328307757157]  # howlingaf
 # A user accruing this many cumulative minutes across ALL tracked rooms (within
 # one session window) is cooled down on their next exit.
 FAIRACCESS_THRESHOLD_MINUTES = int(os.getenv("FAIRACCESS_THRESHOLD_MINUTES") or "30")
