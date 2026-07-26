@@ -344,42 +344,57 @@ async def _post_recap_message(bot, entries: list[dict], streamer_links: list[str
             print(f"[RECAP] Could not fetch recap channel: {e}")
             return
 
-    # Everything lands in ONE embed: problems worked on plus every link shared,
-    # each tagged with its platform emblem. Markdown links inside an embed don't
-    # generate preview cards, so the recap stays a single message.
+    # One embed, one list: everything worked on during the stream is a problem,
+    # whether it came from the LeetCode feed or a link shared on stream, so they
+    # all sit together — grouped by platform, blank line between entries.
+    # Markdown links inside an embed don't preview, so this stays one message.
     leetcode_emblem = PLATFORM_EMBLEMS.get("leetcode.com", _DEFAULT_EMBLEM)
-    problem_lines = []
+    grouped: dict[str, list[str]] = {}
     for entry in entries:
         thread_url = f"https://discord.com/channels/{GUILD_ID}/{entry['thread_id']}"
-        problem_lines.append(
+        grouped.setdefault("leetcode.com", []).append(
             f"{leetcode_emblem} [{entry['question_id']}. {entry['problem_name']}]({thread_url})"
         )
+    for url in streamer_links:
+        grouped.setdefault(_link_host(url), []).append(link_line(url))
 
+    lines = []
+    for host in sorted(grouped, key=_platform_rank):
+        lines.extend(grouped[host])
+
+    blocks = _chunk_lines(lines, limit=4096) if lines else []
     embed = discord.Embed(
         title="Stream Recap",
-        description="\n".join(problem_lines) or None,
+        description=blocks[0] if blocks else None,
         color=0xFFA116,
     )
-
-    if streamer_links:
-        # Embed fields cap at 1024 chars; continue into further fields if needed.
-        for i, chunk in enumerate(_chunk_lines([link_line(u) for u in streamer_links])):
-            embed.add_field(name="Links shared" if i == 0 else "​",
-                            value=chunk, inline=False)
+    # Overflow past the description limit continues in unnamed fields.
+    for block in blocks[1:]:
+        embed.add_field(name="​", value=block[:1024], inline=False)
 
     try:
         await channel.send(embed=embed)
         print(f"[RECAP] Recap sent to channel {LEETCODE_RECAP_CHANNEL_ID} "
-              f"({len(problem_lines)} problem(s), {len(streamer_links)} link(s))")
+              f"({len(lines)} problem(s) across {len(grouped)} platform(s))")
     except Exception as e:
         print(f"[RECAP] Failed to send recap message: {e}")
 
 
+def _platform_rank(host: str) -> tuple[int, str]:
+    """Stream problems (LeetCode) first, then the other platforms in a fixed
+    order so a recap's grouping doesn't shuffle between streams."""
+    order = list(PLATFORM_EMBLEMS)
+    for i, domain in enumerate(order):
+        if host == domain or host.endswith("." + domain):
+            return (i, host)
+    return (len(order), host)
+
+
 def _chunk_lines(lines: list[str], limit: int = 1024) -> list[str]:
-    """Group lines into blocks that each fit an embed field."""
+    """Group lines into blocks that fit an embed, blank line between entries."""
     blocks, current = [], ""
     for line in lines:
-        candidate = f"{current}\n{line}" if current else line
+        candidate = f"{current}\n\n{line}" if current else line
         if len(candidate) > limit and current:
             blocks.append(current)
             current = line
