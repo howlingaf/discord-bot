@@ -33,13 +33,14 @@ DSA_LINK_DOMAINS = (
     "cses.fi",
 )
 
-# Emblem shown next to each problem/link in the recap card. Swap any value for
-# a custom guild emoji ("<:codeforces:123456789>") — no other change needed.
+# Emblem shown next to each problem/link in the recap card. These are the real
+# platform logos, uploaded as APPLICATION emoji (owned by the bot, usable in any
+# server, no guild emoji slots consumed) — see scripts/sync_platform_emoji.py.
 PLATFORM_EMBLEMS = {
-    "leetcode.com": "🟧",
-    "codeforces.com": "🔷",
-    "projecteuler.net": "🧮",
-    "cses.fi": "🟩",
+    "leetcode.com": "<:leetcode:1530820116667957298>",
+    "codeforces.com": "<:codeforces:1530820117225672890>",
+    "projecteuler.net": "<:projecteuler:1530820117879980144>",
+    "cses.fi": "<:cses:1530820118508998656>",
 }
 _DEFAULT_EMBLEM = "🔗"
 
