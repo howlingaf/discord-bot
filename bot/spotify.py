@@ -19,6 +19,11 @@ from .database import (
     spotify_get_runtime,
     spotify_set_runtime,
 )
+from .logbus import log_if_persistent
+
+# consecutive Spotify token-refresh failures (drives log escalation)
+_token_fails = 0
+
 
 
 def spotify_authorize_url(state: str) -> str:
@@ -124,7 +129,18 @@ async def handle_spotify_auto_pause(http_session: ClientSession, member_count: i
 
     spotify_set_runtime(last_member_count=member_count)
 
-    access = await spotify_get_access_token(http_session)
+    # A revoked/expired refresh token must degrade to "no auto-pause", not
+    # raise into whatever called us (this handler runs off voice events).
+    global _token_fails
+    try:
+        access = await spotify_get_access_token(http_session)
+    except Exception as e:
+        _token_fails += 1
+        log_if_persistent(_token_fails,
+                          f"[SPOTIFY] token refresh failed, auto-pause off "
+                          f"(x{_token_fails}) — re-link via /spotifylink: {e!r}")
+        return
+    _token_fails = 0
     if not access:
         return
 

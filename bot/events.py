@@ -9,7 +9,7 @@ from .spotify import count_humans_in_channel, handle_spotify_auto_pause
 from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler, leetcode_premium_weekly_scheduler
 from .voicechat import on_voice_update
 from .voicenames import on_voice_state as voicenames_voice, start as voicenames_start
-from .logbus import start as logbus_start
+from .logbus import log_error, start as logbus_start
 from .fairaccess import start as fairaccess_start, on_voice_state as fairaccess_voice
 from .client import bot
 
@@ -55,27 +55,43 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     before_id = before.channel.id if before and before.channel else None
     after_id = after.channel.id if after and after.channel else None
 
+    # Each subsystem is isolated: one of them raising must never cost the others
+    # their event. (A dead Spotify token used to abort the whole handler, so
+    # attendance sessions silently never closed.)
+
     # --- Spotify auto-pause ---
-    if SPOTIFY_VOICE_CHANNEL_ID and (before_id == SPOTIFY_VOICE_CHANNEL_ID or after_id == SPOTIFY_VOICE_CHANNEL_ID):
-        guild = bot.get_guild(GUILD_ID)
-        if guild:
-            channel = guild.get_channel(SPOTIFY_VOICE_CHANNEL_ID)
-            if isinstance(channel, discord.VoiceChannel):
-                member_count = count_humans_in_channel(channel)
-                if bot.http_session:
-                    await handle_spotify_auto_pause(bot.http_session, member_count)
+    try:
+        if SPOTIFY_VOICE_CHANNEL_ID and (before_id == SPOTIFY_VOICE_CHANNEL_ID or after_id == SPOTIFY_VOICE_CHANNEL_ID):
+            guild = bot.get_guild(GUILD_ID)
+            if guild:
+                channel = guild.get_channel(SPOTIFY_VOICE_CHANNEL_ID)
+                if isinstance(channel, discord.VoiceChannel):
+                    member_count = count_humans_in_channel(channel)
+                    if bot.http_session:
+                        await handle_spotify_auto_pause(bot.http_session, member_count)
+    except Exception as e:
+        log_error(f"[VOICE] spotify auto-pause failed: {e!r}")
 
     # --- Restore default names on rooms that just emptied ---
-    await voicenames_voice(bot, before, after)
+    try:
+        await voicenames_voice(bot, before, after)
+    except Exception as e:
+        log_error(f"[VOICE] name revert failed: {e!r}")
 
-    # --- Fair-access tracked-room tally/cooldowns ---
-    await fairaccess_voice(bot, member, before, after)
+    # --- Fair-access tracked-room tally/cooldowns + attendance sessions ---
+    try:
+        await fairaccess_voice(bot, member, before, after)
+    except Exception as e:
+        log_error(f"[VOICE] fair-access failed: {e!r}")
 
     # --- Broadcast to any active voice-chat overlay sessions ---
-    if before_id:
-        await on_voice_update(bot, before_id)
-    if after_id and after_id != before_id:
-        await on_voice_update(bot, after_id)
+    try:
+        if before_id:
+            await on_voice_update(bot, before_id)
+        if after_id and after_id != before_id:
+            await on_voice_update(bot, after_id)
+    except Exception as e:
+        log_error(f"[VOICE] overlay broadcast failed: {e!r}")
 
 
 @bot.event
