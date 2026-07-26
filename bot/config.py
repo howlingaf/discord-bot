@@ -101,6 +101,12 @@ VOICE_TIME_ROOMS = [
 VOICE_TIME_EXCLUDE_IDS = [
     int(x) for x in (os.getenv("VOICE_TIME_EXCLUDE_IDS") or "").replace(" ", "").split(",") if x
 ] or [1236756328307757157]  # howlingaf
+# The host gets their own card instead, totalling every voice channel they sit
+# in — minus these rooms. #on-stream is excluded: being on stream isn't the
+# hanging-out time the card is meant to measure.
+VOICE_TIME_HOST_EXCLUDE_ROOMS = [
+    int(x) for x in (os.getenv("VOICE_TIME_HOST_EXCLUDE_ROOMS") or "").replace(" ", "").split(",") if x
+] or [1393005093045145631]
 # A user accruing this many cumulative minutes across ALL tracked rooms (within
 # one session window) is cooled down on their next exit.
 FAIRACCESS_THRESHOLD_MINUTES = int(os.getenv("FAIRACCESS_THRESHOLD_MINUTES") or "30")

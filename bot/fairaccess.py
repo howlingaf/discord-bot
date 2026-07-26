@@ -46,16 +46,19 @@ from .config import (
     FAIRACCESS_VERIFIED_ROLE_ID,
     FAIRACCESS_WINDOW_RESET_HOURS,
     GUILD_ID,
+    STREAMER_DISCORD_ID,
     VOICE_TIME_EXCLUDE_IDS,
+    VOICE_TIME_HOST_EXCLUDE_ROOMS,
     VOICE_TIME_ROOMS,
 )
 from .database import (
     heartbeat_get,
     heartbeat_set,
+    voice_time_by_channel,
     voice_time_totals,
     voice_visit_close,
     voice_visit_open_for,
-    voice_visit_recent_for,
+    voice_visit_recent_same_channel,
     voice_visit_resume,
     voice_visit_start,
     voice_visits_open,
@@ -265,35 +268,30 @@ async def on_voice_state(bot, member: discord.Member,
 
 def _visit_transition(user_id: int, left_cid: int | None,
                       joined_cid: int | None, now: int) -> bool:
-    """Session log for the tracked rooms only, everyone (staff included).
+    """Presence log for EVERY voice channel, everyone (staff included).
 
-    One open row per user, aggregated across rooms: hopping between tracked
-    rooms is the same session, so only entering/leaving the tracked set opens
-    or closes a row. A rejoin within the merge gap resumes the row.
+    One row per user per channel stint, so time can be attributed to the room
+    it was actually spent in — the cards aggregate across rows in SQL. Moving
+    channels closes one row and opens another; a rejoin to the same channel
+    within the merge gap resumes that row instead of fragmenting it.
     """
-    tracked = set(VOICE_TIME_ROOMS)
-    left = left_cid if left_cid in tracked else None
-    joined = joined_cid if joined_cid in tracked else None
-    if left is None and joined is None:
-        return False
-    if left is not None and joined is not None:
-        return False  # room-to-room inside the tracked set: same session
-
-    v = voice_visit_open_for(user_id)
-    if left is not None:
+    changed = False
+    if left_cid is not None:
+        v = voice_visit_open_for(user_id)
+        if v and v["channel_id"] == left_cid:
+            voice_visit_close(v["id"], now)
+            changed = True
+    if joined_cid is not None:
+        v = voice_visit_open_for(user_id)
         if v is None:
-            return False
-        voice_visit_close(v["id"], now)
-        return True
-
-    if v is not None:
-        return False
-    merge = voice_visit_recent_for(user_id, now - _VISIT_MERGE_SECONDS)
-    if merge is not None:
-        voice_visit_resume(merge, now)
-    else:
-        voice_visit_start(user_id, joined, now)
-    return True
+            merge = voice_visit_recent_same_channel(
+                user_id, joined_cid, now - _VISIT_MERGE_SECONDS)
+            if merge is not None:
+                voice_visit_resume(merge, now)
+            else:
+                voice_visit_start(user_id, joined_cid, now)
+            changed = True
+    return changed
 
 
 async def _handle_voice(bot, member, left_cid: int | None, joined_cid: int | None) -> bool:
@@ -509,6 +507,22 @@ def _build_panel(bot) -> discord.ui.LayoutView:
         discord.ui.TextDisplay("\n".join(feed_lines) or "*no time logged yet*"),
         accent_color=0x4E5058))
 
+    # ---- the host's own time, every voice channel bar the excluded ones ----
+    if STREAMER_DISCORD_ID:
+        rooms = voice_time_by_channel(STREAMER_DISCORD_ID, _now(),
+                                      VOICE_TIME_HOST_EXCLUDE_ROOMS)
+        total = sum(r["seconds"] for r in rooms) // 60
+        body = [f"**{total // 60}h {total % 60}m** total"]
+        body += [f"#{_room_name(bot, r['channel_id'])} · {r['seconds'] // 60} min"
+                 for r in rooms[:8] if r["seconds"] >= 60]
+        view.add_item(discord.ui.Container(
+            discord.ui.TextDisplay(f"### <@{STREAMER_DISCORD_ID}>'s voice time"),
+            discord.ui.TextDisplay("\n".join(body) if rooms else "*no time logged yet*"),
+            discord.ui.TextDisplay(
+                "-# Every voice channel except "
+                + ", ".join(f"#{_room_name(bot, c)}" for c in VOICE_TIME_HOST_EXCLUDE_ROOMS)),
+            accent_color=0xFAA61A))
+
     return view
 
 
@@ -597,14 +611,11 @@ def _startup_fixups(bot, now: int) -> None:
     # moment we know they were connected — rather than dropping the segment.
     beat = heartbeat_get()
     for v in voice_visits_open():
-        # a session spans the tracked rooms, so "still there" means still in
-        # any of them — they may have moved rooms during the downtime
-        still_there = False
-        for cid in VOICE_TIME_ROOMS:
-            ch = bot.get_channel(cid)
-            if ch is not None and any(m.id == v["user_id"] for m in getattr(ch, "members", [])):
-                still_there = True
-                break
+        # rows are per channel, so the row is still live only if the user is
+        # still in that exact channel
+        ch = bot.get_channel(v["channel_id"])
+        still_there = ch is not None and any(
+            m.id == v["user_id"] for m in getattr(ch, "members", []))
         if not still_there:
             credit_to = max(v["last_join_at"], min(beat or now, now))
             voice_visit_close(v["id"], credit_to)

@@ -790,14 +790,15 @@ def voice_visit_open_for(user_id: int) -> dict | None:
                 "last_join_at": r[4], "left_at": r[5], "seconds": r[6]}
 
 
-def voice_visit_recent_for(user_id: int, since: int) -> int | None:
-    """Id of this user's most recent CLOSED session ending after `since` — the
-    rejoin-merge target. Channel-agnostic: a session spans the tracked rooms."""
+def voice_visit_recent_same_channel(user_id: int, channel_id: int, since: int) -> int | None:
+    """Id of this user's most recent CLOSED visit to `channel_id` ending after
+    `since` — the rejoin-merge target. Rows are per channel, so a merge must
+    never pull in time from a different room."""
     with _db() as conn:
         r = conn.execute(
-            "SELECT id FROM voice_visits WHERE user_id=? "
+            "SELECT id FROM voice_visits WHERE user_id=? AND channel_id=? "
             "AND left_at IS NOT NULL AND left_at>=? ORDER BY left_at DESC LIMIT 1",
-            (user_id, since),
+            (user_id, channel_id, since),
         ).fetchone()
         return r[0] if r else None
 
@@ -849,6 +850,23 @@ def heartbeat_set(now: int):
     with _db() as conn:
         conn.execute("UPDATE bot_heartbeat SET at=? WHERE id=1", (now,))
         conn.commit()
+
+
+def voice_time_by_channel(user_id: int, now: int,
+                          exclude_channel_ids: list[int] | None = None) -> list[dict]:
+    """One user's all-time seconds per voice channel, longest first. Open rows
+    include the time accrued since the last join, so it climbs while connected."""
+    skip = list(exclude_channel_ids or [])
+    skip_clause = f" AND channel_id NOT IN ({','.join('?' * len(skip))})" if skip else ""
+    with _db() as conn:
+        rows = conn.execute(
+            f"SELECT channel_id, SUM(seconds) + SUM(CASE WHEN left_at IS NULL "
+            f"THEN MAX(0, ?-last_join_at) ELSE 0 END) AS total "
+            f"FROM voice_visits WHERE user_id=?{skip_clause} "
+            f"GROUP BY channel_id ORDER BY total DESC",
+            (now, user_id, *skip),
+        ).fetchall()
+        return [{"channel_id": r[0], "seconds": r[1] or 0} for r in rows]
 
 
 def voice_time_totals(channel_ids: list[int], now: int, limit: int = 15,
