@@ -92,10 +92,10 @@ FAIRACCESS_ENFORCED_ROOMS = [
 # Rooms the attendance card totals time for — and the only rooms the session
 # log records. Deliberately separate from FAIRACCESS_TRACKED_ROOMS (which drives
 # cooldowns): this is just "how long has each member attended".
-# Defaults: #co-working, #1:1 chillin, #super secret streams.
+# Defaults: #co-working, #1:1 chillin, #on-stream, #super secret streams.
 VOICE_TIME_ROOMS = [
     int(x) for x in (os.getenv("VOICE_TIME_ROOMS") or "").replace(" ", "").split(",") if x
-] or [1482589316520739077, 1529599559167246548, SECRET_STREAMS_CHANNEL_ID]
+] or [1482589316520739077, 1529599559167246548, 1393005093045145631, SECRET_STREAMS_CHANNEL_ID]
 # Members left off that list — the host's own hours aren't what the panel is for.
 VOICE_TIME_EXCLUDE_IDS = [
     int(x) for x in (os.getenv("VOICE_TIME_EXCLUDE_IDS") or "").replace(" ", "").split(",") if x
