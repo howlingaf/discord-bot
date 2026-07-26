@@ -64,6 +64,7 @@ from .database import (
     fairaccess_cooldown_create,
     fairaccess_cooldown_mark_expired,
     fairaccess_cooldown_release,
+    fairaccess_cooldown_set_expiry,
     fairaccess_cooldowns_active,
     fairaccess_cooldowns_due,
     fairaccess_set_all_empty_since,
@@ -429,6 +430,21 @@ async def cooldown_release(bot, user_id: int, released_by: int) -> tuple[bool, s
     # (released_by is still recorded on the cooldown row for the audit trail)
     await render_panel(bot)
     return True, f"Released <@{user_id}>."
+
+
+async def cooldown_reset_all(bot, days: int | None = None) -> tuple[bool, str]:
+    """Restart the clock on every active cooldown: each one now expires `days`
+    from now, whatever it was set to or how far through it had run."""
+    async with _lock:
+        actives = fairaccess_cooldowns_active()
+        if not actives:
+            return False, "No active cooldowns."
+        expires = _now() + (days or FAIRACCESS_COOLDOWN_DAYS) * 86400
+        for cd in actives:
+            fairaccess_cooldown_set_expiry(cd["id"], expires)
+    await render_panel(bot)
+    return True, (f"Restarted {len(actives)} cooldown"
+                  f"{'' if len(actives) == 1 else 's'} — all now release <t:{expires}:R>.")
 
 
 async def cooldown_apply(bot, user_id: int, applied_by: int,

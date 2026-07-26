@@ -180,6 +180,17 @@ async def fa_cd_apply(interaction: discord.Interaction, user: discord.User,
     await interaction.followup.send(msg, ephemeral=True)
 
 
+@fa_cooldown.command(name="resetall",
+                     description="(Admin) Restart the clock on every active cooldown.")
+@app_commands.describe(days="New length in days, counted from now (default 7)")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def fa_cd_resetall(interaction: discord.Interaction,
+                         days: app_commands.Range[int, 1, 90] | None = None):
+    await interaction.response.defer(ephemeral=True)
+    _, msg = await _fa.cooldown_reset_all(bot, days)
+    await interaction.followup.send(msg, ephemeral=True)
+
+
 bot.tree.add_command(fa_whitelist)
 bot.tree.add_command(fa_cooldown)
 

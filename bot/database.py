@@ -774,6 +774,13 @@ def fairaccess_cooldown_mark_expired(cooldown_id: int, now: int):
         conn.commit()
 
 
+def fairaccess_cooldown_set_expiry(cooldown_id: int, expires_at: int):
+    with _db() as conn:
+        conn.execute("UPDATE fairaccess_cooldowns SET expires_at=? WHERE id=?",
+                     (expires_at, cooldown_id))
+        conn.commit()
+
+
 def fairaccess_cooldown_release(cooldown_id: int, released_by: int, now: int):
     with _db() as conn:
         conn.execute(
