@@ -52,7 +52,6 @@ from .config import (
 from .database import (
     heartbeat_get,
     heartbeat_set,
-    voice_name_get,
     voice_time_totals,
     voice_visit_close,
     voice_visit_open_for,
@@ -111,10 +110,6 @@ def _is_staff_exempt(member: discord.Member) -> bool:
 
 
 def _room_name(bot, channel_id: int) -> str:
-    """The room's default name — a temporary /rename must not rewrite the panel."""
-    row = voice_name_get(channel_id)
-    if row:
-        return row["default_name"]
     ch = bot.get_channel(channel_id)
     return ch.name if ch else str(channel_id)
 

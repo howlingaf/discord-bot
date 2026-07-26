@@ -14,7 +14,6 @@ from .spotify import dm_spotify_link
 from .leetcode import get_or_create_problem_post
 from .database import twitch_link_delete
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
-from .voicenames import rename as vc_rename
 from .logbus import log_error
 from .client import bot
 
@@ -193,28 +192,6 @@ async def fa_cd_resetall(interaction: discord.Interaction,
 
 bot.tree.add_command(fa_whitelist)
 bot.tree.add_command(fa_cooldown)
-
-
-# ---- Temporary voice channel rename ----
-
-@bot.tree.command(name="rename", description="(Admin) Rename your current voice channel until it empties.")
-@app_commands.describe(name="New name for the channel")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def rename_stream(interaction: discord.Interaction, name: app_commands.Range[str, 1, 100]):
-    member = interaction.user
-    voice = member.voice if isinstance(member, discord.Member) else None
-    channel = voice.channel if voice else None
-    if not isinstance(channel, discord.VoiceChannel):
-        await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    try:
-        msg = await vc_rename(channel, name, member.id)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        msg = f"Failed: {e}"
-    await interaction.followup.send(msg, ephemeral=True)
 
 
 @bot.event

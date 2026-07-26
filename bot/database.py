@@ -233,20 +233,6 @@ def db_init():
         """)
         conn.execute("INSERT OR IGNORE INTO bot_heartbeat(id, at) VALUES(1, 0)")
 
-        # ---- Temporary voice channel names (/rename) ----
-        # A row exists only while a channel carries a custom name; default_name
-        # is the name it had before the first rename, and the row is deleted
-        # once the channel empties and the default is restored.
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS voice_channel_names (
-          channel_id   INTEGER PRIMARY KEY,
-          default_name TEXT NOT NULL,
-          custom_name  TEXT NOT NULL,
-          set_by       INTEGER NOT NULL,
-          set_at       INTEGER NOT NULL
-        )
-        """)
-
         # ---- Indexes for hot query paths ----
         # The contest poller filters on these columns every cycle; leetcode_problems
         # is looked up by slug on the recap path.
@@ -862,47 +848,6 @@ def heartbeat_get() -> int:
 def heartbeat_set(now: int):
     with _db() as conn:
         conn.execute("UPDATE bot_heartbeat SET at=? WHERE id=1", (now,))
-        conn.commit()
-
-
-def _voice_name_row(r) -> dict:
-    return {"channel_id": r[0], "default_name": r[1], "custom_name": r[2],
-            "set_by": r[3], "set_at": r[4]}
-
-
-def voice_name_get(channel_id: int) -> dict | None:
-    with _db() as conn:
-        r = conn.execute(
-            "SELECT channel_id, default_name, custom_name, set_by, set_at "
-            "FROM voice_channel_names WHERE channel_id=?", (channel_id,),
-        ).fetchone()
-        return _voice_name_row(r) if r else None
-
-
-def voice_names_all() -> list[dict]:
-    with _db() as conn:
-        rows = conn.execute(
-            "SELECT channel_id, default_name, custom_name, set_by, set_at "
-            "FROM voice_channel_names").fetchall()
-        return [_voice_name_row(r) for r in rows]
-
-
-def voice_name_set(channel_id: int, default_name: str, custom_name: str, set_by: int, now: int):
-    """Record an active override. The stored default_name is never overwritten
-    by a second rename — the first one captured the real default."""
-    with _db() as conn:
-        conn.execute(
-            "INSERT INTO voice_channel_names(channel_id, default_name, custom_name, set_by, set_at) "
-            "VALUES(?,?,?,?,?) ON CONFLICT(channel_id) DO UPDATE SET "
-            "custom_name=excluded.custom_name, set_by=excluded.set_by, set_at=excluded.set_at",
-            (channel_id, default_name, custom_name, set_by, now),
-        )
-        conn.commit()
-
-
-def voice_name_clear(channel_id: int):
-    with _db() as conn:
-        conn.execute("DELETE FROM voice_channel_names WHERE channel_id=?", (channel_id,))
         conn.commit()
 
 
