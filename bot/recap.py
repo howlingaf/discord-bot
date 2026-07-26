@@ -33,6 +33,32 @@ DSA_LINK_DOMAINS = (
     "cses.fi",
 )
 
+# Emblem shown next to each problem/link in the recap card. Swap any value for
+# a custom guild emoji ("<:codeforces:123456789>") — no other change needed.
+PLATFORM_EMBLEMS = {
+    "leetcode.com": "🟧",
+    "codeforces.com": "🔷",
+    "projecteuler.net": "🧮",
+    "cses.fi": "🟩",
+}
+_DEFAULT_EMBLEM = "🔗"
+
+# Pull a human problem reference out of each platform's URL shape.
+_LINK_PATTERNS = (
+    ("codeforces.com", re.compile(r"/problemset/problem/(\d+)/(\w+)", re.I),
+     lambda m: f"Codeforces {m.group(1)}{m.group(2).upper()}"),
+    ("codeforces.com", re.compile(r"/contest/(\d+)/problem/(\w+)", re.I),
+     lambda m: f"Codeforces {m.group(1)}{m.group(2).upper()}"),
+    ("codeforces.com", re.compile(r"/gym/(\d+)/problem/(\w+)", re.I),
+     lambda m: f"Codeforces gym {m.group(1)}{m.group(2).upper()}"),
+    ("projecteuler.net", re.compile(r"problem=(\d+)", re.I),
+     lambda m: f"Project Euler {m.group(1)}"),
+    ("cses.fi", re.compile(r"/task/(\d+)", re.I),
+     lambda m: f"CSES {m.group(1)}"),
+    ("leetcode.com", re.compile(r"/problems/([a-z0-9-]+)", re.I),
+     lambda m: m.group(1).replace("-", " ").title()),
+)
+
 _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
 
 
@@ -59,6 +85,45 @@ def is_dsa_link(url: str) -> bool:
 
 def filter_dsa_links(links: list[str]) -> list[str]:
     return [u for u in links if is_dsa_link(u)]
+
+
+def _link_host(url: str) -> str:
+    raw = url.strip().strip("<>")
+    if not _SCHEME_RE.match(raw):
+        raw = "https://" + raw
+    try:
+        return (urlparse(raw).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+
+
+def platform_emblem(url: str) -> str:
+    host = _link_host(url)
+    for domain, emblem in PLATFORM_EMBLEMS.items():
+        if host == domain or host.endswith("." + domain):
+            return emblem
+    return _DEFAULT_EMBLEM
+
+
+def link_line(url: str) -> str:
+    """'🔷 [Codeforces 1421A](url)' — emblem, readable label, no preview embed."""
+    clean = url.strip().strip("<>")
+    if not _SCHEME_RE.match(clean):
+        clean = "https://" + clean  # markdown links need a scheme to resolve
+    host = _link_host(clean)
+    label = ""
+    for domain, pattern, build in _LINK_PATTERNS:
+        if host == domain or host.endswith("." + domain):
+            m = pattern.search(clean)
+            if m:
+                label = build(m)
+                break
+    if not label:
+        label = host or clean
+    # Keep the markdown link intact: strip ] from the label and percent-encode
+    # parens in the href so a url can't terminate the link early.
+    href = clean.replace("(", "%28").replace(")", "%29")
+    return f"{platform_emblem(clean)} [{label.replace(']', '')}]({href})"
 
 
 async def fetch_streamer_submissions(
@@ -278,34 +343,47 @@ async def _post_recap_message(bot, entries: list[dict], streamer_links: list[str
             print(f"[RECAP] Could not fetch recap channel: {e}")
             return
 
+    # Everything lands in ONE embed: problems worked on plus every link shared,
+    # each tagged with its platform emblem. Markdown links inside an embed don't
+    # generate preview cards, so the recap stays a single message.
+    leetcode_emblem = PLATFORM_EMBLEMS.get("leetcode.com", _DEFAULT_EMBLEM)
     problem_lines = []
     for entry in entries:
         thread_url = f"https://discord.com/channels/{GUILD_ID}/{entry['thread_id']}"
         problem_lines.append(
-            f"[{entry['question_id']}. {entry['problem_name']}]({thread_url})"
+            f"{leetcode_emblem} [{entry['question_id']}. {entry['problem_name']}]({thread_url})"
         )
 
-    if problem_lines:
-        embed = discord.Embed(
-            title="Stream Recap",
-            description="\n\n".join(problem_lines),
-            color=0xFFA116,
-        )
-        try:
-            await channel.send(embed=embed)
-            print(f"[RECAP] Recap message sent to channel {LEETCODE_RECAP_CHANNEL_ID}")
-        except Exception as e:
-            print(f"[RECAP] Failed to send recap message: {e}")
+    embed = discord.Embed(
+        title="Stream Recap",
+        description="\n".join(problem_lines) or None,
+        color=0xFFA116,
+    )
 
-    # Send streamer-shared links in their own message(s) so Discord auto-previews
-    # them. Discord caps preview embeds at 5 per message, so chunk accordingly.
     if streamer_links:
-        for i in range(0, len(streamer_links), 5):
-            chunk = streamer_links[i : i + 5]
-            content = ("**Links shared**\n" if i == 0 else "") + "\n".join(chunk)
-            try:
-                await channel.send(content=content, allowed_mentions=discord.AllowedMentions.none())
-            except Exception as e:
-                print(f"[RECAP] Failed to send links message: {e}")
-                break
-        print(f"[RECAP] Sent {len(streamer_links)} streamer link(s) to channel {LEETCODE_RECAP_CHANNEL_ID}")
+        # Embed fields cap at 1024 chars; continue into further fields if needed.
+        for i, chunk in enumerate(_chunk_lines([link_line(u) for u in streamer_links])):
+            embed.add_field(name="Links shared" if i == 0 else "​",
+                            value=chunk, inline=False)
+
+    try:
+        await channel.send(embed=embed)
+        print(f"[RECAP] Recap sent to channel {LEETCODE_RECAP_CHANNEL_ID} "
+              f"({len(problem_lines)} problem(s), {len(streamer_links)} link(s))")
+    except Exception as e:
+        print(f"[RECAP] Failed to send recap message: {e}")
+
+
+def _chunk_lines(lines: list[str], limit: int = 1024) -> list[str]:
+    """Group lines into blocks that each fit an embed field."""
+    blocks, current = [], ""
+    for line in lines:
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit and current:
+            blocks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        blocks.append(current)
+    return blocks
