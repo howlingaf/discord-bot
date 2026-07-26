@@ -45,20 +45,24 @@ PLATFORM_EMBLEMS = {
 }
 _DEFAULT_EMBLEM = "🔗"
 
-# Pull a human problem reference out of each platform's URL shape.
+# Pull (platform, problem reference) out of each platform's URL shape. The
+# platform name is only a fallback label for when the problem's name can't be
+# resolved — normally the emblem identifies the platform and the entry reads
+# "50. Consecutive Prime Sum", so the number can't be mistaken for part of the
+# platform's name. LeetCode carries its name in the slug, hence no platform.
 _LINK_PATTERNS = (
     ("codeforces.com", re.compile(r"/problemset/problem/(\d+)/(\w+)", re.I),
-     lambda m: f"Codeforces {m.group(1)}{m.group(2).upper()}"),
+     lambda m: ("Codeforces", f"{m.group(1)}{m.group(2).upper()}")),
     ("codeforces.com", re.compile(r"/contest/(\d+)/problem/(\w+)", re.I),
-     lambda m: f"Codeforces {m.group(1)}{m.group(2).upper()}"),
+     lambda m: ("Codeforces", f"{m.group(1)}{m.group(2).upper()}")),
     ("codeforces.com", re.compile(r"/gym/(\d+)/problem/(\w+)", re.I),
-     lambda m: f"Codeforces gym {m.group(1)}{m.group(2).upper()}"),
+     lambda m: ("Codeforces", f"gym {m.group(1)}{m.group(2).upper()}")),
     ("projecteuler.net", re.compile(r"problem=(\d+)", re.I),
-     lambda m: f"Project Euler {m.group(1)}"),
+     lambda m: ("Project Euler", m.group(1))),
     ("cses.fi", re.compile(r"/task/(\d+)", re.I),
-     lambda m: f"CSES {m.group(1)}"),
+     lambda m: ("CSES", m.group(1))),
     ("leetcode.com", re.compile(r"/problems/([a-z0-9-]+)", re.I),
-     lambda m: m.group(1).replace("-", " ").title()),
+     lambda m: (None, m.group(1).replace("-", " ").title())),
 )
 
 _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
@@ -108,25 +112,32 @@ def platform_emblem(url: str) -> str:
 
 
 def link_line(url: str, title: str | None = None) -> str:
-    """'🔷 [Codeforces 1421A — XORwice](url)' — emblem, reference, problem name.
+    """'🔷 [1421A. XORwice](url)' — emblem, problem number, problem name.
 
-    Markdown links inside an embed don't generate a preview card.
+    Falls back to "Codeforces 1421A" when the name can't be resolved, so an
+    entry never renders as a bare number. Markdown links inside an embed don't
+    generate a preview card.
     """
     clean = url.strip().strip("<>")
     if not _SCHEME_RE.match(clean):
         clean = "https://" + clean  # markdown links need a scheme to resolve
     host = _link_host(clean)
-    label = ""
+    platform, ref = None, ""
     for domain, pattern, build in _LINK_PATTERNS:
         if host == domain or host.endswith("." + domain):
             m = pattern.search(clean)
             if m:
-                label = build(m)
+                platform, ref = build(m)
                 break
-    if not label:
+
+    if not ref:
         label = host or clean
-    if title and title.lower() not in label.lower():
-        label = f"{label} — {title}"
+    elif title and title.lower() not in ref.lower():
+        label = f"{ref}. {title}"
+    elif platform:
+        label = f"{platform} {ref}"
+    else:
+        label = ref
     # Keep the markdown link intact: strip ] from the label and percent-encode
     # parens in the href so a url can't terminate the link early.
     href = clean.replace("(", "%28").replace(")", "%29")
