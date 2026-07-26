@@ -1,8 +1,9 @@
 import re
+from html import unescape
 from urllib.parse import urlparse
 
 import discord
-from aiohttp import ClientSession
+from aiohttp import ClientSession, ClientTimeout
 
 from .config import (
     GUILD_ID,
@@ -106,8 +107,11 @@ def platform_emblem(url: str) -> str:
     return _DEFAULT_EMBLEM
 
 
-def link_line(url: str) -> str:
-    """'🔷 [Codeforces 1421A](url)' — emblem, readable label, no preview embed."""
+def link_line(url: str, title: str | None = None) -> str:
+    """'🔷 [Codeforces 1421A — XORwice](url)' — emblem, reference, problem name.
+
+    Markdown links inside an embed don't generate a preview card.
+    """
     clean = url.strip().strip("<>")
     if not _SCHEME_RE.match(clean):
         clean = "https://" + clean  # markdown links need a scheme to resolve
@@ -121,10 +125,82 @@ def link_line(url: str) -> str:
                 break
     if not label:
         label = host or clean
+    if title and title.lower() not in label.lower():
+        label = f"{label} — {title}"
     # Keep the markdown link intact: strip ] from the label and percent-encode
     # parens in the href so a url can't terminate the link early.
     href = clean.replace("(", "%28").replace(")", "%29")
     return f"{platform_emblem(clean)} [{label.replace(']', '')}]({href})"
+
+
+# Problem-name lookup per platform. Best effort throughout: a failed fetch just
+# leaves the entry showing its reference (e.g. "Codeforces 1421A") on its own.
+_CF_API = "https://codeforces.com/api/problemset.problems"
+_BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/120 Safari/537.36")
+_TITLE_TIMEOUT = 20
+# Where each platform keeps the problem name in its page HTML.
+_TITLE_TAGS = {
+    "projecteuler.net": re.compile(r"<h2[^>]*>(.*?)</h2>", re.S | re.I),
+    "cses.fi": re.compile(r"<h1[^>]*>(.*?)</h1>", re.S | re.I),
+}
+_CF_REF_RE = re.compile(
+    r"/problemset/problem/(\d+)/(\w+)|/contest/(\d+)/problem/(\w+)", re.I)
+
+
+def _cf_ref(url: str) -> str | None:
+    """'1421A' from either codeforces url shape (gym problems aren't in the API)."""
+    m = _CF_REF_RE.search(url)
+    if not m:
+        return None
+    contest, index = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
+    return f"{contest}{index.upper()}"
+
+
+def _strip_tags(html: str) -> str:
+    return unescape(re.sub(r"<[^>]+>", "", html)).strip()
+
+
+async def fetch_problem_titles(session: ClientSession, urls: list[str]) -> dict[str, str]:
+    """Map url -> problem name for the platforms that expose one."""
+    titles: dict[str, str] = {}
+    headers = {"User-Agent": _BROWSER_UA}
+    timeout = ClientTimeout(total=_TITLE_TIMEOUT)
+
+    cf = {u: ref for u in urls if (ref := _cf_ref(u)) and "codeforces.com" in _link_host(u)}
+    if cf:
+        try:
+            async with session.get(_CF_API, headers=headers, timeout=timeout) as resp:
+                data = await resp.json(content_type=None) if resp.status == 200 else {}
+            by_ref = {f"{p.get('contestId')}{p.get('index')}": p.get("name")
+                      for p in (data.get("result") or {}).get("problems") or []}
+            for url, ref in cf.items():
+                if by_ref.get(ref):
+                    titles[url] = by_ref[ref]
+        except Exception as e:
+            print(f"[RECAP] Codeforces name lookup failed: {e!r}")
+
+    for url in urls:
+        if url in titles:
+            continue
+        host = _link_host(url)
+        pattern = next((p for d, p in _TITLE_TAGS.items()
+                        if host == d or host.endswith("." + d)), None)
+        if not pattern:
+            continue
+        try:
+            async with session.get(url, headers=headers, timeout=timeout) as resp:
+                if resp.status != 200:
+                    continue
+                m = pattern.search(await resp.text())
+            if m:
+                name = _strip_tags(m.group(1))
+                if name:
+                    titles[url] = name
+        except Exception as e:
+            print(f"[RECAP] name lookup failed for {url}: {e!r}")
+
+    return titles
 
 
 async def fetch_streamer_submissions(
@@ -331,10 +407,11 @@ async def process_recap(bot, payload: dict):
 
     # 5. Post recap embed
     if recap_entries or streamer_links:
-        await _post_recap_message(bot, recap_entries, streamer_links)
+        await _post_recap_message(bot, session, recap_entries, streamer_links)
 
 
-async def _post_recap_message(bot, entries: list[dict], streamer_links: list[str]):
+async def _post_recap_message(bot, session: ClientSession, entries: list[dict],
+                              streamer_links: list[str]):
     """Build and send the recap embed in the recap channel."""
     channel = bot.get_channel(LEETCODE_RECAP_CHANNEL_ID)
     if not channel:
@@ -355,8 +432,9 @@ async def _post_recap_message(bot, entries: list[dict], streamer_links: list[str
         grouped.setdefault("leetcode.com", []).append(
             f"{leetcode_emblem} [{entry['question_id']}. {entry['problem_name']}]({thread_url})"
         )
+    titles = await fetch_problem_titles(session, streamer_links) if streamer_links else {}
     for url in streamer_links:
-        grouped.setdefault(_link_host(url), []).append(link_line(url))
+        grouped.setdefault(_link_host(url), []).append(link_line(url, titles.get(url)))
 
     lines = []
     for host in sorted(grouped, key=_platform_rank):
