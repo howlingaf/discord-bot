@@ -6,10 +6,9 @@ goes back to its default name.
 
 Design contract:
   * The default is whatever the channel was called before the FIRST rename —
-    captured then and stored, so chained renames can't drift the default.
-    #super-secret-streams is seeded from SECRET_STREAMS_EMPTY_NAME instead, so
-    its long-standing revert-to-empty-name behaviour is unchanged and applies
-    to manual renames there too.
+    captured then and stored, so chained renames can't drift the default. A
+    channel nobody has /renamed has no default and is never touched, so
+    renaming one by hand in Discord sticks.
   * A DB row exists only while an override is live; restoring the default
     deletes it. A startup reconcile restores any room that emptied while the
     bot was down.
@@ -24,7 +23,6 @@ import time
 
 import discord
 
-from .config import SECRET_STREAMS_CHANNEL_ID, SECRET_STREAMS_EMPTY_NAME
 from .database import voice_name_clear, voice_name_get, voice_name_set, voice_names_all
 from .logbus import log_error
 
@@ -47,11 +45,7 @@ def _default_name(channel: discord.VoiceChannel) -> str | None:
     """The name this channel should carry when empty, or None if it has no
     default to restore (never renamed through us)."""
     row = voice_name_get(channel.id)
-    if row:
-        return row["default_name"]
-    if SECRET_STREAMS_CHANNEL_ID and channel.id == SECRET_STREAMS_CHANNEL_ID:
-        return SECRET_STREAMS_EMPTY_NAME
-    return None
+    return row["default_name"] if row else None
 
 
 async def rename(channel: discord.VoiceChannel, name: str, by_user_id: int) -> str:
@@ -122,11 +116,8 @@ async def on_voice_state(bot, before: discord.VoiceState, after: discord.VoiceSt
 async def _reconcile(bot):
     """Restore any room that emptied (or was renamed) while we were down."""
     await bot.wait_until_ready()
-    channel_ids = {row["channel_id"] for row in voice_names_all()}
-    if SECRET_STREAMS_CHANNEL_ID:
-        channel_ids.add(SECRET_STREAMS_CHANNEL_ID)
-    for channel_id in channel_ids:
-        _maybe_revert(bot, channel_id)
+    for row in voice_names_all():
+        _maybe_revert(bot, row["channel_id"])
 
 
 def start(bot) -> None:

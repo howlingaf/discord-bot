@@ -65,8 +65,9 @@ TWITCH_CONSOLE_CHANNEL_ID = int(os.getenv("TWITCH_CONSOLE_CHANNEL_ID") or "0")
 VOICECHAT_SECRET = os.getenv("VOICECHAT_SECRET", "")
 
 # ---------------- Secret Streams ----------------
+# The room's name is no longer managed: it only reverts if someone /renames it,
+# same as any other voice channel. Kept as an id for the attendance rooms below.
 SECRET_STREAMS_CHANNEL_ID = 1409455382564180009
-SECRET_STREAMS_EMPTY_NAME = "super secret streams"
 
 # ---------------- Command Logging ----------------
 COMMAND_LOG_CHANNEL_ID = 1473840278497525872
