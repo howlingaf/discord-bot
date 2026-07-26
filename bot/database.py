@@ -222,6 +222,17 @@ def db_init():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_visits_open ON voice_visits(user_id) WHERE left_at IS NULL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_visits_recency ON voice_visits(left_at, last_join_at)")
 
+        # Last moment the bot was known alive, stamped by the fair-access sweep.
+        # A restart credits dangling voice sessions up to this point instead of
+        # discarding the time (see _startup_fixups).
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS bot_heartbeat (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          at INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+        conn.execute("INSERT OR IGNORE INTO bot_heartbeat(id, at) VALUES(1, 0)")
+
         # ---- Temporary voice channel names (/rename) ----
         # A row exists only while a channel carries a custom name; default_name
         # is the name it had before the first rename, and the row is deleted
@@ -833,6 +844,18 @@ def voice_visits_open() -> list[dict]:
             "FROM voice_visits WHERE left_at IS NULL").fetchall()
         return [{"id": r[0], "user_id": r[1], "channel_id": r[2], "started_at": r[3],
                  "last_join_at": r[4], "left_at": r[5], "seconds": r[6]} for r in rows]
+
+
+def heartbeat_get() -> int:
+    with _db() as conn:
+        r = conn.execute("SELECT at FROM bot_heartbeat WHERE id=1").fetchone()
+        return r[0] if r else 0
+
+
+def heartbeat_set(now: int):
+    with _db() as conn:
+        conn.execute("UPDATE bot_heartbeat SET at=? WHERE id=1", (now,))
+        conn.commit()
 
 
 def _voice_name_row(r) -> dict:

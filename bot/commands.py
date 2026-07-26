@@ -166,7 +166,7 @@ async def fa_cd_release(interaction: discord.Interaction, user: discord.User):
 @app_commands.checks.has_permissions(manage_messages=True)
 async def fa_cd_reset(interaction: discord.Interaction, user: discord.User):
     await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.session_reset(bot, user.id, interaction.user.id)
+    _, msg = await _fa.session_reset(bot, user.id)
     await interaction.followup.send(msg, ephemeral=True)
 
 

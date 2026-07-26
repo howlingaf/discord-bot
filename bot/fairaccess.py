@@ -50,6 +50,8 @@ from .config import (
     VOICE_TIME_ROOMS,
 )
 from .database import (
+    heartbeat_get,
+    heartbeat_set,
     voice_name_get,
     voice_time_totals,
     voice_visit_close,
@@ -134,15 +136,6 @@ def _display_name(bot, user_id: int) -> str:
 
 async def _admin_channel(bot):
     return bot.get_channel(FAIRACCESS_ADMIN_CHANNEL_ID) or await bot.fetch_channel(FAIRACCESS_ADMIN_CHANNEL_ID)
-
-
-async def _log(bot, text: str) -> None:
-    """Append-only action log under the panel. Best-effort, never raises."""
-    try:
-        ch = await _admin_channel(bot)
-        await ch.send(text, allowed_mentions=discord.AllowedMentions.none())
-    except Exception as e:
-        log_error(f"[FAIRACCESS] admin log failed: {e!r}")
 
 
 # ------------------------------------------------------------------ #
@@ -365,8 +358,6 @@ async def _flag(bot, user_id: int, rooms: dict, now: int,
     if window_id is not None:
         fairaccess_window_update(window_id, status="flagged")
     await _apply_all(bot, user_id)
-    by = f" by <@{applied_by}>" if applied_by else ""
-    await _log(bot, f"🚫 Cooldown applied{by}: <@{user_id}>")
 
 
 # ------------------------------------------------------------------ #
@@ -407,7 +398,7 @@ async def whitelist_seed(bot, seeded_by: int) -> tuple[bool, str]:
     return True, f"Seeded {added} member(s) from @{role.name}."
 
 
-async def session_reset(bot, user_id: int, reset_by: int) -> tuple[bool, str]:
+async def session_reset(bot, user_id: int) -> tuple[bool, str]:
     """Zero a user's current session tally. If they're connected right now, a
     fresh window opens immediately so tracking continues from zero."""
     async with _lock:
@@ -423,8 +414,6 @@ async def session_reset(bot, user_id: int, reset_by: int) -> tuple[bool, str]:
             fairaccess_window_update(wid, last_join_at=now,
                                      last_join_channel_id=was_connected[1],
                                      last_activity_at=now)
-    await _log(bot, f"🔄 Session tally reset: <@{user_id}> — was "
-                    f"{_fmt_minutes(bot, rooms)} (by <@{reset_by}>)")
     await render_panel(bot)
     return True, f"Reset <@{user_id}>'s tally (was {_fmt_minutes(bot, rooms)})."
 
@@ -549,6 +538,7 @@ async def render_panel(bot) -> None:
 async def _sweep(bot) -> bool:
     """Expire due cooldowns, settle stale windows, reconcile overwrites."""
     now = _now()
+    heartbeat_set(now)
     changed = False
 
     for cd in fairaccess_cooldowns_due():
@@ -590,6 +580,11 @@ def _startup_fixups(bot, now: int) -> None:
         if not still_there:
             fairaccess_window_update(w["id"], last_join_at=None, last_join_channel_id=None)
             print(f"[FAIRACCESS] cleared dangling join for {w['user_id']} (left during downtime)")
+    # Attendance sessions: a restart must not cost anyone the time they were
+    # sitting on. If they're still in a room the row stays open and the whole
+    # span counts; otherwise credit them up to the last heartbeat — the last
+    # moment we know they were connected — rather than dropping the segment.
+    beat = heartbeat_get()
     for v in voice_visits_open():
         # a session spans the tracked rooms, so "still there" means still in
         # any of them — they may have moved rooms during the downtime
@@ -600,8 +595,8 @@ def _startup_fixups(bot, now: int) -> None:
                 still_there = True
                 break
         if not still_there:
-            # left during downtime: close at the accrued time (in-flight lost)
-            voice_visit_close(v["id"], _now(), add_elapsed=False)
+            credit_to = max(v["last_join_at"], min(beat or now, now))
+            voice_visit_close(v["id"], credit_to)
 
 
 async def _loop(bot) -> None:
