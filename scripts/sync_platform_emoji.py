@@ -25,12 +25,16 @@ sys.path.insert(0, ".")
 
 from bot.config import TOKEN  # noqa: E402
 
-# Source logo per platform. Prefer a square mark; a wordmark gets padded.
+# Source logo per platform — a url, or a path under the repo for marks we build
+# ourselves. Prefer a square mark; a wordmark gets padded.
+#
+# CSES ships only a 4:1 wordmark, which shrinks to unreadable at Discord's ~22px
+# inline size, so assets/emoji/cses.png is a stacked CS/ES lettermark instead.
 SOURCES = {
     "leetcode": "https://leetcode.com/static/images/LeetCode_logo_rvs.png",
     "codeforces": "https://codeforces.org/s/0/favicon-96x96.png",
     "projecteuler": "https://projecteuler.net/favicons/apple-touch-icon.png",
-    "cses": "https://cses.fi/logo.png",
+    "cses": "assets/emoji/cses.png",
 }
 
 _BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -76,8 +80,11 @@ async def main():
                             f"{_API}/applications/{app_id}/emojis/{existing[name]}") as r:
                         print(f"{name:14} deleted {existing[name]} ({r.status})")
 
-                async with web.get(url, headers={"User-Agent": _BROWSER_UA}) as r:
-                    raw = await r.read()
+                if "://" in url:
+                    async with web.get(url, headers={"User-Agent": _BROWSER_UA}) as r:
+                        raw = await r.read()
+                else:
+                    raw = open(url, "rb").read()
                 payload = {"name": name,
                            "image": "data:image/png;base64," + base64.b64encode(
                                _squarify(raw)).decode()}

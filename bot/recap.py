@@ -41,7 +41,7 @@ PLATFORM_EMBLEMS = {
     "leetcode.com": "<:leetcode:1530820116667957298>",
     "codeforces.com": "<:codeforces:1530820117225672890>",
     "projecteuler.net": "<:projecteuler:1530820117879980144>",
-    "cses.fi": "<:cses:1530820118508998656>",
+    "cses.fi": "<:cses:1530822475691196497>",
 }
 _DEFAULT_EMBLEM = "🔗"
 
