@@ -853,18 +853,20 @@ def heartbeat_set(now: int):
 
 
 def voice_time_by_channel(user_id: int, now: int,
-                          exclude_channel_ids: list[int] | None = None) -> list[dict]:
-    """One user's all-time seconds per voice channel, longest first. Open rows
-    include the time accrued since the last join, so it climbs while connected."""
-    skip = list(exclude_channel_ids or [])
-    skip_clause = f" AND channel_id NOT IN ({','.join('?' * len(skip))})" if skip else ""
+                          channel_ids: list[int]) -> list[dict]:
+    """One user's all-time seconds per channel across `channel_ids`, longest
+    first. Open rows include the time accrued since the last join, so the total
+    climbs while they're connected."""
+    if not channel_ids:
+        return []
+    marks = ",".join("?" * len(channel_ids))
     with _db() as conn:
         rows = conn.execute(
             f"SELECT channel_id, SUM(seconds) + SUM(CASE WHEN left_at IS NULL "
             f"THEN MAX(0, ?-last_join_at) ELSE 0 END) AS total "
-            f"FROM voice_visits WHERE user_id=?{skip_clause} "
+            f"FROM voice_visits WHERE user_id=? AND channel_id IN ({marks}) "
             f"GROUP BY channel_id ORDER BY total DESC",
-            (now, user_id, *skip),
+            (now, user_id, *channel_ids),
         ).fetchall()
         return [{"channel_id": r[0], "seconds": r[1] or 0} for r in rows]
 

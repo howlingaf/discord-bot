@@ -48,7 +48,7 @@ from .config import (
     GUILD_ID,
     STREAMER_DISCORD_ID,
     VOICE_TIME_EXCLUDE_IDS,
-    VOICE_TIME_HOST_EXCLUDE_ROOMS,
+    VOICE_TIME_HOST_ROOMS,
     VOICE_TIME_ROOMS,
 )
 from .database import (
@@ -507,20 +507,18 @@ def _build_panel(bot) -> discord.ui.LayoutView:
         discord.ui.TextDisplay("\n".join(feed_lines) or "*no time logged yet*"),
         accent_color=0x4E5058))
 
-    # ---- the host's own time, every voice channel bar the excluded ones ----
+    # ---- the host's own time across their rooms ----
     if STREAMER_DISCORD_ID:
-        rooms = voice_time_by_channel(STREAMER_DISCORD_ID, _now(),
-                                      VOICE_TIME_HOST_EXCLUDE_ROOMS)
+        rooms = voice_time_by_channel(STREAMER_DISCORD_ID, _now(), VOICE_TIME_HOST_ROOMS)
         total = sum(r["seconds"] for r in rooms) // 60
         body = [f"**{total // 60}h {total % 60}m** total"]
         body += [f"#{_room_name(bot, r['channel_id'])} · {r['seconds'] // 60} min"
-                 for r in rooms[:8] if r["seconds"] >= 60]
+                 for r in rooms if r["seconds"] >= 60]
         view.add_item(discord.ui.Container(
             discord.ui.TextDisplay(f"### <@{STREAMER_DISCORD_ID}>'s voice time"),
             discord.ui.TextDisplay("\n".join(body) if rooms else "*no time logged yet*"),
             discord.ui.TextDisplay(
-                "-# Every voice channel except "
-                + ", ".join(f"#{_room_name(bot, c)}" for c in VOICE_TIME_HOST_EXCLUDE_ROOMS)),
+                "-# " + " · ".join(f"#{_room_name(bot, c)}" for c in VOICE_TIME_HOST_ROOMS)),
             accent_color=0xFAA61A))
 
     return view
