@@ -12,7 +12,6 @@ from .config import (
     LEETCODE_PROBLEM_URL,
     LEETCODE_BASE,
     LEETCODE_PROBLEMS_CHANNEL_ID,
-    LEETCODE_EMOJI,
     LEETCODE_DAILY_NOTIF_CHANNEL_ID,
     MAX_EXAMPLES,
     LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
@@ -196,7 +195,7 @@ def build_daily_embeds(daily: dict, rating: float | None = None) -> list[discord
 
     embeds: list[discord.Embed] = []
 
-    header_line = f"{LEETCODE_EMOJI} {diff_emoji} **{difficulty}**"
+    header_line = f"{diff_emoji} **{difficulty}**"
     if rating:
         header_line += f" · {format_rating(rating)}"
     if q.get("isPaidOnly"):
@@ -340,7 +339,7 @@ async def _create_problem_forum_post(bot, data: dict) -> tuple[int | None, str]:
     rating = await zerotrac_rating_for(bot.http_session, title_slug)
     embeds = build_daily_embeds(data, rating)
 
-    tag_names = [q.get("difficulty") or ""]
+    tag_names = ["LeetCode", q.get("difficulty") or ""]
     if q.get("isPaidOnly"):
         tag_names.append("Premium")
     tags = _find_forum_tags(forum, tag_names)
@@ -459,7 +458,7 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
     if thread_id is None:
         embeds = build_daily_embeds(daily, rating)
         try:
-            tag_names = [q.get("difficulty") or ""]
+            tag_names = ["LeetCode", q.get("difficulty") or ""]
             if q.get("isPaidOnly"):
                 tag_names.append("Premium")
             tags = _find_forum_tags(forum, tag_names)

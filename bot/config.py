@@ -108,11 +108,11 @@ VOICE_TIME_ROOMS = [
 VOICE_TIME_EXCLUDE_IDS = [
     int(x) for x in (os.getenv("VOICE_TIME_EXCLUDE_IDS") or "").replace(" ", "").split(",") if x
 ] or [1236756328307757157]  # howlingaf
+# The one room /name can rename (#chillin). 0 disables the command's effect.
+VOICE_NAME_CHANNEL_ID = int(os.getenv("VOICE_NAME_CHANNEL_ID") or "1529599559167246548")
 # The host gets their own card instead, totalling their time in these rooms:
 # #general, #co-working, #chillin. An explicit list rather than "everything but
 # #on-stream", so a voice channel added later doesn't silently start counting.
-# The one room /name can rename (#chillin). 0 disables the command's effect.
-VOICE_NAME_CHANNEL_ID = int(os.getenv("VOICE_NAME_CHANNEL_ID") or "1529599559167246548")
 VOICE_TIME_HOST_ROOMS = [
     int(x) for x in (os.getenv("VOICE_TIME_HOST_ROOMS") or "").replace(" ", "").split(",") if x
 ] or [1409455382564180009, 1482589316520739077, 1529599559167246548]
