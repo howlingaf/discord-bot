@@ -42,9 +42,9 @@ async def spotifylink(interaction: discord.Interaction):
         await interaction.response.send_message("\u274c I can't DM you.", ephemeral=True)
 
 
-@bot.tree.command(name="problem", description="Look up or create a forum post for a LeetCode problem by ID.")
+@bot.tree.command(name="lc", description="Look up or create a forum post for a LeetCode problem by ID.")
 @app_commands.describe(question_id="The LeetCode problem number (e.g. 67)")
-async def problem(interaction: discord.Interaction, question_id: int):
+async def lc(interaction: discord.Interaction, question_id: int):
     if question_id < 1:
         await interaction.response.send_message("\u274c Invalid problem ID.", ephemeral=True)
         return
@@ -62,6 +62,17 @@ async def problem(interaction: discord.Interaction, question_id: int):
         # Surface the real failure instead of always blaming the problem ID \u2014
         # the genuine "not found" case is already handled by the err branch above.
         await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
+
+
+# Kept only to point people at the new name \u2014 Discord still offers /problem in
+# the picker for anyone who learned it, and a silent "unknown command" would
+# read as the bot being broken.
+@bot.tree.command(name="problem", description="Renamed \u2014 use /lc instead.")
+@app_commands.describe(question_id="The LeetCode problem number (e.g. 67)")
+async def problem(interaction: discord.Interaction, question_id: int | None = None):
+    hint = f"/lc {question_id}" if question_id else "/lc {id}"
+    await interaction.response.send_message(
+        f"That's `{hint}` now.", ephemeral=True)
 
 
 @bot.tree.command(name="twitch-unlink", description="(Admin) Forget a Twitch\u2194Discord link so the handle can be re-prompted.")

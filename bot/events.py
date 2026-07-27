@@ -6,7 +6,7 @@ from .config import (
     COMMAND_LOG_CHANNEL_ID,
 )
 from .spotify import count_humans_in_channel, handle_spotify_auto_pause
-from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler, leetcode_premium_weekly_scheduler
+from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler
 from .voicechat import on_voice_update
 from .logbus import log_error, start as logbus_start
 from .fairaccess import start as fairaccess_start, on_voice_state as fairaccess_voice
@@ -36,10 +36,6 @@ async def on_ready():
     if not getattr(bot, "_contest_task_started", False):
         bot._contest_task_started = True
         bot.loop.create_task(leetcode_contest_scheduler(bot))
-
-    if not getattr(bot, "_premium_weekly_task_started", False):
-        bot._premium_weekly_task_started = True
-        bot.loop.create_task(leetcode_premium_weekly_scheduler(bot))
 
     # fair-access cooldown system (tracked rooms + admin panel)
     fairaccess_start(bot)
