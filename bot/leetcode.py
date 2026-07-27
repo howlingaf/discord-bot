@@ -170,7 +170,7 @@ async def _get_or_create_forum_tag(forum: discord.ForumChannel, name: str) -> di
     raise RuntimeError(f"Could not create forum tag '{name}'")
 
 
-def build_daily_embeds(daily: dict) -> list[discord.Embed]:
+def build_daily_embeds(daily: dict, rating: float | None = None) -> list[discord.Embed]:
     link = daily.get("link") or ""
     q = daily.get("question") or {}
     qid = q.get("questionFrontendId") or q.get("questionId") or ""
@@ -198,6 +198,8 @@ def build_daily_embeds(daily: dict) -> list[discord.Embed]:
     embeds: list[discord.Embed] = []
 
     header_line = f"{diff_emoji} **{difficulty}**"
+    if rating:
+        header_line += f" · {format_rating(rating)}"
     if q.get("isPaidOnly"):
         header_line += " \U0001f512 Premium"
 
@@ -336,7 +338,8 @@ async def _create_problem_forum_post(bot, data: dict) -> tuple[int | None, str]:
         return None, "problems channel is not a forum channel"
 
     thread_name = f"{qid}. {qtitle}".strip(". ")[:100] if qid else qtitle[:100]
-    embeds = build_daily_embeds(data)
+    rating = await zerotrac_rating_for(bot.http_session, title_slug)
+    embeds = build_daily_embeds(data, rating)
 
     tag_names = [q.get("difficulty") or ""]
     if q.get("isPaidOnly"):
@@ -448,11 +451,14 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
 
     thread_name = f"{qid}. {qtitle}".strip(". ")[:100] if qid else qtitle[:100]
 
+    # one lookup, shared by the forum post and the notification card below
+    rating = await zerotrac_rating_for(bot.http_session, title_slug) if bot.http_session else None
+
     existing = leetcode_get_problem(qid)
     thread_id = existing["thread_id"] if existing else None
 
     if thread_id is None:
-        embeds = build_daily_embeds(daily)
+        embeds = build_daily_embeds(daily, rating)
         try:
             tag_names = [q.get("difficulty") or ""]
             if q.get("isPaidOnly"):
@@ -511,7 +517,6 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
 
         notif_title = f"{qid}. {qtitle}" if qid else qtitle
 
-        rating = await zerotrac_rating_for(bot.http_session, title_slug) if bot.http_session else None
         head = f"{diff_emoji} **{difficulty}**"
         if rating:
             head += f" · {format_rating(rating)}"
