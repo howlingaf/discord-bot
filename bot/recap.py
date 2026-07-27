@@ -8,6 +8,7 @@ from aiohttp import ClientSession, ClientTimeout
 from .config import (
     GUILD_ID,
     LEETCODE_BASE,
+    LEETCODE_EMOJI,
     LEETCODE_SUBMISSIONS_URL,
     LEETCODE_RECAP_CHANNEL_ID,
     STREAMER_NAME,
@@ -38,7 +39,7 @@ DSA_LINK_DOMAINS = (
 # platform logos, uploaded as APPLICATION emoji (owned by the bot, usable in any
 # server, no guild emoji slots consumed) — see scripts/sync_platform_emoji.py.
 PLATFORM_EMBLEMS = {
-    "leetcode.com": "<:leetcode:1530820116667957298>",
+    "leetcode.com": LEETCODE_EMOJI,
     "codeforces.com": "<:codeforces:1530820117225672890>",
     "projecteuler.net": "<:projecteuler:1530820117879980144>",
     "cses.fi": "<:cses:1530822475691196497>",

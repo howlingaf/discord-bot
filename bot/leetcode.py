@@ -12,6 +12,7 @@ from .config import (
     LEETCODE_PROBLEM_URL,
     LEETCODE_BASE,
     LEETCODE_PROBLEMS_CHANNEL_ID,
+    LEETCODE_EMOJI,
     LEETCODE_DAILY_NOTIF_CHANNEL_ID,
     MAX_EXAMPLES,
     LEETCODE_WEEKLY_FORUM_CHANNEL_ID,
@@ -195,7 +196,7 @@ def build_daily_embeds(daily: dict, rating: float | None = None) -> list[discord
 
     embeds: list[discord.Embed] = []
 
-    header_line = f"{diff_emoji} **{difficulty}**"
+    header_line = f"{LEETCODE_EMOJI} {diff_emoji} **{difficulty}**"
     if rating:
         header_line += f" · {format_rating(rating)}"
     if q.get("isPaidOnly"):

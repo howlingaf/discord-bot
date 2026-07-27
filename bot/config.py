@@ -43,6 +43,10 @@ STREAMER_DISCORD_ID = SPOTIFY_ALLOWED_USER_ID
 
 # ---------------- LeetCode Problems Forum ----------------
 LEETCODE_PROBLEMS_CHANNEL_ID = 1472231552607064144
+# Application emoji carrying the LeetCode logo — owned by the bot, so it renders
+# in any server it's in and costs no guild emoji slot. Shared by the problem
+# cards and the recap's platform emblems (scripts/sync_platform_emoji.py).
+LEETCODE_EMOJI = os.getenv("LEETCODE_EMOJI") or "<:leetcode:1530820116667957298>"
 LEETCODE_DAILY_NOTIF_CHANNEL_ID = 1472396200409043086
 
 # ---------------- LeetCode Contests ----------------
