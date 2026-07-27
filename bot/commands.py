@@ -8,12 +8,14 @@ from .config import (
     SPOTIFY_ALLOWED_USER_ID,
     GUILD_ID,
     TWITCH_CONSOLE_CHANNEL_ID,
+    VOICE_NAME_CHANNEL_ID,
 )
 from .twitchconsole import call_console
 from .spotify import dm_spotify_link
 from .leetcode import get_or_create_problem_post
 from .database import twitch_link_delete
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
+from .voicenames import rename as vc_rename
 from .logbus import log_error
 from .client import bot
 
@@ -62,6 +64,30 @@ async def lc(interaction: discord.Interaction, question_id: int):
         # Surface the real failure instead of always blaming the problem ID \u2014
         # the genuine "not found" case is already handled by the err branch above.
         await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
+
+
+@bot.tree.command(name="name", description="Temporarily rename the chill voice channel while you're in it.")
+@app_commands.describe(name="What to call it until you leave")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def name_channel(interaction: discord.Interaction, name: app_commands.Range[str, 1, 100]):
+    channel = bot.get_channel(VOICE_NAME_CHANNEL_ID)
+    if not isinstance(channel, discord.VoiceChannel):
+        await interaction.response.send_message("That channel isn't set up.", ephemeral=True)
+        return
+
+    member = interaction.user
+    if not isinstance(member, discord.Member) or not any(m.id == member.id for m in channel.members):
+        await interaction.response.send_message(
+            f"Join {channel.mention} first \u2014 the name lasts while you're in there.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    try:
+        msg = await vc_rename(channel, name, member.id)
+    except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
+        msg = f"Failed: {e}"
+    await interaction.followup.send(msg, ephemeral=True)
 
 
 # Kept only to point people at the new name \u2014 Discord still offers /problem in

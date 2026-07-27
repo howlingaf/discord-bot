@@ -10,6 +10,7 @@ from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler
 from .voicechat import on_voice_update
 from .logbus import log_error, start as logbus_start
 from .fairaccess import start as fairaccess_start, on_voice_state as fairaccess_voice
+from .voicenames import on_voice_state as voicenames_voice, start as voicenames_start
 from .client import bot
 
 
@@ -40,6 +41,9 @@ async def on_ready():
     # fair-access cooldown system (tracked rooms + admin panel)
     fairaccess_start(bot)
 
+    # restore the chill room's name if whoever renamed it left while we were down
+    voicenames_start(bot)
+
 
 
 @bot.event
@@ -63,6 +67,12 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                         await handle_spotify_auto_pause(bot.http_session, member_count)
     except Exception as e:
         log_error(f"[VOICE] spotify auto-pause failed: {e!r}")
+
+    # --- Temporary channel name: revert once the setter leaves ---
+    try:
+        await voicenames_voice(bot, member, before, after)
+    except Exception as e:
+        log_error(f"[VOICE] name revert failed: {e!r}")
 
     # --- Fair-access tracked-room tally/cooldowns + attendance sessions ---
     try:
