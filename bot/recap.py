@@ -89,8 +89,29 @@ def is_dsa_link(url: str) -> bool:
     return any(host == d or host.endswith("." + d) for d in DSA_LINK_DOMAINS)
 
 
+def _match_link(url: str) -> tuple[str | None, str] | None:
+    """(platform, problem reference) for a problem URL, else None. Blog posts,
+    profiles, standings and section indexes on these domains all return None."""
+    clean = url.strip().strip("<>")
+    if not _SCHEME_RE.match(clean):
+        clean = "https://" + clean
+    host = _link_host(clean)
+    for domain, pattern, build in _LINK_PATTERNS:
+        if host == domain or host.endswith("." + domain):
+            m = pattern.search(clean)
+            if m:
+                return build(m)
+    return None
+
+
+def is_problem_link(url: str) -> bool:
+    """A recap entry has to be a problem — /blog/entry/... on codeforces.com is
+    still a DSA-site link, but it isn't something that was solved on stream."""
+    return is_dsa_link(url) and _match_link(url) is not None
+
+
 def filter_dsa_links(links: list[str]) -> list[str]:
-    return [u for u in links if is_dsa_link(u)]
+    return [u for u in links if is_problem_link(u)]
 
 
 def _link_host(url: str) -> str:
@@ -122,13 +143,7 @@ def link_line(url: str, title: str | None = None) -> str:
     if not _SCHEME_RE.match(clean):
         clean = "https://" + clean  # markdown links need a scheme to resolve
     host = _link_host(clean)
-    platform, ref = None, ""
-    for domain, pattern, build in _LINK_PATTERNS:
-        if host == domain or host.endswith("." + domain):
-            m = pattern.search(clean)
-            if m:
-                platform, ref = build(m)
-                break
+    platform, ref = _match_link(clean) or (None, "")
 
     if not ref:
         label = host or clean
