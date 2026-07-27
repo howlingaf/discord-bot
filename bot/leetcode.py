@@ -1328,6 +1328,9 @@ async def check_and_update_contest_ratings(bot) -> int:
 
 
 async def leetcode_contest_scheduler(bot):
+    if not any(CONTEST_FORUM_CHANNEL_MAP.values()):
+        print("\u23ed\ufe0f  LeetCode contest scheduler disabled (no contest forum configured)")
+        return
     await bot.wait_until_ready()
     await asyncio.sleep(5)
     print("\u2705 LeetCode contest scheduler started")

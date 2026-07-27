@@ -46,8 +46,11 @@ LEETCODE_PROBLEMS_CHANNEL_ID = 1472231552607064144
 LEETCODE_DAILY_NOTIF_CHANNEL_ID = 1472396200409043086
 
 # ---------------- LeetCode Contests ----------------
-LEETCODE_WEEKLY_FORUM_CHANNEL_ID   = int(os.getenv("LEETCODE_WEEKLY_FORUM_CHANNEL_ID",  "1474259972941418496"))
-LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID = int(os.getenv("LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID", "1474260036900360193"))
+# Contest forums. 0 disables contest posting entirely — the scheduler exits at
+# startup and nothing is posted. Set both to a forum channel id to turn weekly /
+# biweekly contest threads back on.
+LEETCODE_WEEKLY_FORUM_CHANNEL_ID   = int(os.getenv("LEETCODE_WEEKLY_FORUM_CHANNEL_ID",  "0"))
+LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID = int(os.getenv("LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID", "0"))
 
 # ---------------- Recap ----------------
 RECAP_SECRET = os.getenv("RECAP_SECRET", "")
