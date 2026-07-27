@@ -511,7 +511,8 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
 
         notif_title = f"{qid}. {qtitle}" if qid else qtitle
 
-        desc_lines = [f"{diff_emoji} **{difficulty}**"]
+        rating = await zerotrac_rating_for(bot.http_session, title_slug) if bot.http_session else None
+        desc_lines = [f"{diff_emoji} **{difficulty}** · {format_rating(rating)}"]
 
         # Problem statement – strip examples, constraints, follow-up
         content_html = q.get("content") or ""
@@ -690,6 +691,32 @@ async def get_zerotrac_data(session: ClientSession) -> list[dict]:
     await asyncio.to_thread(zerotrac_cache_upsert_all, entries)
     print(f"[ZEROTRAC] Cache refreshed ({len(entries)} entries)")
     return entries
+
+
+async def zerotrac_rating_for(session: ClientSession, title_slug: str) -> float | None:
+    """This problem's zerotrac rating, or None if it has none.
+
+    Only problems that appeared in a rated contest get one, and a rating shows
+    up a while after the contest — so a brand-new problem can be missing here
+    and gain a rating later. Never raises: no data means no rating.
+    """
+    if not title_slug:
+        return None
+    try:
+        cached = zerotrac_cache_get_all()
+        if title_slug in cached:
+            return cached[title_slug].get("rating")
+        for entry in await get_zerotrac_data(session):
+            if entry.get("title_slug") == title_slug:
+                return entry.get("rating")
+    except Exception as e:
+        log_error(f"[ZEROTRAC] rating lookup failed for {title_slug}: {e!r}")
+    return None
+
+
+def format_rating(rating: float | None) -> str:
+    """'⭐ 1523' or '⭐ Unrated' — the card always carries the line."""
+    return f"⭐ {round(rating)}" if rating else "⭐ Unrated"
 
 
 def build_contest_forum_embed(
