@@ -512,7 +512,10 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
         notif_title = f"{qid}. {qtitle}" if qid else qtitle
 
         rating = await zerotrac_rating_for(bot.http_session, title_slug) if bot.http_session else None
-        desc_lines = [f"{diff_emoji} **{difficulty}** · {format_rating(rating)}"]
+        head = f"{diff_emoji} **{difficulty}**"
+        if rating:
+            head += f" · {format_rating(rating)}"
+        desc_lines = [head]
 
         # Problem statement – strip examples, constraints, follow-up
         content_html = q.get("content") or ""
@@ -715,8 +718,9 @@ async def zerotrac_rating_for(session: ClientSession, title_slug: str) -> float 
 
 
 def format_rating(rating: float | None) -> str:
-    """'⭐ 1523' or '⭐ Unrated' — the card always carries the line."""
-    return f"⭐ {round(rating)}" if rating else "⭐ Unrated"
+    """'1523', or '' when the problem has no zerotrac rating — an unrated
+    problem shows nothing rather than the word 'Unrated'."""
+    return str(round(rating)) if rating else ""
 
 
 def build_contest_forum_embed(
