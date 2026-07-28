@@ -141,8 +141,13 @@ async def problem_meta(session: ClientSession, ref: str) -> dict | None:
     return codeforces_cache_get(ref)
 
 
-def build_embed(ref: str, meta: dict | None) -> discord.Embed:
-    """Reference card: name, rating, contest, tags, link."""
+def build_embed(ref: str, meta: dict | None, source_url: str = "") -> discord.Embed:
+    """Reference card: name, rating, contest, tags, link.
+
+    `source_url` is the link the problem was shared with. It becomes the card's
+    link when the API doesn't know the problem — an EDU or gym problem has no
+    working /problemset/ URL, so synthesising one would point at a 403.
+    """
     name = (meta or {}).get("name") or ""
     rating = (meta or {}).get("rating")
     emoji, colour = _band(rating)
@@ -155,7 +160,10 @@ def build_embed(ref: str, meta: dict | None) -> discord.Embed:
     if (meta or {}).get("tags"):
         parts.append("\n" + " · ".join(f"`{t}`" for t in meta["tags"]))
 
-    return discord.Embed(title=title[:256], url=problem_url(ref),
+    link = problem_url(ref) if meta else (source_url or problem_url(ref))
+    if not meta:
+        parts.append("-# not in the public problemset — no name or rating available")
+    return discord.Embed(title=title[:256], url=link,
                          description="\n".join(parts), color=colour)
 
 
@@ -180,6 +188,7 @@ async def get_or_create_problem_post(bot, text: str) -> tuple[int | None, str]:
             return existing["thread_id"], ""
 
         meta = await problem_meta(bot.http_session, ref)
+        source_url = text.strip().strip("<>")
         forum = (bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
                  or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID))
         if not isinstance(forum, discord.ForumChannel):
@@ -192,7 +201,7 @@ async def get_or_create_problem_post(bot, text: str) -> tuple[int | None, str]:
         try:
             result = await forum.create_thread(
                 name=thread_name,
-                embed=build_embed(ref, meta),
+                embed=build_embed(ref, meta, source_url),
                 applied_tags=tags,
                 reason=f"Codeforces problem post for {ref}",
             )
@@ -201,5 +210,6 @@ async def get_or_create_problem_post(bot, text: str) -> tuple[int | None, str]:
             return None, f"could not create the post: {e}"
 
         thread = result.thread if hasattr(result, "thread") else result
-        codeforces_problem_save(ref, name, (meta or {}).get("rating"), thread.id)
+        codeforces_problem_save(ref, name, (meta or {}).get("rating"), thread.id,
+                                source_url if not meta else problem_url(ref))
         return thread.id, ""

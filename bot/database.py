@@ -163,9 +163,14 @@ def db_init():
           name       TEXT NOT NULL,
           rating     INTEGER,
           thread_id  INTEGER NOT NULL,
-          created_at INTEGER NOT NULL DEFAULT 0
+          created_at INTEGER NOT NULL DEFAULT 0,
+          url        TEXT NOT NULL DEFAULT ''
         )
         """)
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(codeforces_problems)")}
+        if "url" not in existing_cols:
+            conn.execute("ALTER TABLE codeforces_problems ADD COLUMN url TEXT NOT NULL DEFAULT ''")
+            print("[DB] Added missing column 'url' to codeforces_problems")
 
         # ---- Fair-access cooldown system ----
         # Singleton runtime state: when the tracked rooms last all went empty
@@ -909,13 +914,15 @@ def codeforces_problem_get(ref: str) -> dict | None:
         return {"ref": r[0], "name": r[1], "rating": r[2], "thread_id": r[3]} if r else None
 
 
-def codeforces_problem_save(ref: str, name: str, rating: int | None, thread_id: int):
+def codeforces_problem_save(ref: str, name: str, rating: int | None, thread_id: int,
+                            url: str = ""):
     with _db() as conn:
         conn.execute(
-            "INSERT INTO codeforces_problems(ref, name, rating, thread_id, created_at) "
-            "VALUES(?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET "
-            "name=excluded.name, rating=excluded.rating, thread_id=excluded.thread_id",
-            (ref, name, rating, thread_id, int(time.time())))
+            "INSERT INTO codeforces_problems(ref, name, rating, thread_id, created_at, url) "
+            "VALUES(?,?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET "
+            "name=excluded.name, rating=excluded.rating, thread_id=excluded.thread_id, "
+            "url=excluded.url",
+            (ref, name, rating, thread_id, int(time.time()), url))
         conn.commit()
 
 
