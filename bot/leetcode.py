@@ -331,6 +331,12 @@ async def _create_problem_forum_post(bot, data: dict) -> tuple[int | None, str]:
     if not qtitle:
         return None, "problem has no title"
 
+    # Premium problems are paywalled, so a post about one is a statement most
+    # members can't open. Refused here rather than at each caller, so /lc, the
+    # daily poster and the recap are all covered by the one check.
+    if q.get("isPaidOnly"):
+        return None, f"**{qtitle}** is a LeetCode Premium problem — not posted."
+
     forum = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
     if not isinstance(forum, discord.ForumChannel):
         return None, "problems channel is not a forum channel"
@@ -339,10 +345,7 @@ async def _create_problem_forum_post(bot, data: dict) -> tuple[int | None, str]:
     rating = await zerotrac_rating_for(bot.http_session, title_slug)
     embeds = build_daily_embeds(data, rating)
 
-    tag_names = ["LeetCode", q.get("difficulty") or ""]
-    if q.get("isPaidOnly"):
-        tag_names.append("Premium")
-    tags = _find_forum_tags(forum, tag_names)
+    tags = _find_forum_tags(forum, ["LeetCode", q.get("difficulty") or ""])
 
     result = await forum.create_thread(
         name=thread_name,
@@ -436,6 +439,13 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
         if state and state["date"] == date_ts:
             return False, f"already posted for date={date}"
 
+    # Premium problems are never posted. Stamp the day as handled anyway, or the
+    # 5-minute poller would re-fetch and re-skip it until midnight.
+    if q.get("isPaidOnly"):
+        leetcode_set_daily_state(question_id=qid, title_slug=title_slug,
+                                 title=qtitle, date=date_ts)
+        return False, f"daily {title_slug} is premium — skipped"
+
     # --- Forum post (look up DB, then create if needed) ---
     forum = bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID) or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
     if not isinstance(forum, discord.ForumChannel):
@@ -458,10 +468,7 @@ async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]
     if thread_id is None:
         embeds = build_daily_embeds(daily, rating)
         try:
-            tag_names = ["LeetCode", q.get("difficulty") or ""]
-            if q.get("isPaidOnly"):
-                tag_names.append("Premium")
-            tags = _find_forum_tags(forum, tag_names)
+            tags = _find_forum_tags(forum, ["LeetCode", q.get("difficulty") or ""])
             if daily_tag:
                 tags = [t for t in tags if t.id != daily_tag.id] + [daily_tag]
             result = await forum.create_thread(
