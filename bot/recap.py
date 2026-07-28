@@ -299,6 +299,7 @@ async def process_recap(bot, payload: dict):
     stream_end = int(payload.get("stream_end") or 0)
     stream_problems = payload.get("stream_problems") or []
     chatter_submissions = payload.get("chatter_submissions") or []
+    stream_title = (payload.get("stream_title") or "").strip()
     raw_links = payload.get("streamer_links") or []
     streamer_links = filter_dsa_links(raw_links)
     dropped = len(raw_links) - len(streamer_links)
@@ -442,11 +443,12 @@ async def process_recap(bot, payload: dict):
 
     # 5. Post recap embed
     if recap_entries or streamer_links:
-        await _post_recap_message(bot, session, recap_entries, streamer_links)
+        await _post_recap_message(bot, session, recap_entries, streamer_links,
+                                  stream_title)
 
 
 async def _post_recap_message(bot, session: ClientSession, entries: list[dict],
-                              streamer_links: list[str]):
+                              streamer_links: list[str], stream_title: str = ""):
     """Build and send the recap embed in the recap channel."""
     channel = bot.get_channel(LEETCODE_RECAP_CHANNEL_ID)
     if not channel:
@@ -490,8 +492,12 @@ async def _post_recap_message(bot, session: ClientSession, entries: list[dict],
         lines.extend(grouped[host])
 
     blocks = _chunk_lines(lines, limit=4096) if lines else []
+    # The stream's Twitch title, captured when it went live. Older twitch-bot
+    # builds don't send one, and a stream can go live with an empty title, so
+    # the plain heading stays as the fallback.
+    heading = f"Problem Recap from {stream_title}" if stream_title else "Problem Recap"
     embed = discord.Embed(
-        title="Stream Recap",
+        title=heading[:256],
         description=blocks[0] if blocks else None,
         color=0xFFA116,
     )
