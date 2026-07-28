@@ -56,11 +56,21 @@ _URL_RE = re.compile(
 _UNSUPPORTED_RE = re.compile(r"/(?:edu|gym)/", re.I)
 _BARE_RE = re.compile(r"^\s*(\d+)\s*([A-Za-z]\d?)\s*$")
 
-# Rating bands set to Codeforces' own quartiles over the rated problemset
-# (p25=1300, p75=2400, n=11006): green is the easiest quarter, yellow the middle
-# half, red the hardest quarter. Eyeballed thresholds put ~80% of problems in
-# the top two bands, which told you almost nothing.
-_BANDS = ((1300, "🟢", 0x00B8A3), (2400, "🟡", 0xFFC01E), (10_000, "🔴", 0xFF375F))
+# Codeforces ratings and LeetCode/zerotrac ratings are separate scales — the
+# same number sits at a different percentile in each pool — so a difficulty is
+# derived by RANK, not by number: the cut points are where Codeforces' rated
+# problemset splits in the same proportions LeetCode's does (23.5/50.2/26.3).
+# That lands on <1200 / <2400, which reproduces the split to within ~3 points
+# (20.6/52.1/27.3) and lets a Codeforces problem carry the same Easy/Medium/Hard
+# forum tag as a LeetCode one.
+#
+# It normalises problem POOLS, not solver experience: "Medium" means as hard,
+# relative to Codeforces' catalogue, as a LeetCode Medium is to LeetCode's.
+_BANDS = (
+    (1200, "Easy", "🟢", 0x00B8A3),
+    (2400, "Medium", "🟡", 0xFFC01E),
+    (10_000, "Hard", "🔴", 0xFF375F),
+)
 
 _lock = asyncio.Lock()
 
@@ -89,14 +99,24 @@ def problem_url(ref: str) -> str:
     return f"{BASE}/problemset/problem/{m.group(1)}/{m.group(2)}"
 
 
-def _band(rating: int | None) -> tuple[str, int]:
-    """(emoji, embed colour) for a rating — grey when Codeforces has none yet."""
+def difficulty_label(rating: int | None) -> str | None:
+    """'Easy' | 'Medium' | 'Hard' for a Codeforces rating, None when unrated."""
     if not rating:
-        return "⚪", 0x808080
-    for ceiling, emoji, colour in _BANDS:
+        return None
+    for ceiling, label, _emoji, _colour in _BANDS:
         if rating < ceiling:
-            return emoji, colour
-    return "🔴", 0xFF375F
+            return label
+    return "Hard"
+
+
+def _band(rating: int | None) -> tuple[str, str, int]:
+    """(label, emoji, embed colour) — grey and unlabelled when unrated."""
+    if not rating:
+        return "Unrated", "⚪", 0x808080
+    for ceiling, label, emoji, colour in _BANDS:
+        if rating < ceiling:
+            return label, emoji, colour
+    return "Hard", "🔴", 0xFF375F
 
 
 async def refresh_cache(session: ClientSession) -> int:
@@ -156,10 +176,11 @@ def build_embed(ref: str, meta: dict | None, source_url: str = "") -> discord.Em
     """
     name = (meta or {}).get("name") or ""
     rating = (meta or {}).get("rating")
-    emoji, colour = _band(rating)
+    label, emoji, colour = _band(rating)
 
     title = f"{ref}. {name}" if name else ref
-    header = f"{emoji} **{rating}**" if rating else f"{emoji} **Unrated**"
+    # Same shape as the LeetCode card: difficulty, then the platform's rating.
+    header = f"{emoji} **{label}** · {rating}" if rating else f"{emoji} **Unrated**"
     # Blank line under the rating so it reads as a header, matching the gap the
     # LeetCode card puts between its difficulty line and the statement.
     parts = [header, ""]
@@ -207,7 +228,8 @@ async def get_or_create_problem_post(bot, text: str) -> tuple[int | None, str]:
 
         name = (meta or {}).get("name") or ""
         thread_name = (f"{ref}. {name}" if name else ref)[:100]
-        tags = [t for t in forum.available_tags if t.name == "Codeforces"]
+        wanted = {"Codeforces", difficulty_label((meta or {}).get("rating"))}
+        tags = [t for t in forum.available_tags if t.name in wanted]
 
         try:
             result = await forum.create_thread(
