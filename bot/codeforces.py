@@ -56,8 +56,11 @@ _URL_RE = re.compile(
 _UNSUPPORTED_RE = re.compile(r"/(?:edu|gym)/", re.I)
 _BARE_RE = re.compile(r"^\s*(\d+)\s*([A-Za-z]\d?)\s*$")
 
-# Rating bands, mirroring how the LeetCode card colours difficulty.
-_BANDS = ((1200, "🟢", 0x00B8A3), (1900, "🟡", 0xFFC01E), (10_000, "🔴", 0xFF375F))
+# Rating bands set to Codeforces' own quartiles over the rated problemset
+# (p25=1300, p75=2400, n=11006): green is the easiest quarter, yellow the middle
+# half, red the hardest quarter. Eyeballed thresholds put ~80% of problems in
+# the top two bands, which told you almost nothing.
+_BANDS = ((1300, "🟢", 0x00B8A3), (2400, "🟡", 0xFFC01E), (10_000, "🔴", 0xFF375F))
 
 _lock = asyncio.Lock()
 
