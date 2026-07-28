@@ -138,6 +138,35 @@ def db_init():
         )
         """)
 
+        # ---- Codeforces ----
+        # Mirror of the problemset API (name, official rating, tags, contest),
+        # refreshed weekly — the same shape as zerotrac_cache does for LeetCode.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS codeforces_cache (
+          ref          TEXT PRIMARY KEY,      -- "1421A": contestId + index
+          contest_id   INTEGER NOT NULL,
+          idx          TEXT NOT NULL,
+          name         TEXT NOT NULL,
+          rating       INTEGER,               -- NULL until Codeforces publishes one
+          tags         TEXT NOT NULL DEFAULT '',
+          contest_name TEXT NOT NULL DEFAULT '',
+          updated_at   INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+
+        # Posted Codeforces problems. Separate from leetcode_problems: the two
+        # platforms key differently (ref vs question id) and carry different
+        # metadata, so they don't share a table.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS codeforces_problems (
+          ref        TEXT PRIMARY KEY,
+          name       TEXT NOT NULL,
+          rating     INTEGER,
+          thread_id  INTEGER NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+
         # ---- Fair-access cooldown system ----
         # Singleton runtime state: when the tracked rooms last all went empty
         # (drives the session-window reset) and the pinned admin panel message.
@@ -832,6 +861,61 @@ def heartbeat_get() -> int:
 def heartbeat_set(now: int):
     with _db() as conn:
         conn.execute("UPDATE bot_heartbeat SET at=? WHERE id=1", (now,))
+        conn.commit()
+
+
+# ---- Codeforces ----
+
+def codeforces_cache_updated_at() -> int:
+    with _db() as conn:
+        row = conn.execute("SELECT MAX(updated_at) FROM codeforces_cache").fetchone()
+        return row[0] or 0
+
+
+def codeforces_cache_get(ref: str) -> dict | None:
+    with _db() as conn:
+        r = conn.execute(
+            "SELECT ref, contest_id, idx, name, rating, tags, contest_name "
+            "FROM codeforces_cache WHERE ref=?", (ref,)).fetchone()
+        if not r:
+            return None
+        return {"ref": r[0], "contest_id": r[1], "index": r[2], "name": r[3],
+                "rating": r[4], "tags": [t for t in (r[5] or "").split(",") if t],
+                "contest_name": r[6]}
+
+
+def codeforces_cache_upsert_all(entries: list[dict]):
+    """Bulk upsert of the whole problemset (~11k rows)."""
+    now = int(time.time())
+    with _db() as conn:
+        conn.executemany(
+            """INSERT INTO codeforces_cache(ref, contest_id, idx, name, rating, tags,
+                                            contest_name, updated_at)
+               VALUES(?,?,?,?,?,?,?,?)
+               ON CONFLICT(ref) DO UPDATE SET
+                 name=excluded.name, rating=excluded.rating, tags=excluded.tags,
+                 contest_name=excluded.contest_name, updated_at=excluded.updated_at""",
+            [(e["ref"], e["contest_id"], e["index"], e["name"], e.get("rating"),
+              ",".join(e.get("tags") or []), e.get("contest_name") or "", now)
+             for e in entries])
+        conn.commit()
+
+
+def codeforces_problem_get(ref: str) -> dict | None:
+    with _db() as conn:
+        r = conn.execute(
+            "SELECT ref, name, rating, thread_id FROM codeforces_problems WHERE ref=?",
+            (ref,)).fetchone()
+        return {"ref": r[0], "name": r[1], "rating": r[2], "thread_id": r[3]} if r else None
+
+
+def codeforces_problem_save(ref: str, name: str, rating: int | None, thread_id: int):
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO codeforces_problems(ref, name, rating, thread_id, created_at) "
+            "VALUES(?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET "
+            "name=excluded.name, rating=excluded.rating, thread_id=excluded.thread_id",
+            (ref, name, rating, thread_id, int(time.time())))
         conn.commit()
 
 

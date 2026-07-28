@@ -21,6 +21,8 @@ from .leetcode import (
     get_or_create_problem_post,
     fetch_leetcode_problem,
 )
+from .codeforces import get_or_create_problem_post as cf_get_or_create_post
+from .logbus import log_error
 from .twitchlink import solution_name, maybe_prompt
 
 
@@ -133,7 +135,7 @@ def platform_emblem(url: str) -> str:
     return _DEFAULT_EMBLEM
 
 
-def link_line(url: str, title: str | None = None) -> str:
+def link_line(url: str, title: str | None = None, href: str | None = None) -> str:
     """'🔷 [1421A. XORwice](url)' — emblem, problem number, problem name.
 
     Falls back to "Codeforces 1421A" when the name can't be resolved, so an
@@ -156,8 +158,8 @@ def link_line(url: str, title: str | None = None) -> str:
         label = ref
     # Keep the markdown link intact: strip ] from the label and percent-encode
     # parens in the href so a url can't terminate the link early.
-    href = clean.replace("(", "%28").replace(")", "%29")
-    return f"{platform_emblem(clean)} [{label.replace(']', '')}]({href})"
+    target = (href or clean).replace("(", "%28").replace(")", "%29")
+    return f"{platform_emblem(clean)} [{label.replace(']', '')}]({target})"
 
 
 # Problem-name lookup per platform. Best effort throughout: a failed fetch just
@@ -461,7 +463,21 @@ async def _post_recap_message(bot, session: ClientSession, entries: list[dict],
         )
     titles = await fetch_problem_titles(session, streamer_links) if streamer_links else {}
     for url in streamer_links:
-        grouped.setdefault(_link_host(url), []).append(link_line(url, titles.get(url)))
+        host = _link_host(url)
+        href = None
+        # A Codeforces problem gets a forum post like a LeetCode one, so the
+        # entry links somewhere people can talk about it. If the post can't be
+        # made, the entry still renders — pointing at Codeforces instead.
+        if host == "codeforces.com" or host.endswith(".codeforces.com"):
+            try:
+                thread_id, err = await cf_get_or_create_post(bot, url)
+                if thread_id:
+                    href = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
+                elif err:
+                    print(f"[RECAP] codeforces post for {url}: {err}")
+            except Exception as e:
+                log_error(f"[RECAP] codeforces post failed for {url}: {e!r}")
+        grouped.setdefault(host, []).append(link_line(url, titles.get(url), href))
 
     lines = []
     for host in sorted(grouped, key=_platform_rank):
