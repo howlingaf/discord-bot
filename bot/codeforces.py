@@ -229,8 +229,11 @@ async def get_or_create_problem_post(bot, text: str) -> tuple[int | None, str]:
 
         name = (meta or {}).get("name") or ""
         thread_name = (f"{ref}. {name}" if name else ref)[:100]
-        wanted = {"Codeforces", difficulty_label((meta or {}).get("rating"))}
-        tags = [t for t in forum.available_tags if t.name in wanted]
+        # Platform tag only. Discord decides the order of a thread's tags itself
+        # — the same two-tag write lands platform-first on one thread and
+        # difficulty-first on another, with no way to force it — so the
+        # difficulty lives in the card header, where it can't be reordered.
+        tags = [t for t in forum.available_tags if t.name == "Codeforces"]
 
         try:
             result = await forum.create_thread(
