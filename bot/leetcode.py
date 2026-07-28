@@ -406,6 +406,62 @@ async def get_or_create_problem_post(bot, question_id: str) -> tuple[int | None,
         return await _create_problem_forum_post(bot, data)
 
 
+# What a member is likely to paste: the problem URL with any trailing section
+# (/description/, /solutions/), a bare slug, or the old bare number.
+_LINK_SLUG_RE = re.compile(r"leetcode\.com/problems/([a-zA-Z0-9][a-zA-Z0-9-]*)", re.I)
+_BARE_ID_RE = re.compile(r"^#?(\d+)$")
+# Hyphen required, so a mistyped word can't be mistaken for a slug.
+_BARE_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)+$", re.I)
+
+
+def parse_ref(text: str) -> tuple[str, str] | None:
+    """('id'|'slug', value) from a problem link, bare slug or number, else None."""
+    text = (text or "").strip().strip("<>")
+    if not text:
+        return None
+    m = _LINK_SLUG_RE.search(text)
+    if m:
+        return "slug", m.group(1).lower()
+    bare = _BARE_ID_RE.match(text)
+    if bare:
+        return "id", bare.group(1)
+    if "/" not in text and _BARE_SLUG_RE.match(text):
+        return "slug", text.lower()
+    return None
+
+
+async def get_or_create_problem_post_from_ref(bot, text: str) -> tuple[int | None, str]:
+    """Look up or create the post for a problem link, slug or number.
+
+    A slug can't be handed straight to get_or_create_problem_post: both its
+    fast path and the row it saves are keyed on the frontend id, so a problem
+    that already has a thread would get a second one. Resolve to an id first —
+    from the slug index when it's known, otherwise from the API. That costs one
+    extra fetch on the create path, which is worth keeping the locking and
+    dedup in a single place.
+    """
+    ref = parse_ref(text)
+    if not ref:
+        return None, "not a LeetCode problem link"
+    kind, value = ref
+    if kind == "id":
+        return await get_or_create_problem_post(bot, value)
+
+    existing = leetcode_get_problem_by_slug(value)
+    if existing:
+        return existing["thread_id"], ""
+    if not bot.http_session:
+        return None, "http session not ready"
+    try:
+        data = await fetch_leetcode_problem(bot.http_session, value)
+    except Exception:
+        return None, f"could not find LeetCode problem '{value}'"
+    qid = str(data["question"].get("questionFrontendId") or "")
+    if not qid:
+        return None, f"could not find LeetCode problem '{value}'"
+    return await get_or_create_problem_post(bot, qid)
+
+
 async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]:
     if not bot.http_session:
         return False, "http session not ready"

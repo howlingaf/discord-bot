@@ -12,7 +12,7 @@ from .config import (
 )
 from .twitchconsole import call_console
 from .spotify import dm_spotify_link
-from .leetcode import get_or_create_problem_post
+from .leetcode import get_or_create_problem_post_from_ref as lc_get_or_create_post
 from .codeforces import get_or_create_problem_post as cf_get_or_create_post
 from .database import twitch_link_delete
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
@@ -45,16 +45,12 @@ async def spotifylink(interaction: discord.Interaction):
         await interaction.response.send_message("\u274c I can't DM you.", ephemeral=True)
 
 
-@bot.tree.command(name="lc", description="Look up or create a forum post for a LeetCode problem by ID.")
-@app_commands.describe(question_id="The LeetCode problem number (e.g. 67)")
-async def lc(interaction: discord.Interaction, question_id: int):
-    if question_id < 1:
-        await interaction.response.send_message("\u274c Invalid problem ID.", ephemeral=True)
-        return
-
+@bot.tree.command(name="lc", description="Look up or create a forum post for a LeetCode problem.")
+@app_commands.describe(problem="Problem link, or the number (e.g. 67)")
+async def lc(interaction: discord.Interaction, problem: str):
     await interaction.response.defer(ephemeral=True)
     try:
-        thread_id, err = await get_or_create_problem_post(bot, str(question_id))
+        thread_id, err = await lc_get_or_create_post(bot, problem)
         if thread_id:
             thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
             await interaction.followup.send(thread_url, ephemeral=True)
