@@ -186,6 +186,7 @@ def build_embed(ref: str, meta: dict | None, source_url: str = "") -> discord.Em
     parts = [header, ""]
     if (meta or {}).get("contest_name"):
         parts.append(f"-# {meta['contest_name']}")
+        parts.append("")
     if (meta or {}).get("tags"):
         parts.append(" · ".join(f"`{t}`" for t in meta["tags"]))
 
