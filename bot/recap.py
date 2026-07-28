@@ -58,8 +58,6 @@ _LINK_PATTERNS = (
      lambda m: ("Codeforces", f"{m.group(1)}{m.group(2).upper()}")),
     ("codeforces.com", re.compile(r"/contest/(\d+)/problem/(\w+)", re.I),
      lambda m: ("Codeforces", f"{m.group(1)}{m.group(2).upper()}")),
-    ("codeforces.com", re.compile(r"/gym/(\d+)/problem/(\w+)", re.I),
-     lambda m: ("Codeforces", f"gym {m.group(1)}{m.group(2).upper()}")),
     ("projecteuler.net", re.compile(r"problem=(\d+)", re.I),
      lambda m: ("Project Euler", m.group(1))),
     ("cses.fi", re.compile(r"/task/(\d+)", re.I),
@@ -92,10 +90,18 @@ def is_dsa_link(url: str) -> bool:
     return any(host == d or host.endswith("." + d) for d in DSA_LINK_DOMAINS)
 
 
+# Codeforces EDU lessons and gym contests: unsupported, since neither is in any
+# public API and both 403 without an enrolment.
+_CF_UNSUPPORTED_RE = re.compile(r"/(?:edu|gym)/", re.I)
+
+
 def _match_link(url: str) -> tuple[str | None, str] | None:
     """(platform, problem reference) for a problem URL, else None. Blog posts,
-    profiles, standings and section indexes on these domains all return None."""
+    profiles, standings, section indexes, and Codeforces EDU/gym links on these
+    domains all return None."""
     clean = url.strip().strip("<>")
+    if _CF_UNSUPPORTED_RE.search(clean):
+        return None
     if not _SCHEME_RE.match(clean):
         clean = "https://" + clean
     host = _link_host(clean)

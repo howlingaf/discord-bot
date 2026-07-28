@@ -14,8 +14,9 @@ Design contract:
     contests lack one, and they gain it a few days later.
   * No statement is fetched. Codeforces has no API for problem text, so the card
     is a reference: name, rating, contest, tags, link.
-  * Gym problems are absent from the problemset API, so they get a post with a
-    bare reference rather than being refused.
+  * EDU course and gym problems are not supported. Neither appears in the
+    problemset API nor in contest.standings, and their pages 403 without an
+    enrolment, so a post for one could only ever be a bare reference.
 """
 
 import asyncio
@@ -47,10 +48,12 @@ _TIMEOUT = ClientTimeout(total=30)
 _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/120 Safari/537.36")
 
-# Both URL shapes plus a bare "1421A".
+# Both public URL shapes plus a bare "1421A".
 _URL_RE = re.compile(
-    r"/problemset/problem/(\d+)/(\w+)|/contest/(\d+)/problem/(\w+)"
-    r"|/gym/(\d+)/problem/(\w+)", re.I)
+    r"/problemset/problem/(\d+)/(\w+)|/contest/(\d+)/problem/(\w+)", re.I)
+# EDU lesson practice and gym contests: unsupported. An EDU url contains a
+# /contest/<id>/problem/<x> segment, so it has to be rejected before matching.
+_UNSUPPORTED_RE = re.compile(r"/(?:edu|gym)/", re.I)
 _BARE_RE = re.compile(r"^\s*(\d+)\s*([A-Za-z]\d?)\s*$")
 
 # Rating bands, mirroring how the LeetCode card colours difficulty.
@@ -60,8 +63,8 @@ _lock = asyncio.Lock()
 
 
 def parse_ref(text: str) -> str | None:
-    """'1421A' from a problem URL or a bare reference, else None."""
-    if not text:
+    """'1421A' from a public problem URL or a bare reference, else None."""
+    if not text or _UNSUPPORTED_RE.search(text):
         return None
     bare = _BARE_RE.match(text)
     if bare:
@@ -69,7 +72,7 @@ def parse_ref(text: str) -> str | None:
     m = _URL_RE.search(text)
     if not m:
         return None
-    pairs = [(m.group(1), m.group(2)), (m.group(3), m.group(4)), (m.group(5), m.group(6))]
+    pairs = [(m.group(1), m.group(2)), (m.group(3), m.group(4))]
     for contest, index in pairs:
         if contest:
             return f"{contest}{index.upper()}"
@@ -174,7 +177,7 @@ async def get_or_create_problem_post(bot, text: str) -> tuple[int | None, str]:
     """
     ref = parse_ref(text)
     if not ref:
-        return None, "that doesn't look like a Codeforces problem link"
+        return None, "not a public Codeforces problem (EDU and gym aren't supported)"
     if not bot.http_session:
         return None, "http session not ready"
 
@@ -188,6 +191,9 @@ async def get_or_create_problem_post(bot, text: str) -> tuple[int | None, str]:
             return existing["thread_id"], ""
 
         meta = await problem_meta(bot.http_session, ref)
+        if not meta:
+            # Nothing public backs this ref, so a card would be a dead link.
+            return None, f"{ref} isn't in the public problemset"
         source_url = text.strip().strip("<>")
         forum = (bot.get_channel(LEETCODE_PROBLEMS_CHANNEL_ID)
                  or await bot.fetch_channel(LEETCODE_PROBLEMS_CHANNEL_ID))
