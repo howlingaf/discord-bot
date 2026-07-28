@@ -215,6 +215,14 @@ async def fa_cd_release(interaction: discord.Interaction, user: discord.User):
     await interaction.followup.send(msg, ephemeral=True)
 
 
+@fa_cooldown.command(name="releaseall", description="(Admin) End every active cooldown early (silent).")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def fa_cd_releaseall(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    _, msg = await _fa.cooldown_release_all(bot, interaction.user.id)
+    await interaction.followup.send(msg, ephemeral=True)
+
+
 @fa_cooldown.command(name="reset", description="(Admin) Zero a user's current session tally.")
 @app_commands.describe(user="Whose tally to reset")
 @app_commands.checks.has_permissions(manage_messages=True)

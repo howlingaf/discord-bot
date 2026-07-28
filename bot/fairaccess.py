@@ -426,6 +426,28 @@ async def cooldown_release(bot, user_id: int, released_by: int) -> tuple[bool, s
     return True, f"Released <@{user_id}>."
 
 
+async def cooldown_release_all(bot, released_by: int) -> tuple[bool, str]:
+    """Release every active cooldown — /cooldown release, applied to each.
+
+    Note this is the opposite of reset_all/indefinite, which keep the cooldowns
+    and only move their expiry: these rows are closed and their room overwrites
+    lifted, so everyone regains the tracked rooms immediately.
+    """
+    async with _lock:
+        actives = fairaccess_cooldowns_active()
+        if not actives:
+            return False, "No active cooldowns."
+        now = _now()
+        for cd in actives:
+            fairaccess_cooldown_release(cd["id"], released_by, now)
+    # Overwrite removal is Discord I/O — outside the lock, as in cooldown_release.
+    for cd in actives:
+        await _remove_all(bot, cd["user_id"])
+    await render_panel(bot)
+    return True, (f"Released {len(actives)} cooldown"
+                  f"{'' if len(actives) == 1 else 's'}.")
+
+
 async def cooldown_reset_all(bot, days: int | None = None) -> tuple[bool, str]:
     """Restart the clock on every active cooldown: each one now expires `days`
     from now, whatever it was set to or how far through it had run."""
