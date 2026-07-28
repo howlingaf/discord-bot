@@ -13,6 +13,7 @@ from .config import (
 from .twitchconsole import call_console
 from .spotify import dm_spotify_link
 from .leetcode import get_or_create_problem_post
+from .codeforces import get_or_create_problem_post as cf_get_or_create_post
 from .database import twitch_link_delete
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
 from .voicenames import rename as vc_rename
@@ -63,6 +64,24 @@ async def lc(interaction: discord.Interaction, question_id: int):
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         # Surface the real failure instead of always blaming the problem ID \u2014
         # the genuine "not found" case is already handled by the err branch above.
+        await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
+
+
+@bot.tree.command(name="cf", description="Look up or create a forum post for a Codeforces problem.")
+@app_commands.describe(problem="Problem link, or a bare reference like 1421A")
+async def cf(interaction: discord.Interaction, problem: str):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        # Takes the raw string: the same helper the recap uses already accepts
+        # either URL shape or a bare ref, and reports an unusable one as err.
+        thread_id, err = await cf_get_or_create_post(bot, problem)
+        if thread_id:
+            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
+            await interaction.followup.send(thread_url, ephemeral=True)
+        else:
+            await interaction.followup.send(f"\u274c {err}", ephemeral=True)
+    except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
 
 
