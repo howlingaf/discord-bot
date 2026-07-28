@@ -157,11 +157,13 @@ def build_embed(ref: str, meta: dict | None, source_url: str = "") -> discord.Em
 
     title = f"{ref}. {name}" if name else ref
     header = f"{emoji} **{rating}**" if rating else f"{emoji} **Unrated**"
-    parts = [header]
+    # Blank line under the rating so it reads as a header, matching the gap the
+    # LeetCode card puts between its difficulty line and the statement.
+    parts = [header, ""]
     if (meta or {}).get("contest_name"):
         parts.append(f"-# {meta['contest_name']}")
     if (meta or {}).get("tags"):
-        parts.append("\n" + " · ".join(f"`{t}`" for t in meta["tags"]))
+        parts.append(" · ".join(f"`{t}`" for t in meta["tags"]))
 
     link = problem_url(ref) if meta else (source_url or problem_url(ref))
     if not meta:
