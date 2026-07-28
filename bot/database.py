@@ -740,11 +740,17 @@ def fairaccess_cooldown_create(user_id: int, applied_at: int, expires_at: int,
         return cur.lastrowid
 
 
+# expires_at = 0 means indefinite: it never falls due, and only /cooldown
+# release lifts it.
+INDEFINITE = 0
+
+
 def fairaccess_cooldown_active_for(user_id: int) -> dict | None:
     with _db() as conn:
         r = conn.execute(
             f"SELECT {_FA_COOLDOWN_COLS} FROM fairaccess_cooldowns "
-            "WHERE user_id=? AND released_at IS NULL AND expired_at IS NULL AND expires_at>? ",
+            "WHERE user_id=? AND released_at IS NULL AND expired_at IS NULL "
+            "AND (expires_at=0 OR expires_at>?)",
             (user_id, int(time.time())),
         ).fetchone()
         return _fa_cooldown_row(r) if r else None
@@ -754,18 +760,22 @@ def fairaccess_cooldowns_active() -> list[dict]:
     with _db() as conn:
         rows = conn.execute(
             f"SELECT {_FA_COOLDOWN_COLS} FROM fairaccess_cooldowns "
-            "WHERE released_at IS NULL AND expired_at IS NULL AND expires_at>?",
+            "WHERE released_at IS NULL AND expired_at IS NULL "
+            "AND (expires_at=0 OR expires_at>?)",
             (int(time.time()),),
         ).fetchall()
         return [_fa_cooldown_row(r) for r in rows]
 
 
 def fairaccess_cooldowns_due() -> list[dict]:
-    """Active-until-now cooldowns whose expiry has passed (needs overwrite removal)."""
+    """Active-until-now cooldowns whose expiry has passed (needs overwrite removal).
+
+    Indefinite ones (expires_at=0) are never due."""
     with _db() as conn:
         rows = conn.execute(
             f"SELECT {_FA_COOLDOWN_COLS} FROM fairaccess_cooldowns "
-            "WHERE released_at IS NULL AND expired_at IS NULL AND expires_at<=?",
+            "WHERE released_at IS NULL AND expired_at IS NULL "
+            "AND expires_at>0 AND expires_at<=?",
             (int(time.time()),),
         ).fetchall()
         return [_fa_cooldown_row(r) for r in rows]

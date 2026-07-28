@@ -227,6 +227,15 @@ async def fa_cd_resetall(interaction: discord.Interaction,
     await interaction.followup.send(msg, ephemeral=True)
 
 
+@fa_cooldown.command(name="indefinite",
+                     description="(Admin) Drop the expiry from every active cooldown.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def fa_cd_indefinite(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    _, msg = await _fa.cooldown_make_indefinite(bot)
+    await interaction.followup.send(msg, ephemeral=True)
+
+
 bot.tree.add_command(fa_whitelist)
 bot.tree.add_command(fa_cooldown)
 

@@ -52,6 +52,7 @@ from .config import (
     VOICE_TIME_ROOMS,
 )
 from .database import (
+    INDEFINITE,
     heartbeat_get,
     heartbeat_set,
     voice_time_by_channel,
@@ -440,6 +441,20 @@ async def cooldown_reset_all(bot, days: int | None = None) -> tuple[bool, str]:
                   f"{'' if len(actives) == 1 else 's'} — all now release <t:{expires}:R>.")
 
 
+async def cooldown_make_indefinite(bot) -> tuple[bool, str]:
+    """Drop the expiry from every active cooldown — they then last until
+    someone runs /cooldown release."""
+    async with _lock:
+        actives = fairaccess_cooldowns_active()
+        if not actives:
+            return False, "No active cooldowns."
+        for cd in actives:
+            fairaccess_cooldown_set_expiry(cd["id"], INDEFINITE)
+    await render_panel(bot)
+    return True, (f"{len(actives)} cooldown{'' if len(actives) == 1 else 's'} "
+                  "now have no expiry — release them with `/cooldown release`.")
+
+
 async def cooldown_apply(bot, user_id: int, applied_by: int,
                          days: int | None = None) -> tuple[bool, str]:
     async with _lock:
@@ -493,8 +508,10 @@ def _build_panel(bot) -> discord.ui.LayoutView:
         accent_color=0x43B581))
 
     # ---- active cooldowns (text only; released via /cooldown release) ----
-    cd_body = "\n".join(f"<@{c['user_id']}> · releases <t:{c['expires_at']}:R>"
-                        for c in actives) or "*none*"
+    cd_body = "\n".join(
+        f"<@{c['user_id']}> · " + (f"releases <t:{c['expires_at']}:R>"
+                                   if c["expires_at"] else "no expiry")
+        for c in actives) or "*none*"
     view.add_item(discord.ui.Container(
         discord.ui.TextDisplay("### Active cooldowns"),
         discord.ui.TextDisplay(cd_body + "\n-# release via `/cooldown release`"),
