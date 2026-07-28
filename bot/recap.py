@@ -492,10 +492,11 @@ async def _post_recap_message(bot, session: ClientSession, entries: list[dict],
         lines.extend(grouped[host])
 
     blocks = _chunk_lines(lines, limit=4096) if lines else []
-    # The stream's Twitch title, captured when it went live. Older twitch-bot
-    # builds don't send one, and a stream can go live with an empty title, so
-    # the plain heading stays as the fallback.
-    heading = f"Problem Recap from {stream_title}" if stream_title else "Problem Recap"
+    # The stream's Twitch title, captured when it went live, stands alone as the
+    # heading. Older twitch-bot builds don't send one and a stream can go live
+    # with an empty title, so a generic heading is still needed for those — an
+    # embed with no title at all would open on a bare list of problems.
+    heading = stream_title or "Problem Recap"
     embed = discord.Embed(
         title=heading[:256],
         description=blocks[0] if blocks else None,
