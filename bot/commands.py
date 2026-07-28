@@ -109,9 +109,12 @@ async def name_channel(interaction: discord.Interaction, name: app_commands.Rang
 # the picker for anyone who learned it, and a silent "unknown command" would
 # read as the bot being broken.
 @bot.tree.command(name="problem", description="Renamed \u2014 use /lc instead.")
-@app_commands.describe(question_id="The LeetCode problem number (e.g. 67)")
-async def problem(interaction: discord.Interaction, question_id: int | None = None):
-    hint = f"/lc {question_id}" if question_id else "/lc {id}"
+@app_commands.describe(problem="Problem link, or the number (e.g. 67)")
+async def problem_stub(interaction: discord.Interaction, problem: str | None = None):
+    # A string option, matching /lc: as an int it would have Discord reject a
+    # pasted link outright, so the one person most in need of the redirect \u2014
+    # someone typing the old name with the new link style \u2014 wouldn't see it.
+    hint = f"/lc {problem}" if problem else "/lc <link>"
     await interaction.response.send_message(
         f"That's `{hint}` now.", ephemeral=True)
 
