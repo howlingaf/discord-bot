@@ -4,6 +4,12 @@ import time
 
 from .config import DB_PATH
 
+# Site key -> table, for the sites whose posts are keyed on a bare problem
+# number. Lookups go through this map rather than interpolating a caller's
+# string into the SQL, so an unknown site raises instead of reaching the
+# database. Used by db_init and the site_problem_* accessors below.
+SITE_PROBLEM_TABLES = {"cses": "cses_problems", "euler": "euler_problems"}
+
 
 def _db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -171,6 +177,20 @@ def db_init():
         if "url" not in existing_cols:
             conn.execute("ALTER TABLE codeforces_problems ADD COLUMN url TEXT NOT NULL DEFAULT ''")
             print("[DB] Added missing column 'url' to codeforces_problems")
+
+        # Posted CSES / Project Euler problems. One table per site even though
+        # the shape is identical: a ref is only a number within its own site, so
+        # CSES task 1068 and Euler problem 1068 would collide in a shared one.
+        for _table in SITE_PROBLEM_TABLES.values():
+            conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {_table} (
+              ref        TEXT PRIMARY KEY,
+              name       TEXT NOT NULL,
+              thread_id  INTEGER NOT NULL,
+              created_at INTEGER NOT NULL DEFAULT 0,
+              url        TEXT NOT NULL DEFAULT ''
+            )
+            """)
 
         # ---- Fair-access cooldown system ----
         # Singleton runtime state: when the tracked rooms last all went empty
@@ -913,6 +933,25 @@ def codeforces_cache_upsert_all(entries: list[dict]):
             [(e["ref"], e["contest_id"], e["index"], e["name"], e.get("rating"),
               ",".join(e.get("tags") or []), e.get("contest_name") or "", now)
              for e in entries])
+        conn.commit()
+
+
+def site_problem_get(site: str, ref: str) -> dict | None:
+    table = SITE_PROBLEM_TABLES[site]
+    with _db() as conn:
+        r = conn.execute(
+            f"SELECT ref, name, thread_id FROM {table} WHERE ref=?", (ref,)).fetchone()
+        return {"ref": r[0], "name": r[1], "thread_id": r[2]} if r else None
+
+
+def site_problem_save(site: str, ref: str, name: str, thread_id: int, url: str = ""):
+    table = SITE_PROBLEM_TABLES[site]
+    with _db() as conn:
+        conn.execute(
+            f"INSERT INTO {table}(ref, name, thread_id, created_at, url) "
+            "VALUES(?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET "
+            "name=excluded.name, thread_id=excluded.thread_id, url=excluded.url",
+            (ref, name, thread_id, int(time.time()), url))
         conn.commit()
 
 

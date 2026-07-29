@@ -14,6 +14,7 @@ from .twitchconsole import call_console
 from .spotify import dm_spotify_link
 from .leetcode import get_or_create_problem_post_from_ref as lc_get_or_create_post
 from .codeforces import get_or_create_problem_post as cf_get_or_create_post
+from .problemsites import get_or_create_problem_post as site_get_or_create_post
 from .database import twitch_link_delete
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
 from .voicenames import rename as vc_rename
@@ -79,6 +80,33 @@ async def cf(interaction: discord.Interaction, problem: str):
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
+
+
+@bot.tree.command(name="cs", description="Look up or create a forum post for a CSES problem.")
+@app_commands.describe(problem="Problem link, or the task number (e.g. 1068)")
+async def cs(interaction: discord.Interaction, problem: str):
+    await _post_site_problem(interaction, "cses", problem)
+
+
+@bot.tree.command(name="eu", description="Look up or create a forum post for a Project Euler problem.")
+@app_commands.describe(problem="Problem link, or the problem number (e.g. 1)")
+async def eu(interaction: discord.Interaction, problem: str):
+    await _post_site_problem(interaction, "euler", problem)
+
+
+async def _post_site_problem(interaction: discord.Interaction, site: str, problem: str):
+    """Shared body for /cs and /eu — they differ only in which site they name."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        thread_id, err = await site_get_or_create_post(bot, site, problem)
+        if thread_id:
+            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
+            await interaction.followup.send(thread_url, ephemeral=True)
+        else:
+            await interaction.followup.send(f"❌ {err}", ephemeral=True)
+    except Exception as e:
+        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
+        await interaction.followup.send(f"❌ Failed: {e!r}", ephemeral=True)
 
 
 @bot.tree.command(name="name", description="Temporarily rename the chill voice channel while you're in it.")

@@ -49,6 +49,14 @@ LEETCODE_PROBLEMS_CHANNEL_ID = 1472231552607064144
 LEETCODE_EMOJI = os.getenv("LEETCODE_EMOJI") or "<:leetcode:1530820116667957298>"
 LEETCODE_DAILY_NOTIF_CHANNEL_ID = 1472396200409043086
 
+# Application emoji for the other problem sites, same origin as LEETCODE_EMOJI
+# (scripts/sync_platform_emoji.py). These are the emblems used in messages; the
+# forum tags carry separate GUILD emoji, which Discord requires for tags —
+# see scripts/sync_platform_tags.py.
+CODEFORCES_EMOJI = os.getenv("CODEFORCES_EMOJI") or "<:codeforces:1530820117225672890>"
+CSES_EMOJI = os.getenv("CSES_EMOJI") or "<:cses:1530822475691196497>"
+EULER_EMOJI = os.getenv("EULER_EMOJI") or "<:projecteuler:1530820117879980144>"
+
 # ---------------- LeetCode Contests ----------------
 # Contest forums. 0 disables contest posting entirely — the scheduler exits at
 # startup and nothing is posted. Set both to a forum channel id to turn weekly /
