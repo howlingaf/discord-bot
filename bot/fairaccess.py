@@ -58,9 +58,7 @@ from .config import (
     FAIRACCESS_WINDOW_RESET_HOURS,
     GUILD_ID,
     STREAMER_DISCORD_ID,
-    VOICE_TIME_EXCLUDE_IDS,
     VOICE_TIME_HOST_ROOMS,
-    VOICE_TIME_ROOMS,
 )
 from .database import (
     INDEFINITE,
@@ -93,7 +91,6 @@ from .database import (
 from .logbus import log_error, log_if_persistent
 
 _SWEEP_SECONDS = 300
-_FEED_LIMIT = 15
 # rejoining the same voice channel within this gap resumes the visit row
 _VISIT_MERGE_SECONDS = 300
 # component budget on the panel message: 5 rows x 5 buttons
@@ -503,40 +500,24 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     """Components-V2 layout, informational sections only; no interactive
     components (staff actions are slash commands)."""
     actives = fairaccess_cooldowns_active()
-    totals = voice_time_totals(VOICE_TIME_ROOMS, _now(), _FEED_LIMIT,
-                               exclude_user_ids=VOICE_TIME_EXCLUDE_IDS)
-
     view = discord.ui.LayoutView(timeout=None)
 
-    # ---- attendance, with regulars marked in place ----
-    # One list, not two: a regular IS an attendee, and splitting them meant
-    # reading the same person's name twice to answer one question. Minutes are
-    # #co-working only, since that is what the threshold measures — a total
-    # across every room couldn't be compared against it.
+    # ---- regulars, with the minutes that earned it ----
+    # One card, not a roster plus an attendance list: everyone here is a
+    # regular, so the card's title says it once instead of every row repeating
+    # it. Minutes are #co-working only, since that is what the threshold
+    # measures — a total across every room couldn't be compared against it.
     cw = {t["user_id"]: t["seconds"] for t in
           voice_time_totals([FAIRACCESS_REGULAR_ROOM], _now(), limit=10_000)}
-    regulars = {c["user_id"] for c in actives}
-    # Regulars with no logged time still belong here — several were designated
-    # by hand — so the roster is the union, not just whoever has minutes.
-    listed = [t["user_id"] for t in totals]
-    listed += [u for u in regulars if u not in listed]
-    # Sorted by minutes alone, not regulars-first: the useful signal is who is
-    # approaching the line, and someone at 480 shouldn't sit below a regular
-    # designated by hand at zero.
-    listed.sort(key=lambda u: cw.get(u, 0), reverse=True)
-
-    feed_lines = []
-    for uid in listed:
-        secs = cw.get(uid, 0)
-        line = f"<@{uid}>"
-        if secs >= 60:
-            line += f" · {secs // 60} min"
-        if uid in regulars:
-            line += " · **regular**"
-        feed_lines.append(line)
+    listed = sorted((c["user_id"] for c in actives),
+                    key=lambda u: cw.get(u, 0), reverse=True)
+    # Several were designated by hand, so a regular with no logged time still
+    # belongs on the list — the minutes are context, not the membership test.
+    feed_lines = [f"<@{uid}>" + (f" · {cw[uid] // 60} min" if cw.get(uid, 0) >= 60 else "")
+                  for uid in listed]
     view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay("### Attendance"),
-        discord.ui.TextDisplay("\n".join(feed_lines) or "*no time logged yet*"),
+        discord.ui.TextDisplay("### Regulars"),
+        discord.ui.TextDisplay("\n".join(feed_lines) or "*none*"),
         discord.ui.TextDisplay(
             f"-# time in #{_room_name(bot, FAIRACCESS_REGULAR_ROOM)} · "
             f"regular at {FAIRACCESS_REGULAR_MINUTES} min · "
@@ -547,9 +528,10 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     if STREAMER_DISCORD_ID:
         rooms = voice_time_by_channel(STREAMER_DISCORD_ID, _now(), VOICE_TIME_HOST_ROOMS)
         total = sum(r["seconds"] for r in rooms) // 60
+        # Total plus the week-over-week list only — the per-room split said
+        # which room the hours came from, which isn't the question this card
+        # answers. The footer still names the rooms being counted.
         body = [f"**{total // 60}h {total % 60}m** total"]
-        body += [f"#{_room_name(bot, r['channel_id'])} · {r['seconds'] // 60} min"
-                 for r in rooms if r["seconds"] >= 60]
 
         # Week over week, newest first. Empty weeks are listed rather than
         # skipped — a gap is the point of the comparison.
@@ -561,7 +543,7 @@ def _build_panel(bot) -> discord.ui.LayoutView:
             wk_lines.append(f"{label} · {_hm(seconds)}")
 
         view.add_item(discord.ui.Container(
-            discord.ui.TextDisplay(f"### <@{STREAMER_DISCORD_ID}>'s voice time"),
+            discord.ui.TextDisplay(f"### <@{STREAMER_DISCORD_ID}>"),
             discord.ui.TextDisplay("\n".join(body) if rooms else "*no time logged yet*"),
             discord.ui.TextDisplay("\n".join(wk_lines)),
             discord.ui.TextDisplay(
