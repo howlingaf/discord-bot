@@ -508,23 +508,39 @@ def _build_panel(bot) -> discord.ui.LayoutView:
 
     view = discord.ui.LayoutView(timeout=None)
 
-    # ---- regulars (text only; managed via /regular add|remove) ----
-    # A dated row can only be a leftover from the superseded rule; regulars
-    # marked under the current one never expire.
-    cd_body = "\n".join(
-        f"<@{c['user_id']}>" + (f" · until <t:{c['expires_at']}:R>"
-                                if c["expires_at"] else "")
-        for c in actives) or "*none*"
-    view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay("### Regulars"),
-        discord.ui.TextDisplay(cd_body + "\n-# manage via `/regular add` · `/regular remove`"),
-        accent_color=0xED4245))
+    # ---- attendance, with regulars marked in place ----
+    # One list, not two: a regular IS an attendee, and splitting them meant
+    # reading the same person's name twice to answer one question. Minutes are
+    # #co-working only, since that is what the threshold measures — a total
+    # across every room couldn't be compared against it.
+    cw = {t["user_id"]: t["seconds"] for t in
+          voice_time_totals([FAIRACCESS_REGULAR_ROOM], _now(), limit=10_000)}
+    regulars = {c["user_id"] for c in actives}
+    # Regulars with no logged time still belong here — several were designated
+    # by hand — so the roster is the union, not just whoever has minutes.
+    listed = [t["user_id"] for t in totals]
+    listed += [u for u in regulars if u not in listed]
+    # Sorted by minutes alone, not regulars-first: the useful signal is who is
+    # approaching the line, and someone at 480 shouldn't sit below a regular
+    # designated by hand at zero.
+    listed.sort(key=lambda u: cw.get(u, 0), reverse=True)
 
-    # ---- attendance: total time per member across the logged rooms ----
-    feed_lines = [f"<@{t['user_id']}> · {t['seconds'] // 60} min" for t in totals]
+    feed_lines = []
+    for uid in listed:
+        secs = cw.get(uid, 0)
+        line = f"<@{uid}>"
+        if secs >= 60:
+            line += f" · {secs // 60} min"
+        if uid in regulars:
+            line += " · **regular**"
+        feed_lines.append(line)
     view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay("### Discord Stream Attendance"),
+        discord.ui.TextDisplay("### Attendance"),
         discord.ui.TextDisplay("\n".join(feed_lines) or "*no time logged yet*"),
+        discord.ui.TextDisplay(
+            f"-# time in #{_room_name(bot, FAIRACCESS_REGULAR_ROOM)} · "
+            f"regular at {FAIRACCESS_REGULAR_MINUTES} min · "
+            "`/regular add` · `/regular remove`"),
         accent_color=0x4E5058))
 
     # ---- the host's own time across their rooms ----
