@@ -160,5 +160,3 @@ FAIRACCESS_EXEMPT_IDS = [
 FAIRACCESS_WINDOW_RESET_HOURS = float(os.getenv("FAIRACCESS_WINDOW_RESET_HOURS") or "2")
 # Members with this role (and the server owner) are exempt from tallying. 0 = owner only.
 FAIRACCESS_MOD_ROLE_ID = int(os.getenv("FAIRACCESS_MOD_ROLE_ID") or "0")
-# Role whose current members /whitelist seed imports (one-time snapshot; no auto-sync).
-FAIRACCESS_VERIFIED_ROLE_ID = int(os.getenv("FAIRACCESS_VERIFIED_ROLE_ID") or "0")

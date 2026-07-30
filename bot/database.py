@@ -228,14 +228,7 @@ def db_init():
         conn.execute("INSERT OR IGNORE INTO fairaccess_state(id) VALUES(1)")
 
         # Exempt users: pure internal state, no Discord artifact of any kind.
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS fairaccess_whitelist (
-          user_id  INTEGER PRIMARY KEY,
-          added_by INTEGER NOT NULL,
-          added_at INTEGER NOT NULL
-        )
-        """)
-
+        
         # One row per user per session window; doubles as the visitor feed.
         # room_seconds is a JSON object {channel_id: seconds}. status: 'open'
         # while the window can still accrue, then 'ok' | 'exempt' | 'flagged'.
@@ -666,51 +659,6 @@ def fairaccess_set_panel_message(message_id: int):
     with _db() as conn:
         conn.execute("UPDATE fairaccess_state SET panel_message_id=? WHERE id=1", (message_id,))
         conn.commit()
-
-
-def fairaccess_whitelist_add(user_id: int, added_by: int) -> bool:
-    """True if newly added, False if already present."""
-    with _db() as conn:
-        cur = conn.execute(
-            "INSERT OR IGNORE INTO fairaccess_whitelist(user_id, added_by, added_at) VALUES(?,?,?)",
-            (user_id, added_by, int(time.time())),
-        )
-        conn.commit()
-        return cur.rowcount > 0
-
-
-def fairaccess_whitelist_remove(user_id: int) -> bool:
-    with _db() as conn:
-        cur = conn.execute("DELETE FROM fairaccess_whitelist WHERE user_id=?", (user_id,))
-        conn.commit()
-        return cur.rowcount > 0
-
-
-def fairaccess_whitelist_has(user_id: int) -> bool:
-    with _db() as conn:
-        return conn.execute(
-            "SELECT 1 FROM fairaccess_whitelist WHERE user_id=?", (user_id,)
-        ).fetchone() is not None
-
-
-def fairaccess_whitelist_all() -> list[dict]:
-    with _db() as conn:
-        rows = conn.execute(
-            "SELECT user_id, added_by, added_at FROM fairaccess_whitelist ORDER BY added_at"
-        ).fetchall()
-        return [{"user_id": r[0], "added_by": r[1], "added_at": r[2]} for r in rows]
-
-
-def _fa_window_row(r) -> dict:
-    return {
-        "id": r[0], "user_id": r[1], "started_at": r[2], "last_activity_at": r[3],
-        "last_join_at": r[4], "last_join_channel_id": r[5],
-        "room_seconds": r[6], "status": r[7],
-    }
-
-
-_FA_WINDOW_COLS = ("id, user_id, started_at, last_activity_at, last_join_at, "
-                   "last_join_channel_id, room_seconds, status")
 
 
 def fairaccess_window_open_for(user_id: int) -> dict | None:

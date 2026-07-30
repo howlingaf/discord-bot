@@ -12,7 +12,7 @@ Design contract:
     re-running changes nothing.
   * Someone is marked at most once. Since the total never falls back below the
     line, re-marking would undo any `/regular remove` the moment the next sweep
-    ran, leaving staff no way to grant an exception short of the whitelist.
+    ran, leaving `/regular remove` with no lasting effect.
     That "already handled" check starts at FAIRACCESS_REGULAR_RULE_SINCE:
     the rows written by the superseded per-session cooldown rule were bulk
     released, and would otherwise have permanently exempted the very regulars
@@ -31,12 +31,12 @@ Design contract:
     orphans). Only overwrites exactly matching our deny signature are ever
     touched, so unrelated manual per-user overwrites survive.
   * Exemptions: the server owner + FAIRACCESS_MOD_ROLE_ID are invisible to the
-    system entirely, as is FAIRACCESS_EXEMPT_IDS (the host). Whitelisted users
-    are tallied — their sessions show in the visitor feed — but never marked
-    automatically.
+    system entirely, as is FAIRACCESS_EXEMPT_IDS (the host). There is no
+    whitelist — it was removed 2026-07-30 as a second, overlapping way to say
+    "leave this person alone". `/regular remove` is permanent and covers it.
   * The admin panel is one bot-owned pinned message, re-rendered wholesale from
     state on every change and at startup — purely informational; all staff
-    actions go through the /whitelist and /regular slash commands.
+    actions go through the /regular slash commands.
 """
 
 import asyncio
@@ -55,7 +55,6 @@ from .config import (
     FAIRACCESS_REGULAR_MINUTES,
     FAIRACCESS_EXEMPT_IDS,
     FAIRACCESS_TRACKED_ROOMS,
-    FAIRACCESS_VERIFIED_ROLE_ID,
     FAIRACCESS_WINDOW_RESET_HOURS,
     GUILD_ID,
     STREAMER_DISCORD_ID,
@@ -86,10 +85,6 @@ from .database import (
     fairaccess_set_all_empty_since,
     fairaccess_set_panel_message,
     fairaccess_state_get,
-    fairaccess_whitelist_add,
-    fairaccess_whitelist_all,
-    fairaccess_whitelist_has,
-    fairaccess_whitelist_remove,
     fairaccess_window_create,
     fairaccess_window_open_for,
     fairaccess_window_update,
@@ -231,9 +226,9 @@ def _update_occupancy(bot, now: int) -> None:
 
 
 def _close_window(w: dict, now: int, status: str | None = None) -> None:
-    """Finalize a window row; status defaults by live whitelist membership."""
+    """Finalize a window row."""
     if status is None:
-        status = "exempt" if fairaccess_whitelist_has(w["user_id"]) else "ok"
+        status = "ok"
     fairaccess_window_update(w["id"], status=status, last_join_at=None,
                              last_join_channel_id=None, last_activity_at=w["last_activity_at"])
 
@@ -377,7 +372,6 @@ async def _apply_regulars(bot) -> bool:
         user_id = row["user_id"]
         if (row["seconds"] < limit
                 or user_id in FAIRACCESS_EXEMPT_IDS
-                or fairaccess_whitelist_has(user_id)
                 or fairaccess_cooldown_ever_for(user_id, FAIRACCESS_REGULAR_RULE_SINCE)):
             continue
         await _flag(bot, user_id, {str(FAIRACCESS_REGULAR_ROOM): row["seconds"]},
@@ -402,40 +396,6 @@ async def _flag(bot, user_id: int, rooms: dict, now: int,
 # ------------------------------------------------------------------ #
 #  Staff actions (shared by buttons and slash commands)              #
 # ------------------------------------------------------------------ #
-
-async def whitelist_add(bot, user_id: int, added_by: int) -> tuple[bool, str]:
-    async with _lock:
-        if not fairaccess_whitelist_add(user_id, added_by):
-            return False, "Already whitelisted."
-    await render_panel(bot)   # silent: the list row appearing is the signal
-    return True, f"Whitelisted <@{user_id}>."
-
-
-async def whitelist_remove(bot, user_id: int, removed_by: int) -> tuple[bool, str]:
-    async with _lock:
-        if not fairaccess_whitelist_remove(user_id):
-            return False, "Not on the whitelist."
-        # zero their tally: minutes accrued while exempt must not flag them
-        w = fairaccess_window_open_for(user_id)
-        if w:
-            _close_window(w, _now(), status="exempt")
-    await render_panel(bot)   # silent: the list row disappearing is the signal
-    return True, f"Removed <@{user_id}> from the whitelist (tally reset)."
-
-
-async def whitelist_seed(bot, seeded_by: int) -> tuple[bool, str]:
-    """One-time snapshot of the Verified role's current members. No auto-sync."""
-    if not FAIRACCESS_VERIFIED_ROLE_ID:
-        return False, "FAIRACCESS_VERIFIED_ROLE_ID isn't configured."
-    guild = bot.get_guild(GUILD_ID)
-    role = guild.get_role(FAIRACCESS_VERIFIED_ROLE_ID) if guild else None
-    if role is None:
-        return False, "Verified role not found."
-    async with _lock:
-        added = sum(1 for m in role.members if fairaccess_whitelist_add(m.id, seeded_by))
-    await render_panel(bot)   # silent: the whitelist section shows the result
-    return True, f"Seeded {added} member(s) from @{role.name}."
-
 
 async def regular_add(bot, user_id: int, added_by: int) -> tuple[bool, str]:
     """Mark someone a regular by hand, without waiting for their total."""
@@ -540,35 +500,13 @@ def _weekly_totals(user_id: int, rooms: list[int], now: int,
 
 
 def _build_panel(bot) -> discord.ui.LayoutView:
-    """Components-V2 layout, three informational sections; no interactive
+    """Components-V2 layout, informational sections only; no interactive
     components (staff actions are slash commands)."""
-    wl = fairaccess_whitelist_all()
     actives = fairaccess_cooldowns_active()
     totals = voice_time_totals(VOICE_TIME_ROOMS, _now(), _FEED_LIMIT,
                                exclude_user_ids=VOICE_TIME_EXCLUDE_IDS)
 
     view = discord.ui.LayoutView(timeout=None)
-
-    # ---- whitelist (text only; managed via /whitelist add|remove) ----
-    # Two equal-width columns: monospace code block with padded display names
-    # (mention pills can't be aligned). Width tracks the longest current name,
-    # clamped at 24 (Discord names cap at 32; most are far shorter).
-    shown = wl[:40]
-    names = []
-    for r in shown:
-        n = _display_name(bot, r["user_id"])
-        names.append(n[:23] + "…" if len(n) > 24 else n)
-    width = max((len(n) for n in names), default=0)
-    wl_lines = [names[i].ljust(width) + "  " + names[i + 1] if i + 1 < len(names)
-                else names[i]
-                for i in range(0, len(names), 2)]
-    body = ("```\n" + "\n".join(wl_lines) + "\n```") if wl_lines else "*empty*"
-    if len(wl) > 40:
-        body += f"\n-# …and {len(wl) - 40} more"
-    view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay("### Never auto-marked"),
-        discord.ui.TextDisplay(body + "\n-# manage via `/whitelist add` · `/whitelist remove`"),
-        accent_color=0x43B581))
 
     # ---- regulars (text only; managed via /regular add|remove) ----
     # A dated row can only be a leftover from the superseded rule; regulars

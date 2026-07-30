@@ -200,38 +200,9 @@ async def twitch_console(interaction: discord.Interaction, command: app_commands
 
 from . import fairaccess as _fa
 
-fa_whitelist = app_commands.Group(
-    name="whitelist", description="(Admin) Fair-access whitelist",
-    default_permissions=discord.Permissions(manage_messages=True))
 fa_regular = app_commands.Group(
     name="regular", description="(Admin) Regulars",
     default_permissions=discord.Permissions(manage_messages=True))
-
-
-@fa_whitelist.command(name="add", description="(Admin) Never mark this user a regular automatically.")
-@app_commands.describe(user="Who to whitelist")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def fa_wl_add(interaction: discord.Interaction, user: discord.User):
-    await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.whitelist_add(bot, user.id, interaction.user.id)
-    await interaction.followup.send(msg, ephemeral=True)
-
-
-@fa_whitelist.command(name="remove", description="(Admin) Remove a user from the whitelist (their tally resets).")
-@app_commands.describe(user="Who to remove")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def fa_wl_remove(interaction: discord.Interaction, user: discord.User):
-    await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.whitelist_remove(bot, user.id, interaction.user.id)
-    await interaction.followup.send(msg, ephemeral=True)
-
-
-@fa_whitelist.command(name="seed", description="(Admin) One-time import of the Verified role's current members.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def fa_wl_seed(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.whitelist_seed(bot, interaction.user.id)
-    await interaction.followup.send(msg, ephemeral=True)
 
 
 @fa_regular.command(name="add", description="(Admin) Mark a user a regular (hides the newcomer room).")
@@ -260,7 +231,6 @@ async def fa_reg_removeall(interaction: discord.Interaction):
     await interaction.followup.send(msg, ephemeral=True)
 
 
-bot.tree.add_command(fa_whitelist)
 bot.tree.add_command(fa_regular)
 
 
