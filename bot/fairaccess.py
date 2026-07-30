@@ -1,4 +1,4 @@
-"""Fair-access cooldown system for the tracked voice rooms.
+"""Regulars: who no longer needs the room kept for newcomers.
 
 The enforced room is for people still finding their footing. Anyone whose
 LIFETIME time in FAIRACCESS_REGULAR_ROOM (#co-working) passes
@@ -8,15 +8,18 @@ manage all of it from the pinned panel in the admin channel.
 
 Design contract:
   * "Regular" is a lifetime total in one room, not a rate. It only ever grows,
-    so the check is idempotent: crossing the line applies one cooldown and
+    so the check is idempotent: crossing the line marks someone once and
     re-running changes nothing.
-  * A cooldown is applied at most once per user. Since the total never falls
-    back below the line, re-applying would undo any `/cooldown release` the
-    moment the next sweep ran, leaving staff no way to grant an exception short
-    of the whitelist. That "already handled" check starts at
-    FAIRACCESS_REGULAR_RULE_SINCE: cooldowns from the superseded per-session
-    rule were bulk-released, and would otherwise have permanently exempted the
-    very regulars this rule exists to catch.
+  * Someone is marked at most once. Since the total never falls back below the
+    line, re-marking would undo any `/regular remove` the moment the next sweep
+    ran, leaving staff no way to grant an exception short of the whitelist.
+    That "already handled" check starts at FAIRACCESS_REGULAR_RULE_SINCE:
+    the rows written by the superseded per-session cooldown rule were bulk
+    released, and would otherwise have permanently exempted the very regulars
+    this rule exists to catch.
+  * The DB still calls a regular a "cooldown" (fairaccess_cooldowns, and the
+    fairaccess_cooldown_* accessors). The name is historical — renaming the
+    table would buy nothing but a migration.
   * Session windows still record per-visit tallies for the audit trail, but no
     longer decide anything — they drove the superseded per-session rule.
   * Enforcement is a per-user permission overwrite on each tracked room denying
@@ -28,13 +31,12 @@ Design contract:
     orphans). Only overwrites exactly matching our deny signature are ever
     touched, so unrelated manual per-user overwrites survive.
   * Exemptions: the server owner + FAIRACCESS_MOD_ROLE_ID are invisible to the
-    system entirely. Whitelisted users (pure DB state, no Discord artifact) are
-    tallied — their sessions show in the visitor feed — but never flagged;
-    removing one from the whitelist closes their open tally so exempt minutes
-    can't flag them.
+    system entirely, as is FAIRACCESS_EXEMPT_IDS (the host). Whitelisted users
+    are tallied — their sessions show in the visitor feed — but never marked
+    automatically.
   * The admin panel is one bot-owned pinned message, re-rendered wholesale from
     state on every change and at startup — purely informational; all staff
-    actions go through the /whitelist and /cooldown slash commands.
+    actions go through the /whitelist and /regular slash commands.
 """
 
 import asyncio
@@ -46,7 +48,6 @@ import discord
 
 from .config import (
     FAIRACCESS_ADMIN_CHANNEL_ID,
-    FAIRACCESS_COOLDOWN_DAYS,
     FAIRACCESS_ENFORCED_ROOMS,
     FAIRACCESS_MOD_ROLE_ID,
     FAIRACCESS_REGULAR_ROOM,
@@ -80,7 +81,6 @@ from .database import (
     fairaccess_cooldown_ever_for,
     fairaccess_cooldown_mark_expired,
     fairaccess_cooldown_release,
-    fairaccess_cooldown_set_expiry,
     fairaccess_cooldowns_active,
     fairaccess_cooldowns_due,
     fairaccess_set_all_empty_since,
@@ -381,7 +381,7 @@ async def _apply_regulars(bot) -> bool:
                 or fairaccess_cooldown_ever_for(user_id, FAIRACCESS_REGULAR_RULE_SINCE)):
             continue
         await _flag(bot, user_id, {str(FAIRACCESS_REGULAR_ROOM): row["seconds"]},
-                    now, window_id=None, expires_at=INDEFINITE)
+                    now, window_id=None)
         print(f"[FAIRACCESS] {user_id} passed {FAIRACCESS_REGULAR_MINUTES}m in "
               f"{FAIRACCESS_REGULAR_ROOM} ({row['seconds'] // 60}m) — cooled down")
         changed = True
@@ -389,12 +389,11 @@ async def _apply_regulars(bot) -> bool:
 
 
 async def _flag(bot, user_id: int, rooms: dict, now: int,
-                window_id: int | None, days: int | None = None,
-                applied_by: int | None = None,
-                expires_at: int | None = None) -> None:
-    expires = expires_at if expires_at is not None else \
-        now + (days or FAIRACCESS_COOLDOWN_DAYS) * 86400
-    fairaccess_cooldown_create(user_id, now, expires, json.dumps(rooms), applied_by)
+                window_id: int | None, applied_by: int | None = None,
+                expires_at: int = INDEFINITE) -> None:
+    """Mark someone a regular. Never dated now — only the superseded rule set
+    an expiry, and its rows are what the sweep's expiry pass still drains."""
+    fairaccess_cooldown_create(user_id, now, expires_at, json.dumps(rooms), applied_by)
     if window_id is not None:
         fairaccess_window_update(window_id, status="flagged")
     await _apply_all(bot, user_id)
@@ -438,102 +437,50 @@ async def whitelist_seed(bot, seeded_by: int) -> tuple[bool, str]:
     return True, f"Seeded {added} member(s) from @{role.name}."
 
 
-async def session_reset(bot, user_id: int) -> tuple[bool, str]:
-    """Zero a user's current session tally. If they're connected right now, a
-    fresh window opens immediately so tracking continues from zero."""
-    async with _lock:
-        w = fairaccess_window_open_for(user_id)
-        if not w:
-            return False, "No open session tally for that user."
-        now = _now()
-        rooms = json.loads(w["room_seconds"])
-        was_connected = (w["last_join_at"], w["last_join_channel_id"])
-        _close_window(w, now)
-        if was_connected[0]:
-            wid = fairaccess_window_create(user_id, now)
-            fairaccess_window_update(wid, last_join_at=now,
-                                     last_join_channel_id=was_connected[1],
-                                     last_activity_at=now)
-    await render_panel(bot)
-    return True, f"Reset <@{user_id}>'s tally (was {_fmt_minutes(bot, rooms)})."
-
-
-async def cooldown_release(bot, user_id: int, released_by: int) -> tuple[bool, str]:
-    async with _lock:
-        cd = fairaccess_cooldown_active_for(user_id)
-        if not cd:
-            return False, "No active cooldown for that user."
-        fairaccess_cooldown_release(cd["id"], released_by, _now())
-    await _remove_all(bot, user_id)
-    # no log message: the row disappearing from the panel is the signal
-    # (released_by is still recorded on the cooldown row for the audit trail)
-    await render_panel(bot)
-    return True, f"Released <@{user_id}>."
-
-
-async def cooldown_release_all(bot, released_by: int) -> tuple[bool, str]:
-    """Release every active cooldown — /cooldown release, applied to each.
-
-    Note this is the opposite of reset_all/indefinite, which keep the cooldowns
-    and only move their expiry: these rows are closed and their room overwrites
-    lifted, so everyone regains the tracked rooms immediately.
-    """
-    async with _lock:
-        actives = fairaccess_cooldowns_active()
-        if not actives:
-            return False, "No active cooldowns."
-        now = _now()
-        for cd in actives:
-            fairaccess_cooldown_release(cd["id"], released_by, now)
-    # Overwrite removal is Discord I/O — outside the lock, as in cooldown_release.
-    for cd in actives:
-        await _remove_all(bot, cd["user_id"])
-    await render_panel(bot)
-    return True, (f"Released {len(actives)} cooldown"
-                  f"{'' if len(actives) == 1 else 's'}.")
-
-
-async def cooldown_reset_all(bot, days: int | None = None) -> tuple[bool, str]:
-    """Restart the clock on every active cooldown: each one now expires `days`
-    from now, whatever it was set to or how far through it had run."""
-    async with _lock:
-        actives = fairaccess_cooldowns_active()
-        if not actives:
-            return False, "No active cooldowns."
-        expires = _now() + (days or FAIRACCESS_COOLDOWN_DAYS) * 86400
-        for cd in actives:
-            fairaccess_cooldown_set_expiry(cd["id"], expires)
-    await render_panel(bot)
-    return True, (f"Restarted {len(actives)} cooldown"
-                  f"{'' if len(actives) == 1 else 's'} — all now release <t:{expires}:R>.")
-
-
-async def cooldown_make_indefinite(bot) -> tuple[bool, str]:
-    """Drop the expiry from every active cooldown — they then last until
-    someone runs /cooldown release."""
-    async with _lock:
-        actives = fairaccess_cooldowns_active()
-        if not actives:
-            return False, "No active cooldowns."
-        for cd in actives:
-            fairaccess_cooldown_set_expiry(cd["id"], INDEFINITE)
-    await render_panel(bot)
-    return True, (f"{len(actives)} cooldown{'' if len(actives) == 1 else 's'} "
-                  "now have no expiry — release them with `/cooldown release`.")
-
-
-async def cooldown_apply(bot, user_id: int, applied_by: int,
-                         days: int | None = None) -> tuple[bool, str]:
+async def regular_add(bot, user_id: int, added_by: int) -> tuple[bool, str]:
+    """Mark someone a regular by hand, without waiting for their total."""
     async with _lock:
         if fairaccess_cooldown_active_for(user_id):
-            return False, "That user already has an active cooldown."
+            return False, "Already a regular."
         w = fairaccess_window_open_for(user_id)
         rooms = json.loads(w["room_seconds"]) if w else {}
         await _flag(bot, user_id, rooms, _now(),
                     window_id=w["id"] if w else None,
-                    days=days, applied_by=applied_by)
+                    applied_by=added_by)
     await render_panel(bot)
-    return True, f"Cooldown applied to <@{user_id}>."
+    return True, f"<@{user_id}> is now a regular."
+
+
+async def regular_remove(bot, user_id: int, removed_by: int) -> tuple[bool, str]:
+    """Un-mark a regular, restoring the room. Permanent: the automatic check
+    skips anyone already marked once, so this is not re-applied later."""
+    async with _lock:
+        cd = fairaccess_cooldown_active_for(user_id)
+        if not cd:
+            return False, "That user isn't a regular."
+        fairaccess_cooldown_release(cd["id"], removed_by, _now())
+    await _remove_all(bot, user_id)
+    # no log message: the row disappearing from the panel is the signal
+    # (removed_by is still recorded on the row for the audit trail)
+    await render_panel(bot)
+    return True, f"<@{user_id}> is no longer a regular."
+
+
+async def regular_remove_all(bot, removed_by: int) -> tuple[bool, str]:
+    """Un-mark every regular at once — regular_remove, applied to each."""
+    async with _lock:
+        actives = fairaccess_cooldowns_active()
+        if not actives:
+            return False, "No regulars."
+        now = _now()
+        for cd in actives:
+            fairaccess_cooldown_release(cd["id"], removed_by, now)
+    # Overwrite removal is Discord I/O — outside the lock, as in regular_remove.
+    for cd in actives:
+        await _remove_all(bot, cd["user_id"])
+    await render_panel(bot)
+    return True, (f"Cleared {len(actives)} regular"
+                  f"{'' if len(actives) == 1 else 's'}.")
 
 
 # ------------------------------------------------------------------ #
@@ -619,18 +566,20 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     if len(wl) > 40:
         body += f"\n-# …and {len(wl) - 40} more"
     view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay("### Fair access — whitelist"),
+        discord.ui.TextDisplay("### Never auto-marked"),
         discord.ui.TextDisplay(body + "\n-# manage via `/whitelist add` · `/whitelist remove`"),
         accent_color=0x43B581))
 
-    # ---- active cooldowns (text only; released via /cooldown release) ----
+    # ---- regulars (text only; managed via /regular add|remove) ----
+    # A dated row can only be a leftover from the superseded rule; regulars
+    # marked under the current one never expire.
     cd_body = "\n".join(
-        f"<@{c['user_id']}> · " + (f"releases <t:{c['expires_at']}:R>"
-                                   if c["expires_at"] else "no expiry")
+        f"<@{c['user_id']}>" + (f" · until <t:{c['expires_at']}:R>"
+                                if c["expires_at"] else "")
         for c in actives) or "*none*"
     view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay("### Active cooldowns"),
-        discord.ui.TextDisplay(cd_body + "\n-# release via `/cooldown release`"),
+        discord.ui.TextDisplay("### Regulars"),
+        discord.ui.TextDisplay(cd_body + "\n-# manage via `/regular add` · `/regular remove`"),
         accent_color=0xED4245))
 
     # ---- attendance: total time per member across the logged rooms ----

@@ -146,7 +146,7 @@ VOICE_TIME_HOST_ROOMS = [
 # Superseded the old per-session tally, which cooled people down for a single
 # long visit regardless of whether they were new.
 FAIRACCESS_REGULAR_ROOM = int(os.getenv("FAIRACCESS_REGULAR_ROOM") or "1482589316520739077")
-FAIRACCESS_REGULAR_MINUTES = int(os.getenv("FAIRACCESS_REGULAR_MINUTES") or "300")
+FAIRACCESS_REGULAR_MINUTES = int(os.getenv("FAIRACCESS_REGULAR_MINUTES") or "500")
 # When the lifetime rule went live (2026-07-30 14:22 CDT). Only cooldowns from
 # at or after this count as "already handled" — everything before it was
 # applied by the superseded per-session rule and then bulk-released, and would
@@ -158,7 +158,6 @@ FAIRACCESS_EXEMPT_IDS = [
 ] or [SPOTIFY_ALLOWED_USER_ID]
 # The tally window resets once all tracked rooms have been empty this long.
 FAIRACCESS_WINDOW_RESET_HOURS = float(os.getenv("FAIRACCESS_WINDOW_RESET_HOURS") or "2")
-FAIRACCESS_COOLDOWN_DAYS = int(os.getenv("FAIRACCESS_COOLDOWN_DAYS") or "7")
 # Members with this role (and the server owner) are exempt from tallying. 0 = owner only.
 FAIRACCESS_MOD_ROLE_ID = int(os.getenv("FAIRACCESS_MOD_ROLE_ID") or "0")
 # Role whose current members /whitelist seed imports (one-time snapshot; no auto-sync).

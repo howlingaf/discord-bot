@@ -203,12 +203,12 @@ from . import fairaccess as _fa
 fa_whitelist = app_commands.Group(
     name="whitelist", description="(Admin) Fair-access whitelist",
     default_permissions=discord.Permissions(manage_messages=True))
-fa_cooldown = app_commands.Group(
-    name="cooldown", description="(Admin) Fair-access cooldowns",
+fa_regular = app_commands.Group(
+    name="regular", description="(Admin) Regulars",
     default_permissions=discord.Permissions(manage_messages=True))
 
 
-@fa_whitelist.command(name="add", description="(Admin) Exempt a user from fair-access cooldowns.")
+@fa_whitelist.command(name="add", description="(Admin) Never mark this user a regular automatically.")
 @app_commands.describe(user="Who to whitelist")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def fa_wl_add(interaction: discord.Interaction, user: discord.User):
@@ -234,64 +234,34 @@ async def fa_wl_seed(interaction: discord.Interaction):
     await interaction.followup.send(msg, ephemeral=True)
 
 
-@fa_cooldown.command(name="release", description="(Admin) End a user's cooldown early (silent).")
-@app_commands.describe(user="Whose cooldown to release")
+@fa_regular.command(name="add", description="(Admin) Mark a user a regular (hides the newcomer room).")
+@app_commands.describe(user="Who to mark")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def fa_cd_release(interaction: discord.Interaction, user: discord.User):
+async def fa_reg_add(interaction: discord.Interaction, user: discord.User):
     await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.cooldown_release(bot, user.id, interaction.user.id)
+    _, msg = await _fa.regular_add(bot, user.id, interaction.user.id)
     await interaction.followup.send(msg, ephemeral=True)
 
 
-@fa_cooldown.command(name="releaseall", description="(Admin) End every active cooldown early (silent).")
+@fa_regular.command(name="remove", description="(Admin) Un-mark a regular, restoring the room (permanent).")
+@app_commands.describe(user="Who to un-mark")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def fa_cd_releaseall(interaction: discord.Interaction):
+async def fa_reg_remove(interaction: discord.Interaction, user: discord.User):
     await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.cooldown_release_all(bot, interaction.user.id)
+    _, msg = await _fa.regular_remove(bot, user.id, interaction.user.id)
     await interaction.followup.send(msg, ephemeral=True)
 
 
-@fa_cooldown.command(name="reset", description="(Admin) Zero a user's current session tally.")
-@app_commands.describe(user="Whose tally to reset")
+@fa_regular.command(name="removeall", description="(Admin) Un-mark every regular at once.")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def fa_cd_reset(interaction: discord.Interaction, user: discord.User):
+async def fa_reg_removeall(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.session_reset(bot, user.id)
-    await interaction.followup.send(msg, ephemeral=True)
-
-
-@fa_cooldown.command(name="apply", description="(Admin) Manually apply a cooldown.")
-@app_commands.describe(user="Who to cool down", days="Duration in days (default 7)")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def fa_cd_apply(interaction: discord.Interaction, user: discord.User,
-                      days: app_commands.Range[int, 1, 90] | None = None):
-    await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.cooldown_apply(bot, user.id, interaction.user.id, days)
-    await interaction.followup.send(msg, ephemeral=True)
-
-
-@fa_cooldown.command(name="resetall",
-                     description="(Admin) Restart the clock on every active cooldown.")
-@app_commands.describe(days="New length in days, counted from now (default 7)")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def fa_cd_resetall(interaction: discord.Interaction,
-                         days: app_commands.Range[int, 1, 90] | None = None):
-    await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.cooldown_reset_all(bot, days)
-    await interaction.followup.send(msg, ephemeral=True)
-
-
-@fa_cooldown.command(name="indefinite",
-                     description="(Admin) Drop the expiry from every active cooldown.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def fa_cd_indefinite(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.cooldown_make_indefinite(bot)
+    _, msg = await _fa.regular_remove_all(bot, interaction.user.id)
     await interaction.followup.send(msg, ephemeral=True)
 
 
 bot.tree.add_command(fa_whitelist)
-bot.tree.add_command(fa_cooldown)
+bot.tree.add_command(fa_regular)
 
 
 @bot.event
