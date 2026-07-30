@@ -544,13 +544,14 @@ def _build_panel(bot) -> discord.ui.LayoutView:
         now = _now()
         weekly = _weekly_totals(STREAMER_DISCORD_ID, VOICE_TIME_HOST_ROOMS, now)
         month = _month_total(STREAMER_DISCORD_ID, VOICE_TIME_HOST_ROOMS, now)
-        rows = [("this week", weekly[0][1] if weekly else 0, "1;32"),
-                ("last week", weekly[1][1] if len(weekly) > 1 else 0, "36"),
-                (f"{datetime.fromtimestamp(now):%B}", month, "30")]
+        rows = [(f"{datetime.fromtimestamp(now):%B}", month, "33"),
+                ("this week", weekly[0][1] if weekly else 0, "1;32"),
+                ("last week", weekly[1][1] if len(weekly) > 1 else 0, "36")]
         # An ansi code block is the only way to colour individual lines — a
         # Container's accent_color paints the whole card, not a row. This week
-        # is bold green because it's the number being watched; the month is
-        # dimmed rather than omitted.
+        # is the only bold one because it's the number being watched. Ansi 30
+        # reads as near-black on Discord's dark theme, so the month is yellow —
+        # legible, and distinct from the two week rows without competing.
         body = "```ansi\n" + "\n".join(
             f"\u001b[{colour}m{label:<12}{_hm(secs)}\u001b[0m"
             for label, secs, colour in rows) + "\n```"
