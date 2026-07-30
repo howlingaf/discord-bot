@@ -462,6 +462,21 @@ def _hm(seconds: int) -> str:
     return f"{seconds // 3600}h {seconds % 3600 // 60}m"
 
 
+def _month_total(user_id: int, rooms: list[int], now: int) -> int:
+    """Seconds so far this calendar month, same bucketing as _weekly_totals:
+    a visit counts toward the month it started in."""
+    if not rooms:
+        return 0
+    start = int(datetime.fromtimestamp(now).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
+    total = 0
+    for v in voice_visits_since(user_id, rooms, start):
+        total += v["seconds"]
+        if v["left_at"] is None:
+            total += max(0, now - v["last_join_at"])
+    return total
+
+
 def _weekly_totals(user_id: int, rooms: list[int], now: int,
                    weeks: int = _HOST_WEEKS) -> list[tuple[int, int]]:
     """[(week_start, seconds)] for the last `weeks` weeks, newest first.
@@ -526,26 +541,22 @@ def _build_panel(bot) -> discord.ui.LayoutView:
 
     # ---- the host's own time across their rooms ----
     if STREAMER_DISCORD_ID:
-        rooms = voice_time_by_channel(STREAMER_DISCORD_ID, _now(), VOICE_TIME_HOST_ROOMS)
-        total = sum(r["seconds"] for r in rooms) // 60
-        # Total plus the week-over-week list only — the per-room split said
-        # which room the hours came from, which isn't the question this card
-        # answers. The footer still names the rooms being counted.
-        body = [f"**{total // 60}h {total % 60}m** total"]
-
-        # Week over week, newest first. Empty weeks are listed rather than
-        # skipped — a gap is the point of the comparison.
-        weekly = _weekly_totals(STREAMER_DISCORD_ID, VOICE_TIME_HOST_ROOMS, _now())
-        wk_lines = []
-        for i, (start, seconds) in enumerate(weekly):
-            label = ("**this week**" if i == 0 else "last week" if i == 1
-                     else f"wk of {datetime.fromtimestamp(start):%b %-d}")
-            wk_lines.append(f"{label} · {_hm(seconds)}")
-
+        now = _now()
+        weekly = _weekly_totals(STREAMER_DISCORD_ID, VOICE_TIME_HOST_ROOMS, now)
+        month = _month_total(STREAMER_DISCORD_ID, VOICE_TIME_HOST_ROOMS, now)
+        rows = [("this week", weekly[0][1] if weekly else 0, "1;32"),
+                ("last week", weekly[1][1] if len(weekly) > 1 else 0, "36"),
+                (f"{datetime.fromtimestamp(now):%B}", month, "30")]
+        # An ansi code block is the only way to colour individual lines — a
+        # Container's accent_color paints the whole card, not a row. This week
+        # is bold green because it's the number being watched; the month is
+        # dimmed rather than omitted.
+        body = "```ansi\n" + "\n".join(
+            f"\u001b[{colour}m{label:<12}{_hm(secs)}\u001b[0m"
+            for label, secs, colour in rows) + "\n```"
         view.add_item(discord.ui.Container(
             discord.ui.TextDisplay(f"### <@{STREAMER_DISCORD_ID}>"),
-            discord.ui.TextDisplay("\n".join(body) if rooms else "*no time logged yet*"),
-            discord.ui.TextDisplay("\n".join(wk_lines)),
+            discord.ui.TextDisplay(body),
             discord.ui.TextDisplay(
                 "-# " + " · ".join(f"#{_room_name(bot, c)}" for c in VOICE_TIME_HOST_ROOMS)),
             accent_color=0xFAA61A))
