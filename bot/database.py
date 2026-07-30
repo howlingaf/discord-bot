@@ -1027,6 +1027,26 @@ def voice_time_by_channel(user_id: int, now: int,
         return [{"channel_id": r[0], "seconds": r[1] or 0} for r in rows]
 
 
+def voice_visits_since(user_id: int, channel_ids: list[int], since: int) -> list[dict]:
+    """One user's visits to `channel_ids` that started at or after `since`.
+
+    Raw rows rather than a SUM: bucketing them by week needs the local-time
+    calendar, which SQLite would only approximate through the server's TZ.
+    """
+    if not channel_ids:
+        return []
+    marks = ",".join("?" * len(channel_ids))
+    with _db() as conn:
+        rows = conn.execute(
+            f"SELECT started_at, seconds, left_at, last_join_at FROM voice_visits "
+            f"WHERE user_id=? AND channel_id IN ({marks}) AND started_at>=? "
+            f"ORDER BY started_at DESC",
+            (user_id, *channel_ids, since),
+        ).fetchall()
+        return [{"started_at": r[0], "seconds": r[1] or 0,
+                 "left_at": r[2], "last_join_at": r[3]} for r in rows]
+
+
 def voice_time_totals(channel_ids: list[int], now: int, limit: int = 15,
                       exclude_user_ids: list[int] | None = None) -> list[dict]:
     """One row per user: their all-time total seconds in `channel_ids`, longest

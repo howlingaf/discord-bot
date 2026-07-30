@@ -33,6 +33,7 @@ Design contract:
 import asyncio
 import json
 import time
+from datetime import datetime, timedelta
 
 import discord
 
@@ -63,6 +64,7 @@ from .database import (
     voice_visit_resume,
     voice_visit_start,
     voice_visits_open,
+    voice_visits_since,
     fairaccess_cooldown_active_for,
     fairaccess_cooldown_create,
     fairaccess_cooldown_mark_expired,
@@ -498,6 +500,55 @@ async def cooldown_apply(bot, user_id: int, applied_by: int,
 _render_lock = asyncio.Lock()
 
 
+_HOST_WEEKS = 6
+
+
+def _week_start(ts: int) -> int:
+    """Unix time of the Monday 00:00 that opens `ts`'s week, server local time."""
+    d = datetime.fromtimestamp(ts)
+    monday = (d - timedelta(days=d.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    return int(monday.timestamp())
+
+
+def _hm(seconds: int) -> str:
+    return f"{seconds // 3600}h {seconds % 3600 // 60}m"
+
+
+def _weekly_totals(user_id: int, rooms: list[int], now: int,
+                   weeks: int = _HOST_WEEKS) -> list[tuple[int, int]]:
+    """[(week_start, seconds)] for the last `weeks` weeks, newest first.
+
+    A visit counts toward the week it STARTED in, so one running through
+    Sunday midnight lands wholly in the earlier week. Rejoins within the merge
+    gap extend their original row, which is what makes that possible at all —
+    splitting would mean logging every join separately.
+
+    Trailing empty weeks are dropped: voice logging only began 2026-07-24, so
+    the window would otherwise open on rows of 0h that mean "not recorded"
+    rather than "wasn't here". This week and last week always survive, so the
+    week-over-week comparison is always there to read.
+    """
+    if not rooms:
+        return []
+    this_week = _week_start(now)
+    starts = [int((datetime.fromtimestamp(this_week) - timedelta(weeks=i)).timestamp())
+              for i in range(weeks)]
+    buckets = {s: 0 for s in starts}
+    for v in voice_visits_since(user_id, rooms, starts[-1]):
+        bucket = _week_start(v["started_at"])
+        if bucket not in buckets:
+            continue
+        secs = v["seconds"]
+        if v["left_at"] is None:
+            secs += max(0, now - v["last_join_at"])
+        buckets[bucket] += secs
+    out = [(s, buckets[s]) for s in starts]
+    while len(out) > 2 and out[-1][1] == 0:
+        out.pop()
+    return out
+
+
 def _build_panel(bot) -> discord.ui.LayoutView:
     """Components-V2 layout, three informational sections; no interactive
     components (staff actions are slash commands)."""
@@ -553,9 +604,20 @@ def _build_panel(bot) -> discord.ui.LayoutView:
         body = [f"**{total // 60}h {total % 60}m** total"]
         body += [f"#{_room_name(bot, r['channel_id'])} · {r['seconds'] // 60} min"
                  for r in rooms if r["seconds"] >= 60]
+
+        # Week over week, newest first. Empty weeks are listed rather than
+        # skipped — a gap is the point of the comparison.
+        weekly = _weekly_totals(STREAMER_DISCORD_ID, VOICE_TIME_HOST_ROOMS, _now())
+        wk_lines = []
+        for i, (start, seconds) in enumerate(weekly):
+            label = ("**this week**" if i == 0 else "last week" if i == 1
+                     else f"wk of {datetime.fromtimestamp(start):%b %-d}")
+            wk_lines.append(f"{label} · {_hm(seconds)}")
+
         view.add_item(discord.ui.Container(
             discord.ui.TextDisplay(f"### <@{STREAMER_DISCORD_ID}>'s voice time"),
             discord.ui.TextDisplay("\n".join(body) if rooms else "*no time logged yet*"),
+            discord.ui.TextDisplay("\n".join(wk_lines)),
             discord.ui.TextDisplay(
                 "-# " + " · ".join(f"#{_room_name(bot, c)}" for c in VOICE_TIME_HOST_ROOMS)),
             accent_color=0xFAA61A))
