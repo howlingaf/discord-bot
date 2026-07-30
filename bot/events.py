@@ -38,6 +38,12 @@ async def on_ready():
         bot._contest_task_started = True
         bot.loop.create_task(leetcode_contest_scheduler(bot))
 
+    # nightly sweep: overnight solves across all three platforms get posts
+    if not getattr(bot, "_sweep_task_started", False):
+        bot._sweep_task_started = True
+        from .solvesweep import solve_sweep_scheduler
+        bot.loop.create_task(solve_sweep_scheduler(bot))
+
     # fair-access cooldown system (tracked rooms + admin panel)
     fairaccess_start(bot)
 

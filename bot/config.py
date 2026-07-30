@@ -65,6 +65,21 @@ EULER_EMOJI = os.getenv("EULER_EMOJI") or "<:projecteuler:1530820117879980144>"
 LEETCODE_WEEKLY_FORUM_CHANNEL_ID   = int(os.getenv("LEETCODE_WEEKLY_FORUM_CHANNEL_ID",  "0"))
 LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID = int(os.getenv("LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID", "0"))
 
+# ---------------- Nightly solve sweep ----------------
+# Every problem solved in the trailing window gets a post + a solution comment,
+# fired Tue-Sat (Mon=0) at this hour, server local time. The window is 12h so a
+# 05:00 run covers the previous evening and night in one piece.
+SOLVE_SWEEP_HOUR = int(os.getenv("SOLVE_SWEEP_HOUR") or "5")
+SOLVE_SWEEP_WINDOW_HOURS = int(os.getenv("SOLVE_SWEEP_WINDOW_HOURS") or "12")
+SOLVE_SWEEP_DAYS = {int(x) for x in
+                    (os.getenv("SOLVE_SWEEP_DAYS") or "1,2,3,4,5").split(",") if x.strip()}
+# Codeforces handle for the public user.status feed. Same name as everywhere else.
+CODEFORCES_HANDLE = os.getenv("CODEFORCES_HANDLE") or STREAMER_NAME
+# CSES has no public API for solves — the sweep signs in to read them. Unset
+# leaves CSES out of the sweep entirely rather than failing it.
+CSES_NICK = os.getenv("CSES_NICK") or ""
+CSES_PASS = os.getenv("CSES_PASS") or ""
+
 # ---------------- Recap ----------------
 RECAP_SECRET = os.getenv("RECAP_SECRET", "")
 LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490

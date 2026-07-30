@@ -192,6 +192,29 @@ def db_init():
             )
             """)
 
+        # One row per solution comment the sweep has posted, so a re-run (or a
+        # restart mid-sweep) tops up rather than repeating itself.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS solve_posts (
+          platform      TEXT NOT NULL,
+          ref           TEXT NOT NULL,
+          submission_id TEXT NOT NULL DEFAULT '',
+          thread_id     INTEGER NOT NULL,
+          posted_at     INTEGER NOT NULL,
+          PRIMARY KEY (platform, ref, submission_id)
+        )
+        """)
+
+        # CSES publishes no solve timestamp — only a solved/not-solved mark — so
+        # "new since last time" is the diff against this snapshot rather than a
+        # time window. Seeded on the first run, which therefore posts nothing.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS cses_solved (
+          ref           TEXT PRIMARY KEY,
+          first_seen_at INTEGER NOT NULL
+        )
+        """)
+
         # ---- Fair-access cooldown system ----
         # Singleton runtime state: when the tracked rooms last all went empty
         # (drives the session-window reset) and the pinned admin panel message.
@@ -934,6 +957,43 @@ def codeforces_cache_upsert_all(entries: list[dict]):
               ",".join(e.get("tags") or []), e.get("contest_name") or "", now)
              for e in entries])
         conn.commit()
+
+
+def solve_post_exists(platform: str, ref: str, submission_id: str) -> bool:
+    with _db() as conn:
+        return conn.execute(
+            "SELECT 1 FROM solve_posts WHERE platform=? AND ref=? AND submission_id=?",
+            (platform, ref, submission_id)).fetchone() is not None
+
+
+def solve_post_save(platform: str, ref: str, submission_id: str, thread_id: int):
+    with _db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO solve_posts(platform, ref, submission_id, thread_id, posted_at) "
+            "VALUES(?,?,?,?,?)",
+            (platform, ref, submission_id, thread_id, int(time.time())))
+        conn.commit()
+
+
+def cses_solved_all() -> set[str]:
+    with _db() as conn:
+        return {r[0] for r in conn.execute("SELECT ref FROM cses_solved")}
+
+
+def cses_solved_add(refs: list[str], now: int):
+    if not refs:
+        return
+    with _db() as conn:
+        conn.executemany("INSERT OR IGNORE INTO cses_solved(ref, first_seen_at) VALUES(?,?)",
+                         [(r, now) for r in refs])
+        conn.commit()
+
+
+def cses_solved_seeded() -> bool:
+    """Whether the snapshot has ever been written — an empty table on a real
+    account is indistinguishable from 'solved nothing yet' without this."""
+    with _db() as conn:
+        return conn.execute("SELECT 1 FROM cses_solved LIMIT 1").fetchone() is not None
 
 
 def site_problem_get(site: str, ref: str) -> dict | None:
