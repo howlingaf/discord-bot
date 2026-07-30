@@ -140,9 +140,22 @@ VOICE_NAME_CHANNEL_ID = int(os.getenv("VOICE_NAME_CHANNEL_ID") or "1529599559167
 VOICE_TIME_HOST_ROOMS = [
     int(x) for x in (os.getenv("VOICE_TIME_HOST_ROOMS") or "").replace(" ", "").split(",") if x
 ] or [1409455382564180009, 1482589316520739077, 1529599559167246548]
-# A user accruing this many cumulative minutes across ALL tracked rooms (within
-# one session window) is cooled down on their next exit.
-FAIRACCESS_THRESHOLD_MINUTES = int(os.getenv("FAIRACCESS_THRESHOLD_MINUTES") or "30")
+# "Regular" is decided by lifetime time in ONE room (#co-working): past this
+# many minutes there, someone is taken to have found their footing and the 1:1
+# room is hidden from them indefinitely, keeping it for people who haven't.
+# Superseded the old per-session tally, which cooled people down for a single
+# long visit regardless of whether they were new.
+FAIRACCESS_REGULAR_ROOM = int(os.getenv("FAIRACCESS_REGULAR_ROOM") or "1482589316520739077")
+FAIRACCESS_REGULAR_MINUTES = int(os.getenv("FAIRACCESS_REGULAR_MINUTES") or "300")
+# When the lifetime rule went live (2026-07-30 14:22 CDT). Only cooldowns from
+# at or after this count as "already handled" — everything before it was
+# applied by the superseded per-session rule and then bulk-released, and would
+# otherwise permanently exempt exactly the regulars this rule is meant to catch.
+FAIRACCESS_REGULAR_RULE_SINCE = int(os.getenv("FAIRACCESS_REGULAR_RULE_SINCE") or "1785439368")
+# Never auto-cooled, whatever their total: the host runs the room.
+FAIRACCESS_EXEMPT_IDS = [
+    int(x) for x in (os.getenv("FAIRACCESS_EXEMPT_IDS") or "").replace(" ", "").split(",") if x
+] or [SPOTIFY_ALLOWED_USER_ID]
 # The tally window resets once all tracked rooms have been empty this long.
 FAIRACCESS_WINDOW_RESET_HOURS = float(os.getenv("FAIRACCESS_WINDOW_RESET_HOURS") or "2")
 FAIRACCESS_COOLDOWN_DAYS = int(os.getenv("FAIRACCESS_COOLDOWN_DAYS") or "7")

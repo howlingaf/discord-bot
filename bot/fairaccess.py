@@ -1,17 +1,24 @@
 """Fair-access cooldown system for the tracked voice rooms.
 
-Two (config-driven) voice rooms are open to everyone, but a user who accrues
-FAIRACCESS_THRESHOLD_MINUTES cumulative minutes across all tracked rooms within
-one session window gets both rooms hidden from them for FAIRACCESS_COOLDOWN_DAYS.
-Everything is silent — no DMs, no announcements; staff see and manage all of it
-from the pinned panel in the admin channel.
+The enforced room is for people still finding their footing. Anyone whose
+LIFETIME time in FAIRACCESS_REGULAR_ROOM (#co-working) passes
+FAIRACCESS_REGULAR_MINUTES counts as a regular and has it hidden from them
+indefinitely. Everything is silent — no DMs, no announcements; staff see and
+manage all of it from the pinned panel in the admin channel.
 
 Design contract:
-  * Flag on exit only — accrual and the threshold check happen when a user
-    leaves a tracked room, never while they're connected.
-  * The session window is global: once ALL tracked rooms have been empty for
-    FAIRACCESS_WINDOW_RESET_HOURS, every open tally closes and the next visit
-    starts from zero. Bouncing in/out within a window keeps accruing.
+  * "Regular" is a lifetime total in one room, not a rate. It only ever grows,
+    so the check is idempotent: crossing the line applies one cooldown and
+    re-running changes nothing.
+  * A cooldown is applied at most once per user. Since the total never falls
+    back below the line, re-applying would undo any `/cooldown release` the
+    moment the next sweep ran, leaving staff no way to grant an exception short
+    of the whitelist. That "already handled" check starts at
+    FAIRACCESS_REGULAR_RULE_SINCE: cooldowns from the superseded per-session
+    rule were bulk-released, and would otherwise have permanently exempted the
+    very regulars this rule exists to catch.
+  * Session windows still record per-visit tallies for the audit trail, but no
+    longer decide anything — they drove the superseded per-session rule.
   * Enforcement is a per-user permission overwrite on each tracked room denying
     ViewChannel + Connect — no roles, ever. Overwrites are applied/removed via
     raw HTTP so departed members and unresolvable ids work the same.
@@ -42,7 +49,10 @@ from .config import (
     FAIRACCESS_COOLDOWN_DAYS,
     FAIRACCESS_ENFORCED_ROOMS,
     FAIRACCESS_MOD_ROLE_ID,
-    FAIRACCESS_THRESHOLD_MINUTES,
+    FAIRACCESS_REGULAR_ROOM,
+    FAIRACCESS_REGULAR_RULE_SINCE,
+    FAIRACCESS_REGULAR_MINUTES,
+    FAIRACCESS_EXEMPT_IDS,
     FAIRACCESS_TRACKED_ROOMS,
     FAIRACCESS_VERIFIED_ROLE_ID,
     FAIRACCESS_WINDOW_RESET_HOURS,
@@ -67,6 +77,7 @@ from .database import (
     voice_visits_since,
     fairaccess_cooldown_active_for,
     fairaccess_cooldown_create,
+    fairaccess_cooldown_ever_for,
     fairaccess_cooldown_mark_expired,
     fairaccess_cooldown_release,
     fairaccess_cooldown_set_expiry,
@@ -263,6 +274,10 @@ async def on_voice_state(bot, member: discord.Member,
             changed = _visit_transition(member.id, b, a, now)
             if left is not None or joined is not None:
                 changed |= await _handle_voice(bot, member, left, joined)
+            # Leaving the regular room is when its total last moved, so check
+            # then rather than making them wait out the sweep interval.
+            if b == FAIRACCESS_REGULAR_ROOM:
+                changed |= await _apply_regulars(bot)
         if changed:
             await render_panel(bot)
     except Exception as e:
@@ -339,18 +354,46 @@ async def _handle_leave(bot, member, channel_id: int, now: int) -> bool:
                             last_join_at=None, last_join_channel_id=None,
                             last_activity_at=now)
 
-    total = sum(rooms.values())
-    if (total >= FAIRACCESS_THRESHOLD_MINUTES * 60
-            and not fairaccess_whitelist_has(member.id)
-            and not fairaccess_cooldown_active_for(member.id)):
-        await _flag(bot, member.id, rooms, now, window_id=w["id"])
+    # No threshold here any more: the tally is kept for the record, but what
+    # earns a cooldown is the lifetime total in the regular room, checked by
+    # _apply_regulars on the sweep and on leaving that room.
     return True
+
+
+async def _apply_regulars(bot) -> bool:
+    """Cool down anyone whose lifetime regular-room total has crossed the line.
+
+    Runs on the sweep and whenever someone leaves that room. Returns whether
+    anything changed, so the caller can re-render the panel.
+    """
+    if not FAIRACCESS_REGULAR_ROOM:
+        return False
+    now = _now()
+    limit = FAIRACCESS_REGULAR_MINUTES * 60
+    changed = False
+    # No feed limit here: this decides access, so it has to see every user, not
+    # the top slice the panel shows.
+    for row in voice_time_totals([FAIRACCESS_REGULAR_ROOM], now, limit=10_000):
+        user_id = row["user_id"]
+        if (row["seconds"] < limit
+                or user_id in FAIRACCESS_EXEMPT_IDS
+                or fairaccess_whitelist_has(user_id)
+                or fairaccess_cooldown_ever_for(user_id, FAIRACCESS_REGULAR_RULE_SINCE)):
+            continue
+        await _flag(bot, user_id, {str(FAIRACCESS_REGULAR_ROOM): row["seconds"]},
+                    now, window_id=None, expires_at=INDEFINITE)
+        print(f"[FAIRACCESS] {user_id} passed {FAIRACCESS_REGULAR_MINUTES}m in "
+              f"{FAIRACCESS_REGULAR_ROOM} ({row['seconds'] // 60}m) — cooled down")
+        changed = True
+    return changed
 
 
 async def _flag(bot, user_id: int, rooms: dict, now: int,
                 window_id: int | None, days: int | None = None,
-                applied_by: int | None = None) -> None:
-    expires = now + (days or FAIRACCESS_COOLDOWN_DAYS) * 86400
+                applied_by: int | None = None,
+                expires_at: int | None = None) -> None:
+    expires = expires_at if expires_at is not None else \
+        now + (days or FAIRACCESS_COOLDOWN_DAYS) * 86400
     fairaccess_cooldown_create(user_id, now, expires, json.dumps(rooms), applied_by)
     if window_id is not None:
         fairaccess_window_update(window_id, status="flagged")
@@ -671,6 +714,10 @@ async def _sweep(bot) -> bool:
         changed = True   # silent: the panel row disappearing is the signal
 
     changed |= _reset_stale_windows(now)
+
+    # New regulars, before reconciling — a cooldown applied here should get its
+    # overwrite checked in the same pass rather than waiting for the next one.
+    changed |= await _apply_regulars(bot)
 
     # reconcile: DB is truth. Re-apply missing overwrites; drop orphans that
     # exactly match our signature.

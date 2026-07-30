@@ -788,6 +788,21 @@ def fairaccess_cooldown_create(user_id: int, applied_at: int, expires_at: int,
 INDEFINITE = 0
 
 
+def fairaccess_cooldown_ever_for(user_id: int, since: int = 0) -> bool:
+    """Whether this user has been cooled down at or after `since` — released
+    and expired ones included.
+
+    The regular-room rule is a lifetime total that never falls back below its
+    threshold, so without this a released cooldown would simply be re-applied
+    on the next sweep. `since` scopes it to the rule's own era, so cooldowns
+    from the superseded per-session rule don't grant a permanent pass.
+    """
+    with _db() as conn:
+        return conn.execute(
+            "SELECT 1 FROM fairaccess_cooldowns WHERE user_id=? AND applied_at>=? LIMIT 1",
+            (user_id, since)).fetchone() is not None
+
+
 def fairaccess_cooldown_active_for(user_id: int) -> dict | None:
     with _db() as conn:
         r = conn.execute(
