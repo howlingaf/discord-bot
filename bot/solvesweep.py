@@ -191,7 +191,11 @@ async def _post_one(bot, platform: str, item: dict) -> str | None:
         return None
 
     if platform == "leetcode":
-        thread_id, err = await lc_get_or_create_post(bot, item["ref"])
+        # Handed over as a url, not the bare slug: the slug parser requires a
+        # hyphen so a mistyped word can't pose as one, which would reject the
+        # single-word slugs ("subsets", "triangle") the api legitimately returns.
+        thread_id, err = await lc_get_or_create_post(
+            bot, f"{LEETCODE_BASE}/problems/{item['ref']}/")
     elif platform == "codeforces":
         thread_id, err = await cf_get_or_create_post(bot, item["ref"])
     else:
