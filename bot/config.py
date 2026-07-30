@@ -65,14 +65,23 @@ EULER_EMOJI = os.getenv("EULER_EMOJI") or "<:projecteuler:1530820117879980144>"
 LEETCODE_WEEKLY_FORUM_CHANNEL_ID   = int(os.getenv("LEETCODE_WEEKLY_FORUM_CHANNEL_ID",  "0"))
 LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID = int(os.getenv("LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID", "0"))
 
-# ---------------- Nightly solve sweep ----------------
-# Every problem solved in the trailing window gets a post + a solution comment,
-# fired Tue-Sat (Mon=0) at this hour, server local time. The window is 12h so a
-# 05:00 run covers the previous evening and night in one piece.
-SOLVE_SWEEP_HOUR = int(os.getenv("SOLVE_SWEEP_HOUR") or "5")
+# ---------------- Solve sweep ----------------
+# Every problem solved during a co-working session gets a post + a solution
+# comment when that session ends, plus one summary card. Replaced a fixed 05:00
+# job: the session is the thing worth summarising, and a clock can only guess
+# where one started and stopped.
+SOLVE_SESSION_ROOMS = [
+    int(x) for x in (os.getenv("SOLVE_SESSION_ROOMS") or "").replace(" ", "").split(",") if x
+] or [1482589316520739077, 1529599559167246548]
+# Sessions shorter than this don't sweep — a drop-in isn't a session.
+SOLVE_SESSION_MINUTES = int(os.getenv("SOLVE_SESSION_MINUTES") or "60")
+# Two visits closer together than this are one session, so stepping between the
+# two rooms (or reconnecting) doesn't split a sitting into sub-hour pieces.
+SOLVE_SESSION_GAP_MINUTES = int(os.getenv("SOLVE_SESSION_GAP_MINUTES") or "15")
+# Heads the summary card in the recap channel.
+SOLVE_SESSION_CARD_TITLE = os.getenv("SOLVE_SESSION_CARD_TITLE") or "#co-working"
+# Only used by scripts/run_solve_sweep.py now, as its default lookback.
 SOLVE_SWEEP_WINDOW_HOURS = int(os.getenv("SOLVE_SWEEP_WINDOW_HOURS") or "12")
-SOLVE_SWEEP_DAYS = {int(x) for x in
-                    (os.getenv("SOLVE_SWEEP_DAYS") or "1,2,3,4,5").split(",") if x.strip()}
 # Codeforces handle for the public user.status feed. Same name as everywhere else.
 CODEFORCES_HANDLE = os.getenv("CODEFORCES_HANDLE") or STREAMER_NAME
 # CSES has no public API for solves — the sweep signs in to read them. Unset

@@ -1,13 +1,20 @@
-"""The 05:00 sweep: every problem solved overnight gets a post and a comment.
+"""Session sweep: a co-working sitting posts the problems it produced.
 
-Runs Tue-Sat, looks back SOLVE_SWEEP_WINDOW_HOURS, and for each problem solved
-in that window creates (or finds) its forum post and replies with the solution
-link. A window with nothing in it posts nothing at all — no "nothing today"
-message.
+When the host leaves the co-working rooms after at least
+SOLVE_SESSION_MINUTES, every problem solved during that sitting gets its forum
+post created (or found), a comment with the solution link, and one summary
+card in the recap channel. A sitting with no solves posts nothing at all — no
+card, no "nothing today" message.
+
+Replaced a fixed 05:00 job. A clock had to guess where a session started and
+stopped and then look back a flat 12 hours; the room itself knows exactly.
+Fires on leaving rather than at the 60-minute mark, since a sweep run
+mid-session would list only what was solved so far and the rest would never be
+carded.
 
 Per-platform notes, because the three differ in what they'll tell us:
   * LeetCode and Codeforces both expose a real submission timestamp, so their
-    window is literally the last 12 hours.
+    window is exactly the session's span.
   * CSES publishes no timestamp — a problem is solved or it isn't — so its
     "new" set is the diff against the stored snapshot instead. That is also
     why the first run seeds the snapshot and posts no CSES problems: every
@@ -27,14 +34,21 @@ import discord
 
 from .codeforces import get_or_create_problem_post as cf_get_or_create_post
 from .config import (
+    CODEFORCES_EMOJI,
     CODEFORCES_HANDLE,
+    CSES_EMOJI,
     CSES_NICK,
     CSES_PASS,
+    EULER_EMOJI,
     GUILD_ID,
     LEETCODE_BASE,
+    LEETCODE_EMOJI,
+    LEETCODE_RECAP_CHANNEL_ID,
     LEETCODE_SUBMISSIONS_URL,
-    SOLVE_SWEEP_DAYS,
-    SOLVE_SWEEP_HOUR,
+    SOLVE_SESSION_CARD_TITLE,
+    SOLVE_SESSION_GAP_MINUTES,
+    SOLVE_SESSION_MINUTES,
+    SOLVE_SESSION_ROOMS,
     SOLVE_SWEEP_WINDOW_HOURS,
     STREAMER_DISCORD_ID,
     STREAMER_NAME,
@@ -45,6 +59,9 @@ from .database import (
     cses_solved_seeded,
     solve_post_exists,
     solve_post_save,
+    solve_session_save,
+    solve_session_seen,
+    voice_visits_since,
 )
 from .leetcode import get_or_create_problem_post_from_ref as lc_get_or_create_post
 from .logbus import log_error
@@ -58,6 +75,8 @@ _CSES_ROW_RE = re.compile(
     r'<a href="/problemset/task/(\d+)"[^>]*>(.*?)</a>.*?'
     r'<span class="task-score icon ([a-z]*)"', re.S)
 _CSES_RESULT_RE = re.compile(r'href="/problemset/result/(\d+)/?"')
+_EMBLEMS = {"leetcode": LEETCODE_EMOJI, "codeforces": CODEFORCES_EMOJI,
+            "cses": CSES_EMOJI, "euler": EULER_EMOJI}
 
 
 def _solver_name() -> str:
@@ -185,10 +204,14 @@ def _submission_url(platform: str, item: dict) -> str:
     return ""
 
 
-async def _post_one(bot, platform: str, item: dict) -> str | None:
-    """Create/find the post and comment on it. Returns a summary line, or None."""
-    if solve_post_exists(platform, item["ref"], item["sub_id"]):
-        return None
+async def _post_one(bot, platform: str, item: dict) -> tuple[int | None, bool]:
+    """Create/find the post and comment on it.
+
+    Returns (thread_id, commented). A problem whose comment already exists
+    still reports its thread: the summary card lists everything solved in the
+    session, not just what was new this pass.
+    """
+    already = solve_post_exists(platform, item["ref"], item["sub_id"])
 
     if platform == "leetcode":
         # Handed over as a url, not the bare slug: the slug parser requires a
@@ -202,7 +225,9 @@ async def _post_one(bot, platform: str, item: dict) -> str | None:
         thread_id, err = await site_get_or_create_post(bot, platform, item["ref"])
     if not thread_id:
         log_error(f"[SWEEP] {platform} {item['ref']}: {err}")
-        return None
+        return None, False
+    if already:
+        return thread_id, False
 
     thread = bot.get_channel(thread_id)
     if not thread:
@@ -210,7 +235,7 @@ async def _post_one(bot, platform: str, item: dict) -> str | None:
             thread = await bot.fetch_channel(thread_id)
         except Exception as e:
             log_error(f"[SWEEP] could not fetch thread {thread_id}: {e!r}")
-            return None
+            return thread_id, False
 
     # <> around the url so the comment doesn't drag an embed in behind it,
     # matching the recap's solution replies.
@@ -222,19 +247,45 @@ async def _post_one(bot, platform: str, item: dict) -> str | None:
         await thread.send(line, allowed_mentions=discord.AllowedMentions.none())
     except Exception as e:
         log_error(f"[SWEEP] comment failed on {thread_id}: {e!r}")
-        return None
+        return thread_id, False
 
     solve_post_save(platform, item["ref"], item["sub_id"], thread_id)
-    return f"{platform} {item['ref']} — {item['title']} → {thread_id}"
+    return thread_id, True
 
 
-async def run_sweep(bot, *, window_hours: int | None = None) -> str:
-    """One pass. Returns a human summary; posts nothing when nothing was solved."""
+async def _post_card(bot, entries: list[dict]) -> None:
+    """One summary card in the recap channel, listing the session's problems."""
+    channel = bot.get_channel(LEETCODE_RECAP_CHANNEL_ID)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(LEETCODE_RECAP_CHANNEL_ID)
+        except Exception as e:
+            log_error(f"[SWEEP] could not fetch recap channel: {e!r}")
+            return
+    lines = []
+    for e in entries:
+        emblem = _EMBLEMS.get(e["platform"], "🔗")
+        url = f"https://discord.com/channels/{GUILD_ID}/{e['thread_id']}"
+        lines.append(f"{emblem} [{e['title']}]({url})")
+    embed = discord.Embed(title=SOLVE_SESSION_CARD_TITLE,
+                          description="\n".join(lines)[:4096],
+                          color=0xFFA116)
+    try:
+        await channel.send(embed=embed)
+    except Exception as e:
+        log_error(f"[SWEEP] card send failed: {e!r}")
+
+
+async def run_sweep(bot, *, window_hours: int | None = None,
+                    start: int | None = None, end: int | None = None,
+                    card: bool = False) -> str:
+    """One pass over a window. Posts nothing at all when nothing was solved."""
     if not bot.http_session:
         return "http session not ready"
     session = bot.http_session
-    end = int(datetime.now().timestamp())
-    start = end - (window_hours or SOLVE_SWEEP_WINDOW_HOURS) * 3600
+    end = end or int(datetime.now().timestamp())
+    if start is None:
+        start = end - (window_hours or SOLVE_SWEEP_WINDOW_HOURS) * 3600
 
     found: list[tuple[str, dict]] = []
     for platform, coro in (("leetcode", leetcode_solves(session, start, end)),
@@ -251,42 +302,75 @@ async def run_sweep(bot, *, window_hours: int | None = None) -> str:
     if not found:
         return "nothing solved in the window"
 
-    posted = []
+    entries, commented = [], 0
     for platform, item in found:
-        line = await _post_one(bot, platform, item)
-        if line:
-            posted.append(line)
-    if not posted:
-        return f"{len(found)} solved, all already posted"
-    return f"posted {len(posted)}:\n" + "\n".join(posted)
+        thread_id, did = await _post_one(bot, platform, item)
+        if not thread_id:
+            continue
+        commented += did
+        entries.append({"platform": platform, "title": item["title"],
+                        "thread_id": thread_id})
+
+    if card and entries:
+        await _post_card(bot, entries)
+    return (f"{len(entries)} problem(s), {commented} new comment(s)"
+            + (", card posted" if card and entries else ""))
 
 
 # ------------------------------------------------------------------ #
-#  Schedule                                                          #
+#  Session trigger                                                   #
 # ------------------------------------------------------------------ #
 
-def _next_run(now: datetime) -> datetime:
-    """Next SOLVE_SWEEP_HOUR:00 falling on an enabled weekday, strictly ahead."""
-    cand = now.replace(hour=SOLVE_SWEEP_HOUR, minute=0, second=0, microsecond=0)
-    if cand <= now:
-        cand += timedelta(days=1)
-    while cand.weekday() not in SOLVE_SWEEP_DAYS:
-        cand += timedelta(days=1)
-    return cand
+def _current_session(user_id: int, now: int) -> tuple[int, int, int] | None:
+    """(start, end, seconds) of the co-working sitting that just ended.
+
+    Visits to either room are walked newest-first and merged while the gap
+    between them stays under SOLVE_SESSION_GAP_MINUTES, so stepping between the
+    two rooms — or a brief disconnect — reads as one sitting rather than a
+    string of sub-hour fragments that would never trigger.
+    """
+    visits = voice_visits_since(user_id, SOLVE_SESSION_ROOMS, now - 24 * 3600)
+    if not visits:
+        return None
+    gap = SOLVE_SESSION_GAP_MINUTES * 60
+    start = end = None
+    total = 0
+    for v in visits:                       # newest first
+        v_end = v["left_at"] or now
+        if end is None:
+            end = v_end
+        elif start - v_end > gap:
+            break
+        start = v["started_at"]
+        total += v["seconds"] + (max(0, now - v["last_join_at"])
+                                 if v["left_at"] is None else 0)
+    return (start, end, total) if start is not None else None
 
 
-async def solve_sweep_scheduler(bot):
-    await bot.wait_until_ready()
-    days = ",".join(str(d) for d in sorted(SOLVE_SWEEP_DAYS))
-    print(f"✅ Solve sweep scheduler started ({SOLVE_SWEEP_HOUR:02d}:00, weekdays {days}, "
-          f"{SOLVE_SWEEP_WINDOW_HOURS}h window)")
-    while not bot.is_closed():
-        now = datetime.now()
-        nxt = _next_run(now)
-        await asyncio.sleep(max(1, (nxt - now).total_seconds()))
-        try:
-            print(f"[SWEEP] {await run_sweep(bot)}")
-        except Exception as e:
-            log_error(f"[SWEEP] run failed: {e!r}")
-        # Past the hour before recomputing, so a fast run can't fire twice.
-        await asyncio.sleep(90)
+async def on_voice_state(bot, member, before, after) -> None:
+    """Sweep when the host finishes a long enough co-working session.
+
+    Fires on leaving, not at the 60-minute mark: a sweep run mid-session would
+    list only what was solved so far and the rest would never get a card.
+    """
+    try:
+        if member.id != STREAMER_DISCORD_ID:
+            return
+        b = before.channel.id if before.channel else None
+        a = after.channel.id if after.channel else None
+        if b == a or b not in SOLVE_SESSION_ROOMS or a in SOLVE_SESSION_ROOMS:
+            return   # still in the pair: the sitting hasn't ended
+        now = int(datetime.now().timestamp())
+        sess = _current_session(member.id, now)
+        if not sess:
+            return
+        start, end, seconds = sess
+        if seconds < SOLVE_SESSION_MINUTES * 60:
+            return
+        if solve_session_seen(start):
+            return   # already swept; a reconnect extended a sitting we did
+        solve_session_save(start, end)
+        print(f"[SWEEP] co-working session {seconds // 60}m — "
+              f"{await run_sweep(bot, start=start, end=end, card=True)}")
+    except Exception as e:
+        log_error(f"[SWEEP] session trigger failed: {e!r}")

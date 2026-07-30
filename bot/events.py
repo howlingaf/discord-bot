@@ -10,6 +10,7 @@ from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler
 from .voicechat import on_voice_update
 from .logbus import log_error, start as logbus_start
 from .fairaccess import start as fairaccess_start, on_voice_state as fairaccess_voice
+from .solvesweep import on_voice_state as solvesweep_voice
 from .voicenames import on_voice_state as voicenames_voice, start as voicenames_start
 from .client import bot
 
@@ -38,11 +39,6 @@ async def on_ready():
         bot._contest_task_started = True
         bot.loop.create_task(leetcode_contest_scheduler(bot))
 
-    # nightly sweep: overnight solves across all three platforms get posts
-    if not getattr(bot, "_sweep_task_started", False):
-        bot._sweep_task_started = True
-        from .solvesweep import solve_sweep_scheduler
-        bot.loop.create_task(solve_sweep_scheduler(bot))
 
     # fair-access cooldown system (tracked rooms + admin panel)
     fairaccess_start(bot)
@@ -85,6 +81,13 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         await fairaccess_voice(bot, member, before, after)
     except Exception as e:
         log_error(f"[VOICE] fair-access failed: {e!r}")
+
+    # --- Solve sweep: a finished co-working session posts its problems ---
+    # After fair-access, which closes the visit row this reads.
+    try:
+        await solvesweep_voice(bot, member, before, after)
+    except Exception as e:
+        log_error(f"[VOICE] solve sweep failed: {e!r}")
 
     # --- Broadcast to any active voice-chat overlay sessions ---
     try:

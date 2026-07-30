@@ -205,6 +205,16 @@ def db_init():
         )
         """)
 
+        # One row per co-working session already swept, so a session that gets
+        # extended by a reconnect doesn't post a second card.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS solve_sessions (
+          session_start INTEGER PRIMARY KEY,
+          ended_at      INTEGER NOT NULL,
+          posted_at     INTEGER NOT NULL
+        )
+        """)
+
         # CSES publishes no solve timestamp — only a solved/not-solved mark — so
         # "new since last time" is the diff against this snapshot rather than a
         # time window. Seeded on the first run, which therefore posts nothing.
@@ -947,6 +957,21 @@ def solve_post_save(platform: str, ref: str, submission_id: str, thread_id: int)
             "INSERT OR IGNORE INTO solve_posts(platform, ref, submission_id, thread_id, posted_at) "
             "VALUES(?,?,?,?,?)",
             (platform, ref, submission_id, thread_id, int(time.time())))
+        conn.commit()
+
+
+def solve_session_seen(session_start: int) -> bool:
+    with _db() as conn:
+        return conn.execute(
+            "SELECT 1 FROM solve_sessions WHERE session_start=?",
+            (session_start,)).fetchone() is not None
+
+
+def solve_session_save(session_start: int, ended_at: int):
+    with _db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO solve_sessions(session_start, ended_at, posted_at) "
+            "VALUES(?,?,?)", (session_start, ended_at, int(time.time())))
         conn.commit()
 
 

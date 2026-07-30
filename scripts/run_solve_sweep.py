@@ -1,7 +1,9 @@
-"""Run the solve sweep once, now, instead of waiting for its 05:00 slot.
+"""Run the solve sweep once, now, over a plain time window.
 
-Useful to catch up after the bot was down through a scheduled run, or to check
-what a window would post. Posts for real — there is no dry mode, because the
+The sweep normally fires when a co-working session ends. This is the manual
+path: useful when the bot was down as a session finished, or to sweep a window
+that never corresponded to one. It posts problems and comments but no summary
+card — the card belongs to a session. Posts for real — there is no dry mode, because the
 sweep's own dedup table is what makes a re-run safe: anything already posted is
 skipped, so running this twice is not the same as posting twice.
 
