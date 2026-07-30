@@ -661,6 +661,18 @@ def fairaccess_set_panel_message(message_id: int):
         conn.commit()
 
 
+def _fa_window_row(r) -> dict:
+    return {
+        "id": r[0], "user_id": r[1], "started_at": r[2], "last_activity_at": r[3],
+        "last_join_at": r[4], "last_join_channel_id": r[5],
+        "room_seconds": r[6], "status": r[7],
+    }
+
+
+_FA_WINDOW_COLS = ("id, user_id, started_at, last_activity_at, last_join_at, "
+                   "last_join_channel_id, room_seconds, status")
+
+
 def fairaccess_window_open_for(user_id: int) -> dict | None:
     with _db() as conn:
         r = conn.execute(
