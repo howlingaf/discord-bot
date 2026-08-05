@@ -15,11 +15,11 @@ carded.
 Per-platform notes, because the three differ in what they'll tell us:
   * LeetCode and Codeforces both expose a real submission timestamp, so their
     window is exactly the session's span.
-  * CSES publishes no timestamp — a problem is solved or it isn't — so its
-    "new" set is the diff against the stored snapshot instead. That is also
-    why the first run seeds the snapshot and posts no CSES problems: every
-    problem ever solved would otherwise land at once. It makes the CSES half
-    immune to the site's display timezone, which is not the server's.
+  * CSES has no "solved at" anywhere it lists solves, so its new set is a diff
+    against a stored snapshot, then filtered by the timestamps on each task
+    page. The diff alone would credit a problem solved days ago to whichever
+    session swept next. The first run seeds the snapshot and posts nothing:
+    every problem ever solved would otherwise land at once.
   * Only Codeforces submission links are public. LeetCode and CSES show a
     submission to its author alone, so those links work for the streamer and
     nobody else. They're posted anyway — the recap has always done the same
@@ -152,8 +152,33 @@ async def _cses_login(session) -> bool:
     return True
 
 
-async def cses_solves(session) -> list[dict]:
-    """CSES problems solved since the last sweep, by snapshot diff.
+# CSES renders submission times in an unknown zone — not UTC, not the server's.
+# Rather than guess one, a timestamp is treated as any local time it could
+# denote across this range of offsets, and counted only if one of them lands in
+# the window. Hours of slack, which is all an unknown zone can cost; the bug
+# this fixes was days out, so the slack never hides it.
+_CSES_OFFSET_RANGE = (-8 * 3600, 3 * 3600)
+_CSES_TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
+
+
+def _cses_in_window(stamp: str, start: int, end: int) -> bool:
+    """Could this CSES-rendered time fall inside [start, end] under any offset?"""
+    try:
+        naive = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S").timestamp()
+    except ValueError:
+        return False
+    lo, hi = naive + _CSES_OFFSET_RANGE[0], naive + _CSES_OFFSET_RANGE[1]
+    return lo <= end and hi >= start
+
+
+async def cses_solves(session, start: int, end: int) -> list[dict]:
+    """CSES problems solved during the window.
+
+    Two filters, because neither alone is enough. The snapshot diff finds what
+    is newly solved — CSES publishes no "solved at", only a solved mark — and
+    the submission timestamps on the task page then decide whether it happened
+    in THIS window. Without the second, a problem solved days ago surfaced at
+    the next sweep and was credited to whatever session happened to fire.
 
     The first run seeds and returns nothing: with no snapshot there is no way
     to tell a fresh solve from one made a year ago.
@@ -184,6 +209,10 @@ async def cses_solves(session) -> list[dict]:
         async with session.get(f"{_CSES}/problemset/view/{ref}/",
                                headers={"User-Agent": _UA}) as r:
             body = await r.text() if r.status == 200 else ""
+        stamps = _CSES_TS_RE.findall(body)
+        if not any(_cses_in_window(t, start, end) for t in stamps):
+            print(f"[SWEEP] cses {ref} solved outside this window — skipped")
+            continue
         ids = _CSES_RESULT_RE.findall(body)
         out.append({"ref": ref, "title": solved[ref],
                     "sub_id": ids[0] if ids else "", "ts": 0})
@@ -295,7 +324,7 @@ async def run_sweep(bot, *, window_hours: int | None = None,
         except Exception as e:
             log_error(f"[SWEEP] {platform} lookup failed: {e!r}")
     try:
-        found += [("cses", i) for i in await cses_solves(session)]
+        found += [("cses", i) for i in await cses_solves(session, start, end)]
     except Exception as e:
         log_error(f"[SWEEP] cses lookup failed: {e!r}")
 
