@@ -66,6 +66,7 @@ from .database import (
 from .leetcode import get_or_create_problem_post_from_ref as lc_get_or_create_post
 from .logbus import log_error
 from .problemsites import get_or_create_problem_post as site_get_or_create_post
+from .recap import ENTRY_SEP
 
 _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/120 Safari/537.36")
@@ -296,8 +297,9 @@ async def _post_card(bot, entries: list[dict]) -> None:
         emblem = _EMBLEMS.get(e["platform"], "🔗")
         url = f"https://discord.com/channels/{GUILD_ID}/{e['thread_id']}"
         lines.append(f"{emblem} [{e['title']}]({url})")
+    # Same spacer the recap card uses, so the two read as one family.
     embed = discord.Embed(title=SOLVE_SESSION_CARD_TITLE,
-                          description="\n".join(lines)[:4096],
+                          description=ENTRY_SEP.join(lines)[:4096],
                           color=0xFFA116)
     try:
         await channel.send(embed=embed)

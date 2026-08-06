@@ -527,14 +527,14 @@ def _platform_rank(host: str) -> tuple[int, str]:
 # Gap between entries. Discord has no half-line spacing, but a subtext line
 # ("-# ") renders shorter than a normal one, so an empty one gives a gap tighter
 # than a blank line without running the entries together.
-_ENTRY_SEP = "\n-# ​\n"
+ENTRY_SEP = "\n-# ​\n"
 
 
 def _chunk_lines(lines: list[str], limit: int = 1024) -> list[str]:
     """Group lines into blocks that fit an embed, small gap between entries."""
     blocks, current = [], ""
     for line in lines:
-        candidate = f"{current}{_ENTRY_SEP}{line}" if current else line
+        candidate = f"{current}{ENTRY_SEP}{line}" if current else line
         if len(candidate) > limit and current:
             blocks.append(current)
             current = line
