@@ -155,7 +155,7 @@ VOICE_TIME_HOST_ROOMS = [
 # Superseded the old per-session tally, which cooled people down for a single
 # long visit regardless of whether they were new.
 FAIRACCESS_REGULAR_ROOM = int(os.getenv("FAIRACCESS_REGULAR_ROOM") or "1482589316520739077")
-FAIRACCESS_REGULAR_MINUTES = int(os.getenv("FAIRACCESS_REGULAR_MINUTES") or "500")
+FAIRACCESS_REGULAR_MINUTES = int(os.getenv("FAIRACCESS_REGULAR_MINUTES") or "300")
 # When the lifetime rule went live (2026-07-30 14:22 CDT). Only cooldowns from
 # at or after this count as "already handled" — everything before it was
 # applied by the superseded per-session rule and then bulk-released, and would
