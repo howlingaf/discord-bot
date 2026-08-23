@@ -114,6 +114,9 @@ COMMAND_LOG_CHANNEL_ID = 1473840278497525872
 
 # ---------------- Error/Failure Log + Bot Console (mods-only #discord-bot-console) ----------------
 DISCORD_LOG_CHANNEL_ID = 1516295491753607268
+# Where /alert pings the owner (#twitch-bot-console) — urgent, deliberately
+# noisy, unlike the silent log feeds.
+ALERT_CHANNEL_ID = int(os.getenv("ALERT_CHANNEL_ID") or "1516295834046828614")
 # Twitch-link approval prompts post to the same mod console channel.
 TWITCH_LINK_PROMPT_CHANNEL_ID = DISCORD_LOG_CHANNEL_ID
 

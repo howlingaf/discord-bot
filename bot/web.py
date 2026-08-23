@@ -11,6 +11,7 @@ from .config import (
     SPOTIFY_ALLOWED_USER_ID,
     RECAP_SECRET,
     CONSOLE_SECRET,
+    ALERT_CHANNEL_ID,
 )
 from .database import consume_state, spotify_upsert_tokens, spotify_set_runtime
 from .recap import process_recap
@@ -168,9 +169,10 @@ def make_web_app(bot_instance) -> web.Application:
     # ---- Twitch bot log relay ----
     @routes.post("/alert")
     async def alert(request: web.Request):
-        """DM the owner. For things they need to know while streaming, where a
-        channel message would be missed — the twitch bot uses this when an ad
-        break failed and pre-rolls have come back."""
+        """Ping the owner in #twitch-bot-console. For things they need to know
+        while streaming — the twitch bot uses this when an ad break failed and
+        pre-rolls have come back. A real @mention, unlike the log feed's silent
+        lines, because it exists to be noticed."""
         _require_bearer(request, CONSOLE_SECRET)
         try:
             payload = await request.json()
@@ -179,15 +181,14 @@ def make_web_app(bot_instance) -> web.Application:
         text = str(payload.get("message") or "").strip()
         if not text:
             raise web.HTTPBadRequest(text="`message` is required")
-        if not SPOTIFY_ALLOWED_USER_ID:
-            raise web.HTTPBadRequest(text="No owner id configured")
+        if not (ALERT_CHANNEL_ID and SPOTIFY_ALLOWED_USER_ID):
+            raise web.HTTPBadRequest(text="Alert channel or owner id not configured")
         try:
-            user = (bot_instance.get_user(SPOTIFY_ALLOWED_USER_ID)
-                    or await bot_instance.fetch_user(SPOTIFY_ALLOWED_USER_ID))
-            await user.send(text[:2000])
-        except discord.Forbidden:
-            # DMs closed — say so rather than reporting a delivery that didn't happen.
-            return web.json_response({"ok": False, "error": "cannot DM owner"}, status=200)
+            channel = (bot_instance.get_channel(ALERT_CHANNEL_ID)
+                       or await bot_instance.fetch_channel(ALERT_CHANNEL_ID))
+            await channel.send(
+                f"<@{SPOTIFY_ALLOWED_USER_ID}> {text}"[:2000],
+                allowed_mentions=discord.AllowedMentions(users=True))
         except Exception as e:
             return web.json_response({"ok": False, "error": repr(e)}, status=200)
         return web.json_response({"ok": True})
