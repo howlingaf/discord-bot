@@ -166,6 +166,32 @@ def make_web_app(bot_instance) -> web.Application:
         return web.json_response({"status": "accepted"})
 
     # ---- Twitch bot log relay ----
+    @routes.post("/alert")
+    async def alert(request: web.Request):
+        """DM the owner. For things they need to know while streaming, where a
+        channel message would be missed — the twitch bot uses this when an ad
+        break failed and pre-rolls have come back."""
+        _require_bearer(request, CONSOLE_SECRET)
+        try:
+            payload = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(text="Invalid JSON")
+        text = str(payload.get("message") or "").strip()
+        if not text:
+            raise web.HTTPBadRequest(text="`message` is required")
+        if not SPOTIFY_ALLOWED_USER_ID:
+            raise web.HTTPBadRequest(text="No owner id configured")
+        try:
+            user = (bot_instance.get_user(SPOTIFY_ALLOWED_USER_ID)
+                    or await bot_instance.fetch_user(SPOTIFY_ALLOWED_USER_ID))
+            await user.send(text[:2000])
+        except discord.Forbidden:
+            # DMs closed — say so rather than reporting a delivery that didn't happen.
+            return web.json_response({"ok": False, "error": "cannot DM owner"}, status=200)
+        except Exception as e:
+            return web.json_response({"ok": False, "error": repr(e)}, status=200)
+        return web.json_response({"ok": True})
+
     @routes.post("/twitch-log")
     async def twitch_log(request: web.Request):
         _require_bearer(request, CONSOLE_SECRET)
