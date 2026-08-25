@@ -93,20 +93,14 @@ CSES_PASS = os.getenv("CSES_PASS") or ""
 # The pinned info embed carries a "usually around <time>" Discord timestamp.
 # bot/infocard.py re-stamps it daily so it keeps meaning this wall-clock hour
 # in this zone across DST, rather than drifting as a fixed instant would.
-# Two copies of the card, deliberately: #info for members (no button) and
-# #info-new-member for newcomers (with the gate button). Both carry the
-# timestamp, so both get re-stamped. "channel:message" pairs.
+# "channel:message" pairs carrying the timestamp; one card today, in #info.
 INFO_CARDS = [
     tuple(int(x) for x in pair.split(":"))
     for pair in (os.getenv("INFO_CARDS")
-                 or "1400587372026003536:1541890345800040464,"
-                    "1541890342805176340:1541890901700517980").split(",") if pair.strip()
+                 or "1400587372026003536:1541890345800040464").split(",") if pair.strip()
 ]
 COWORK_USUAL_HOUR = int(os.getenv("COWORK_USUAL_HOUR") or "22")
 COWORK_TZ = os.getenv("COWORK_TZ") or "America/Chicago"
-# Granted by the "Sounds good" button on the card (bot/gate.py). Its base
-# permissions carry View Channels; @everyone's do not, which is the gate.
-MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID") or "1400535282545197106")
 
 # ---------------- Recap ----------------
 RECAP_SECRET = os.getenv("RECAP_SECRET", "")
