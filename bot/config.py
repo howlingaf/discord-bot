@@ -94,7 +94,7 @@ CSES_PASS = os.getenv("CSES_PASS") or ""
 # bot/infocard.py re-stamps it daily so it keeps meaning this wall-clock hour
 # in this zone across DST, rather than drifting as a fixed instant would.
 INFO_CHANNEL_ID = int(os.getenv("INFO_CHANNEL_ID") or "1400587372026003536")
-INFO_MESSAGE_ID = int(os.getenv("INFO_MESSAGE_ID") or "1541888640588849224")
+INFO_MESSAGE_ID = int(os.getenv("INFO_MESSAGE_ID") or "1541889563444908034")
 COWORK_USUAL_HOUR = int(os.getenv("COWORK_USUAL_HOUR") or "22")
 COWORK_TZ = os.getenv("COWORK_TZ") or "America/Chicago"
 # Granted by the "Sounds good" button on the card (bot/gate.py). Its base
