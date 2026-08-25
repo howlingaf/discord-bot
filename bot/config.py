@@ -113,6 +113,9 @@ LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490
 STREAM_ALERT_CHANNEL_ID = int(os.getenv("STREAM_ALERT_CHANNEL_ID") or "1400572155548405791")
 STREAM_ALERT_TEST_CHANNEL_ID = int(os.getenv("STREAM_ALERT_TEST_CHANNEL_ID") or "1541895984403972147")
 TWITCH_CHANNEL_URL = f"https://twitch.tv/{STREAMER_NAME}"
+# The line above the embed. Kept in step by hand with the Go Live Notification
+# set in Twitch's Stream Manager — Helix doesn't expose that text to read.
+STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT") or "the howler is back AWOOO"
 
 # ---------------- Twitch bot console (outbound control API) ----------------
 # Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
