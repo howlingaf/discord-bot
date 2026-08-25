@@ -97,6 +97,9 @@ INFO_CHANNEL_ID = int(os.getenv("INFO_CHANNEL_ID") or "1400587372026003536")
 INFO_MESSAGE_ID = int(os.getenv("INFO_MESSAGE_ID") or "1541888640588849224")
 COWORK_USUAL_HOUR = int(os.getenv("COWORK_USUAL_HOUR") or "22")
 COWORK_TZ = os.getenv("COWORK_TZ") or "America/Chicago"
+# Granted by the "Sounds good" button on the card (bot/gate.py). Its base
+# permissions carry View Channels; @everyone's do not, which is the gate.
+MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID") or "1400535282545197106")
 
 # ---------------- Recap ----------------
 RECAP_SECRET = os.getenv("RECAP_SECRET", "")

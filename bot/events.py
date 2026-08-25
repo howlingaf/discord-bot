@@ -26,6 +26,10 @@ async def on_ready():
     from .twitchlink import register as twitchlink_register
     twitchlink_register(bot)
 
+    # register the #info "Sounds good" button (grants Member)
+    from .gate import register as gate_register
+    gate_register(bot)
+
     # start the relay that posts Twitch-bot logs into #twitch-bot-console
     from .twitchlog import start as twitchlog_start
     twitchlog_start(bot)
