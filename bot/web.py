@@ -203,7 +203,7 @@ def make_web_app(bot_instance) -> web.Application:
                           url=vod["url"] if vod else TWITCH_CHANNEL_URL,
                           color=0x9146FF)
         if game:
-            e.add_field(name="Game", value=game[:1024], inline=True)
+            e.add_field(name="Category", value=game[:1024], inline=True)
         if vod:
             e.add_field(name="VOD", value=f"{vod['duration']} · **[Watch]({vod['url']})**", inline=True)
         return e
