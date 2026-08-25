@@ -21,7 +21,7 @@ from .config import (
 )
 from .logbus import log_error
 
-_STAMP_RE = re.compile(r"(Usually around )<t:(\d+):t>")
+_STAMP_RE = re.compile(r"(usually weekdays around )<t:(\d+):t>", re.I)
 
 
 def _todays_instant() -> int:
