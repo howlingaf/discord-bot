@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import re
 
 import discord
 from aiohttp import web
@@ -198,6 +199,17 @@ def make_web_app(bot_instance) -> web.Application:
         return web.json_response({"ok": True})
 
     # ---- Stream alerts (go-live post, then edited into a VOD card) ----
+    def _round_duration(raw: str) -> str:
+        """Twitch's "14h12m40s" -> "14h13m": rounded UP to the minute. Seconds
+        are noise on a multi-hour stream, and rounding up means a 59s stream
+        reads "1m", never "0m"."""
+        m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", raw or "")
+        if not m or not raw:
+            return raw or "?"
+        h, mi, se = (int(x or 0) for x in m.groups())
+        total = h * 60 + mi + (1 if se else 0)
+        return f"{total // 60}h{total % 60}m" if total >= 60 else f"{total}m"
+
     def _alert_embed(title: str, game: str, vod: dict | None) -> discord.Embed:
         e = discord.Embed(title=(title or "Live")[:256],
                           url=vod["url"] if vod else TWITCH_CHANNEL_URL,
@@ -206,7 +218,7 @@ def make_web_app(bot_instance) -> web.Application:
             e.add_field(name="Category", value=game[:1024], inline=True)
         if vod:
             # The title already links to the VOD; a second link would be noise.
-            e.add_field(name="Duration", value=vod["duration"], inline=True)
+            e.add_field(name="Duration", value=_round_duration(vod["duration"]), inline=True)
         return e
 
     async def _alert_channel(test: bool):
