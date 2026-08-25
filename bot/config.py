@@ -128,9 +128,6 @@ VOICECHAT_SECRET = os.getenv("VOICECHAT_SECRET", "")
 # same as any other voice channel. Kept as an id for the attendance rooms below.
 SECRET_STREAMS_CHANNEL_ID = 1409455382564180009
 
-# ---------------- Command Logging ----------------
-COMMAND_LOG_CHANNEL_ID = 1473840278497525872
-
 # ---------------- Error/Failure Log + Bot Console (mods-only #discord-bot-console) ----------------
 DISCORD_LOG_CHANNEL_ID = 1516295491753607268
 # Where /alert pings the owner (#twitch-bot-console) — urgent, deliberately
