@@ -206,7 +206,7 @@ def make_web_app(bot_instance) -> web.Application:
             e.add_field(name="Category", value=game[:1024], inline=True)
         if vod:
             # The title already links to the VOD; a second link would be noise.
-            e.add_field(name="Length", value=vod["duration"], inline=True)
+            e.add_field(name="Duration", value=vod["duration"], inline=True)
         return e
 
     async def _alert_channel(test: bool):
