@@ -40,6 +40,12 @@ async def on_ready():
         bot.loop.create_task(leetcode_contest_scheduler(bot))
 
 
+    # keep the #info card's "usually around <time>" correct across DST
+    if not getattr(bot, "_infocard_task_started", False):
+        bot._infocard_task_started = True
+        from .infocard import scheduler as infocard_scheduler
+        bot.loop.create_task(infocard_scheduler(bot))
+
     # fair-access cooldown system (tracked rooms + admin panel)
     fairaccess_start(bot)
 
