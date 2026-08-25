@@ -106,6 +106,14 @@ COWORK_TZ = os.getenv("COWORK_TZ") or "America/Chicago"
 RECAP_SECRET = os.getenv("RECAP_SECRET", "")
 LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490
 
+# ---------------- Stream alerts ----------------
+# Go-live announcement (replaces Sapphire's): @everyone + an embed with the
+# title and game, edited into a VOD card when the stream ends. Posted by the
+# twitch bot through /stream-alert. Test mode targets #testing and never pings.
+STREAM_ALERT_CHANNEL_ID = int(os.getenv("STREAM_ALERT_CHANNEL_ID") or "1400572155548405791")
+STREAM_ALERT_TEST_CHANNEL_ID = int(os.getenv("STREAM_ALERT_TEST_CHANNEL_ID") or "1541895984403972147")
+TWITCH_CHANNEL_URL = f"https://twitch.tv/{STREAMER_NAME}"
+
 # ---------------- Twitch bot console (outbound control API) ----------------
 # Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
 CONSOLE_SECRET = os.getenv("CONSOLE_SECRET", "")

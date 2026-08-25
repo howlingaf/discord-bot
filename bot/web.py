@@ -12,6 +12,10 @@ from .config import (
     RECAP_SECRET,
     CONSOLE_SECRET,
     ALERT_CHANNEL_ID,
+    STREAM_ALERT_CHANNEL_ID,
+    STREAM_ALERT_TEST_CHANNEL_ID,
+    STREAMER_NAME,
+    TWITCH_CHANNEL_URL,
 )
 from .database import consume_state, spotify_upsert_tokens, spotify_set_runtime
 from .recap import process_recap
@@ -191,6 +195,60 @@ def make_web_app(bot_instance) -> web.Application:
                 allowed_mentions=discord.AllowedMentions(users=True))
         except Exception as e:
             return web.json_response({"ok": False, "error": repr(e)}, status=200)
+        return web.json_response({"ok": True})
+
+    # ---- Stream alerts (go-live post, then edited into a VOD card) ----
+    def _alert_embed(title: str, game: str, vod: dict | None) -> discord.Embed:
+        e = discord.Embed(title=(title or "Live")[:256],
+                          url=vod["url"] if vod else TWITCH_CHANNEL_URL,
+                          color=0x9146FF)
+        if game:
+            e.add_field(name="Game", value=game[:1024], inline=True)
+        if vod:
+            e.add_field(name="VOD", value=f"{vod['duration']} · **[Watch]({vod['url']})**", inline=True)
+        return e
+
+    async def _alert_channel(test: bool):
+        cid = STREAM_ALERT_TEST_CHANNEL_ID if test else STREAM_ALERT_CHANNEL_ID
+        return bot_instance.get_channel(cid) or await bot_instance.fetch_channel(cid)
+
+    @routes.post("/stream-alert")
+    async def stream_alert(request: web.Request):
+        """Go-live. Returns the message id so the caller can edit it later.
+        A real @everyone — unless test=true, which posts to #testing unpinged."""
+        _require_bearer(request, CONSOLE_SECRET)
+        try:
+            payload = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(text="Invalid JSON")
+        test = bool(payload.get("test"))
+        try:
+            channel = await _alert_channel(test)
+            msg = await channel.send(
+                f"@everyone {STREAMER_NAME} is live!",
+                embed=_alert_embed(payload.get("title") or "", payload.get("game") or "", None),
+                allowed_mentions=discord.AllowedMentions(everyone=not test))
+        except Exception as e:
+            return web.json_response({"ok": False, "error": repr(e)})
+        return web.json_response({"ok": True, "message_id": str(msg.id)})
+
+    @routes.post("/stream-alert/vod")
+    async def stream_alert_vod(request: web.Request):
+        """Edit a go-live post into its VOD card. Never re-pings: an edit can't."""
+        _require_bearer(request, CONSOLE_SECRET)
+        try:
+            payload = await request.json()
+            message_id = int(payload["message_id"])
+        except Exception:
+            raise web.HTTPBadRequest(text="Invalid JSON or missing message_id")
+        vod = {"url": payload.get("vod_url") or TWITCH_CHANNEL_URL,
+               "duration": payload.get("duration") or "?"}
+        try:
+            channel = await _alert_channel(bool(payload.get("test")))
+            msg = await channel.fetch_message(message_id)
+            await msg.edit(embed=_alert_embed(payload.get("title") or "", payload.get("game") or "", vod))
+        except Exception as e:
+            return web.json_response({"ok": False, "error": repr(e)})
         return web.json_response({"ok": True})
 
     @routes.post("/twitch-log")
