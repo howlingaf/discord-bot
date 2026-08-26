@@ -82,6 +82,10 @@ CODEFORCES_HANDLE = os.getenv("CODEFORCES_HANDLE") or STREAMER_NAME
 # leaves CSES out of the sweep entirely rather than failing it.
 CSES_NICK = os.getenv("CSES_NICK") or ""
 CSES_PASS = os.getenv("CSES_PASS") or ""
+# The zone CSES renders submission times in. It has no per-account setting;
+# calibrated 2026-08-26 against a solve with a known session window (only
+# Helsinki placed it inside), which is what you'd expect of a Finnish site.
+CSES_TZ = os.getenv("CSES_TZ") or "Europe/Helsinki"
 
 # ---------------- #info card ----------------
 # The pinned info embed carries a "usually around <time>" Discord timestamp.

@@ -11,9 +11,9 @@ Per-platform notes, because the three differ in what they'll tell us:
     window is exactly the session's span.
   * CSES has no "solved at" anywhere it lists solves, so its new set is a diff
     against a stored snapshot, then filtered by the timestamps on each task
-    page. The diff alone would credit a problem solved days ago to whichever
-    session swept next. The first run seeds the snapshot and posts nothing:
-    every problem ever solved would otherwise land at once.
+    page (rendered in CSES_TZ). The diff alone would credit a problem solved
+    days ago to whichever session swept next. The first run seeds the snapshot
+    and posts nothing: every problem ever solved would otherwise land at once.
   * Only Codeforces submission links are public. LeetCode and CSES show a
     submission to its author alone, so those links work for the streamer and
     nobody else. They're posted anyway — the recap has always done the same
@@ -23,6 +23,7 @@ Per-platform notes, because the three differ in what they'll tell us:
 import asyncio
 import re
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import discord
 
@@ -33,6 +34,7 @@ from .config import (
     CSES_EMOJI,
     CSES_NICK,
     CSES_PASS,
+    CSES_TZ,
     EULER_EMOJI,
     GUILD_ID,
     LEETCODE_BASE,
@@ -131,23 +133,16 @@ async def _cses_login(session) -> bool:
     return True
 
 
-# CSES renders submission times in an unknown zone — not UTC, not the server's.
-# Rather than guess one, a timestamp is treated as any local time it could
-# denote across this range of offsets, and counted only if one of them lands in
-# the window. Hours of slack, which is all an unknown zone can cost; the bug
-# this fixes was days out, so the slack never hides it.
-_CSES_OFFSET_RANGE = (-8 * 3600, 3 * 3600)
 _CSES_TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 
 
-def _cses_in_window(stamp: str, start: int, end: int) -> bool:
-    """Could this CSES-rendered time fall inside [start, end] under any offset?"""
+def _cses_epoch(stamp: str) -> int | None:
+    """A CSES-rendered submission time as a unix epoch, via CSES_TZ."""
     try:
-        naive = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S").timestamp()
+        return int(datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+                   .replace(tzinfo=ZoneInfo(CSES_TZ)).timestamp())
     except ValueError:
-        return False
-    lo, hi = naive + _CSES_OFFSET_RANGE[0], naive + _CSES_OFFSET_RANGE[1]
-    return lo <= end and hi >= start
+        return None
 
 
 async def cses_solves(session, start: int, end: int) -> list[dict]:
@@ -187,8 +182,12 @@ async def cses_solves(session, start: int, end: int) -> list[dict]:
         async with session.get(f"{_CSES}/problemset/view/{ref}/",
                                headers={"User-Agent": BROWSER_UA}) as r:
             body = await r.text() if r.status == 200 else ""
-        stamps = _CSES_TS_RE.findall(body)
-        if not any(_cses_in_window(t, start, end) for t in stamps):
+        epochs = [e for e in map(_cses_epoch, _CSES_TS_RE.findall(body)) if e]
+        if any(e > end + 600 for e in epochs):
+            # A submission "in the future" means CSES_TZ is wrong; say so
+            # rather than silently misfiling every CSES solve.
+            log_error(f"[SWEEP] cses {ref} has a submission after now — CSES_TZ ({CSES_TZ}) looks wrong")
+        if not any(start <= e <= end for e in epochs):
             print(f"[SWEEP] cses {ref} solved outside this window — skipped")
             continue
         ids = _CSES_RESULT_RE.findall(body)
