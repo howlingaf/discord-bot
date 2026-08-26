@@ -46,67 +46,44 @@ async def spotifylink(interaction: discord.Interaction):
         await interaction.response.send_message("\u274c I can't DM you.", ephemeral=True)
 
 
-@bot.tree.command(name="lc", description="Look up or create a forum post for a LeetCode problem.")
-@app_commands.describe(problem="Problem link, or the number (e.g. 67)")
-async def lc(interaction: discord.Interaction, problem: str):
+async def _reply_with_post(interaction: discord.Interaction, lookup) -> None:
+    """Shared body of the problem commands: await a (thread_id, err) lookup and
+    answer with the thread link, ephemerally."""
     await interaction.response.defer(ephemeral=True)
     try:
-        thread_id, err = await lc_get_or_create_post(bot, problem)
+        thread_id, err = await lookup
         if thread_id:
-            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-            await interaction.followup.send(thread_url, ephemeral=True)
-        else:
-            await interaction.followup.send(f"\u274c {err}", ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        # Surface the real failure instead of always blaming the problem ID \u2014
-        # the genuine "not found" case is already handled by the err branch above.
-        await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
-
-
-@bot.tree.command(name="cf", description="Look up or create a forum post for a Codeforces problem.")
-@app_commands.describe(problem="Problem link, or a bare reference like 1421A")
-async def cf(interaction: discord.Interaction, problem: str):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        # Takes the raw string: the same helper the recap uses already accepts
-        # either URL shape or a bare ref, and reports an unusable one as err.
-        thread_id, err = await cf_get_or_create_post(bot, problem)
-        if thread_id:
-            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-            await interaction.followup.send(thread_url, ephemeral=True)
-        else:
-            await interaction.followup.send(f"\u274c {err}", ephemeral=True)
-    except Exception as e:
-        log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
-        await interaction.followup.send(f"\u274c Failed: {e!r}", ephemeral=True)
-
-
-@bot.tree.command(name="cs", description="Look up or create a forum post for a CSES problem.")
-@app_commands.describe(problem="Problem link, or the task number (e.g. 1068)")
-async def cs(interaction: discord.Interaction, problem: str):
-    await _post_site_problem(interaction, "cses", problem)
-
-
-@bot.tree.command(name="eu", description="Look up or create a forum post for a Project Euler problem.")
-@app_commands.describe(problem="Problem link, or the problem number (e.g. 1)")
-async def eu(interaction: discord.Interaction, problem: str):
-    await _post_site_problem(interaction, "euler", problem)
-
-
-async def _post_site_problem(interaction: discord.Interaction, site: str, problem: str):
-    """Shared body for /cs and /eu — they differ only in which site they name."""
-    await interaction.response.defer(ephemeral=True)
-    try:
-        thread_id, err = await site_get_or_create_post(bot, site, problem)
-        if thread_id:
-            thread_url = f"https://discord.com/channels/{GUILD_ID}/{thread_id}"
-            await interaction.followup.send(thread_url, ephemeral=True)
+            await interaction.followup.send(
+                f"https://discord.com/channels/{GUILD_ID}/{thread_id}", ephemeral=True)
         else:
             await interaction.followup.send(f"❌ {err}", ephemeral=True)
     except Exception as e:
         log_error(f"[CMD /{interaction.command.name if interaction.command else '?'}] {e!r}")
         await interaction.followup.send(f"❌ Failed: {e!r}", ephemeral=True)
+
+
+@bot.tree.command(name="lc", description="Look up or create a forum post for a LeetCode problem.")
+@app_commands.describe(problem="Problem link, or the number (e.g. 67)")
+async def lc(interaction: discord.Interaction, problem: str):
+    await _reply_with_post(interaction, lc_get_or_create_post(bot, problem))
+
+
+@bot.tree.command(name="cf", description="Look up or create a forum post for a Codeforces problem.")
+@app_commands.describe(problem="Problem link, or a bare reference like 1421A")
+async def cf(interaction: discord.Interaction, problem: str):
+    await _reply_with_post(interaction, cf_get_or_create_post(bot, problem))
+
+
+@bot.tree.command(name="cs", description="Look up or create a forum post for a CSES problem.")
+@app_commands.describe(problem="Problem link, or the task number (e.g. 1068)")
+async def cs(interaction: discord.Interaction, problem: str):
+    await _reply_with_post(interaction, site_get_or_create_post(bot, "cses", problem))
+
+
+@bot.tree.command(name="eu", description="Look up or create a forum post for a Project Euler problem.")
+@app_commands.describe(problem="Problem link, or the problem number (e.g. 1)")
+async def eu(interaction: discord.Interaction, problem: str):
+    await _reply_with_post(interaction, site_get_or_create_post(bot, "euler", problem))
 
 
 @bot.tree.command(name="name", description="Temporarily rename the chill voice channel while you're in it.")
@@ -139,9 +116,6 @@ async def name_channel(interaction: discord.Interaction, name: app_commands.Rang
 @bot.tree.command(name="problem", description="Renamed \u2014 use /lc instead.")
 @app_commands.describe(problem="Problem link, or the number (e.g. 67)")
 async def problem_stub(interaction: discord.Interaction, problem: str | None = None):
-    # A string option, matching /lc: as an int it would have Discord reject a
-    # pasted link outright, so the one person most in need of the redirect \u2014
-    # someone typing the old name with the new link style \u2014 wouldn't see it.
     hint = f"/lc {problem}" if problem else "/lc <link>"
     await interaction.response.send_message(
         f"That's `{hint}` now.", ephemeral=True)

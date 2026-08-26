@@ -34,9 +34,7 @@ LEETCODE_BASE = "https://leetcode.com"
 MAX_EXAMPLES = int(os.getenv("LEETCODE_MAX_EXAMPLES", "3"))
 
 STREAMER_NAME = "howlingaf"
-# Built from STREAMER_NAME: the account was renamed from "howlongfantods" and
-# the two drifted apart unnoticed, because the api answers a dead handle with
-# 200 and an empty list — the recap saw "no submissions", never an error.
+# Built from STREAMER_NAME; a dead handle returns 200 and [] — never an error.
 LEETCODE_SUBMISSIONS_URL = f"https://leetcode-api-pied.vercel.app/user/{STREAMER_NAME}/submissions"
 # The streamer's Discord id (= the bot owner) so streamer solution lines can show
 # a silent @mention instead of the plain name. 0 -> fall back to STREAMER_NAME.
@@ -67,9 +65,7 @@ LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID = int(os.getenv("LEETCODE_BIWEEKLY_FORUM_CHAN
 
 # ---------------- Solve sweep ----------------
 # Every problem solved during a co-working session gets a post + a solution
-# comment when that session ends, plus one summary card. Replaced a fixed 05:00
-# job: the session is the thing worth summarising, and a clock can only guess
-# where one started and stopped.
+# comment when that session ends, plus one summary card.
 SOLVE_SESSION_ROOMS = [
     int(x) for x in (os.getenv("SOLVE_SESSION_ROOMS") or "").replace(" ", "").split(",") if x
 ] or [1482589316520739077, 1529599559167246548]
@@ -80,8 +76,6 @@ SOLVE_SESSION_MINUTES = int(os.getenv("SOLVE_SESSION_MINUTES") or "60")
 SOLVE_SESSION_GAP_MINUTES = int(os.getenv("SOLVE_SESSION_GAP_MINUTES") or "15")
 # Heads the summary card in the recap channel.
 SOLVE_SESSION_CARD_TITLE = os.getenv("SOLVE_SESSION_CARD_TITLE") or "#co-working"
-# Only used by scripts/run_solve_sweep.py now, as its default lookback.
-SOLVE_SWEEP_WINDOW_HOURS = int(os.getenv("SOLVE_SWEEP_WINDOW_HOURS") or "12")
 # Codeforces handle for the public user.status feed. Same name as everywhere else.
 CODEFORCES_HANDLE = os.getenv("CODEFORCES_HANDLE") or STREAMER_NAME
 # CSES has no public API for solves — the sweep signs in to read them. Unset
@@ -154,17 +148,6 @@ FAIRACCESS_TRACKED_ROOMS = [
 FAIRACCESS_ENFORCED_ROOMS = [
     int(x) for x in (os.getenv("FAIRACCESS_ENFORCED_ROOMS") or "").replace(" ", "").split(",") if x
 ] or list(FAIRACCESS_TRACKED_ROOMS)
-# Rooms the attendance card totals time for — and the only rooms the session
-# log records. Deliberately separate from FAIRACCESS_TRACKED_ROOMS (which drives
-# cooldowns): this is just "how long has each member attended".
-# Defaults: #co-working, #1:1 chillin, #on-stream, #super secret streams.
-VOICE_TIME_ROOMS = [
-    int(x) for x in (os.getenv("VOICE_TIME_ROOMS") or "").replace(" ", "").split(",") if x
-] or [1482589316520739077, 1529599559167246548, 1393005093045145631, SECRET_STREAMS_CHANNEL_ID]
-# Members left off that list — the host's own hours aren't what the panel is for.
-VOICE_TIME_EXCLUDE_IDS = [
-    int(x) for x in (os.getenv("VOICE_TIME_EXCLUDE_IDS") or "").replace(" ", "").split(",") if x
-] or [1236756328307757157]  # howlingaf
 # The one room /name can rename (#chillin). 0 disables the command's effect.
 VOICE_NAME_CHANNEL_ID = int(os.getenv("VOICE_NAME_CHANNEL_ID") or "1529599559167246548")
 # The host gets their own card instead, totalling their time in these rooms:
@@ -173,17 +156,12 @@ VOICE_NAME_CHANNEL_ID = int(os.getenv("VOICE_NAME_CHANNEL_ID") or "1529599559167
 VOICE_TIME_HOST_ROOMS = [
     int(x) for x in (os.getenv("VOICE_TIME_HOST_ROOMS") or "").replace(" ", "").split(",") if x
 ] or [1482589316520739077, 1529599559167246548]
-# "Regular" is decided by lifetime time in ONE room (#co-working): past this
-# many minutes there, someone is taken to have found their footing and the 1:1
-# room is hidden from them indefinitely, keeping it for people who haven't.
-# Superseded the old per-session tally, which cooled people down for a single
-# long visit regardless of whether they were new.
+# "Regular" = past this many lifetime minutes in FAIRACCESS_REGULAR_ROOM
+# (#co-working); the enforced room is then hidden from them indefinitely.
 FAIRACCESS_REGULAR_ROOM = int(os.getenv("FAIRACCESS_REGULAR_ROOM") or "1482589316520739077")
 FAIRACCESS_REGULAR_MINUTES = int(os.getenv("FAIRACCESS_REGULAR_MINUTES") or "300")
-# When the lifetime rule went live (2026-07-30 14:22 CDT). Only cooldowns from
-# at or after this count as "already handled" — everything before it was
-# applied by the superseded per-session rule and then bulk-released, and would
-# otherwise permanently exempt exactly the regulars this rule is meant to catch.
+# Only cooldown rows from this instant on count as "already marked"; older rows
+# came from the superseded per-session rule and were bulk-released.
 FAIRACCESS_REGULAR_RULE_SINCE = int(os.getenv("FAIRACCESS_REGULAR_RULE_SINCE") or "1785439368")
 # Never auto-cooled, whatever their total: the host runs the room.
 FAIRACCESS_EXEMPT_IDS = [

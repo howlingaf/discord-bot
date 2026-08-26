@@ -10,18 +10,11 @@ Design contract:
   * "Regular" is a lifetime total in one room, not a rate. It only ever grows,
     so the check is idempotent: crossing the line marks someone once and
     re-running changes nothing.
-  * Someone is marked at most once. Since the total never falls back below the
-    line, re-marking would undo any `/regular remove` the moment the next sweep
-    ran, leaving `/regular remove` with no lasting effect.
-    That "already handled" check starts at FAIRACCESS_REGULAR_RULE_SINCE:
-    the rows written by the superseded per-session cooldown rule were bulk
-    released, and would otherwise have permanently exempted the very regulars
-    this rule exists to catch.
-  * The DB still calls a regular a "cooldown" (fairaccess_cooldowns, and the
-    fairaccess_cooldown_* accessors). The name is historical — renaming the
-    table would buy nothing but a migration.
-  * Session windows still record per-visit tallies for the audit trail, but no
-    longer decide anything — they drove the superseded per-session rule.
+  * Someone is marked at most once (rows from FAIRACCESS_REGULAR_RULE_SINCE on):
+    the total never falls back below the line, so re-marking would undo every
+    `/regular remove` on the next sweep.
+  * DB rows are still named "cooldown"; a regular is an indefinite cooldown.
+  * Session windows are still tallied but decide nothing.
   * Enforcement is a per-user permission overwrite on each tracked room denying
     ViewChannel + Connect — no roles, ever. Overwrites are applied/removed via
     raw HTTP so departed members and unresolvable ids work the same.
@@ -31,9 +24,7 @@ Design contract:
     orphans). Only overwrites exactly matching our deny signature are ever
     touched, so unrelated manual per-user overwrites survive.
   * Exemptions: the server owner + FAIRACCESS_MOD_ROLE_ID are invisible to the
-    system entirely, as is FAIRACCESS_EXEMPT_IDS (the host). There is no
-    whitelist — it was removed 2026-07-30 as a second, overlapping way to say
-    "leave this person alone". `/regular remove` is permanent and covers it.
+    system entirely, as is FAIRACCESS_EXEMPT_IDS (the host).
   * The admin panel is one bot-owned pinned message, re-rendered wholesale from
     state on every change and at startup — purely informational; all staff
     actions go through the /regular slash commands.
@@ -64,7 +55,6 @@ from .database import (
     INDEFINITE,
     heartbeat_get,
     heartbeat_set,
-    voice_time_by_channel,
     voice_time_totals,
     voice_visit_close,
     voice_visit_open_for,
@@ -75,7 +65,7 @@ from .database import (
     voice_visits_since,
     fairaccess_cooldown_active_for,
     fairaccess_cooldown_create,
-    fairaccess_cooldown_ever_for,
+    fairaccess_regular_marked_since,
     fairaccess_cooldown_mark_expired,
     fairaccess_cooldown_release,
     fairaccess_cooldowns_active,
@@ -121,16 +111,6 @@ def _is_staff_exempt(member: discord.Member) -> bool:
 def _room_name(bot, channel_id: int) -> str:
     ch = bot.get_channel(channel_id)
     return ch.name if ch else str(channel_id)
-
-
-def _fmt_minutes(bot, room_seconds: dict) -> str:
-    """'34 min (1:1 22 + streams 12)' from a {channel_id: seconds} dict."""
-    total = sum(room_seconds.values()) // 60
-    parts = [f"{_room_name(bot, int(cid))} {secs // 60}"
-             for cid, secs in sorted(room_seconds.items()) if secs >= 60]
-    if len(parts) > 1:
-        return f"{total} min ({' + '.join(parts)})"
-    return f"{total} min"
 
 
 def _display_name(bot, user_id: int) -> str:
@@ -346,47 +326,34 @@ async def _handle_leave(bot, member, channel_id: int, now: int) -> bool:
                             last_join_at=None, last_join_channel_id=None,
                             last_activity_at=now)
 
-    # No threshold here any more: the tally is kept for the record, but what
-    # earns a cooldown is the lifetime total in the regular room, checked by
-    # _apply_regulars on the sweep and on leaving that room.
     return True
 
 
 async def _apply_regulars(bot) -> bool:
-    """Cool down anyone whose lifetime regular-room total has crossed the line.
-
-    Runs on the sweep and whenever someone leaves that room. Returns whether
-    anything changed, so the caller can re-render the panel.
-    """
+    """Mark anyone whose lifetime regular-room total has crossed the line.
+    Runs on the sweep and whenever someone leaves that room; returns whether
+    anything changed so the caller can re-render the panel."""
     if not FAIRACCESS_REGULAR_ROOM:
         return False
     now = _now()
     limit = FAIRACCESS_REGULAR_MINUTES * 60
+    marked = fairaccess_regular_marked_since(FAIRACCESS_REGULAR_RULE_SINCE)
     changed = False
-    # No feed limit here: this decides access, so it has to see every user, not
-    # the top slice the panel shows.
-    for row in voice_time_totals([FAIRACCESS_REGULAR_ROOM], now, limit=10_000):
+    # No feed limit: this decides access, so it must see every user.
+    for row in voice_time_totals([FAIRACCESS_REGULAR_ROOM], now, limit=None):
         user_id = row["user_id"]
-        if (row["seconds"] < limit
-                or user_id in FAIRACCESS_EXEMPT_IDS
-                or fairaccess_cooldown_ever_for(user_id, FAIRACCESS_REGULAR_RULE_SINCE)):
+        if row["seconds"] < limit or user_id in FAIRACCESS_EXEMPT_IDS or user_id in marked:
             continue
-        await _flag(bot, user_id, {str(FAIRACCESS_REGULAR_ROOM): row["seconds"]},
-                    now, window_id=None)
+        await _flag(bot, user_id, now)
         print(f"[FAIRACCESS] {user_id} passed {FAIRACCESS_REGULAR_MINUTES}m in "
-              f"{FAIRACCESS_REGULAR_ROOM} ({row['seconds'] // 60}m) — cooled down")
+              f"{FAIRACCESS_REGULAR_ROOM} ({row['seconds'] // 60}m) — marked regular")
         changed = True
     return changed
 
 
-async def _flag(bot, user_id: int, rooms: dict, now: int,
-                window_id: int | None, applied_by: int | None = None,
-                expires_at: int = INDEFINITE) -> None:
-    """Mark someone a regular. Never dated now — only the superseded rule set
-    an expiry, and its rows are what the sweep's expiry pass still drains."""
-    fairaccess_cooldown_create(user_id, now, expires_at, json.dumps(rooms), applied_by)
-    if window_id is not None:
-        fairaccess_window_update(window_id, status="flagged")
+async def _flag(bot, user_id: int, now: int, applied_by: int | None = None) -> None:
+    """Mark someone a regular: an indefinite cooldown row + the room overwrites."""
+    fairaccess_cooldown_create(user_id, now, INDEFINITE, "{}", applied_by)
     await _apply_all(bot, user_id)
 
 
@@ -399,11 +366,7 @@ async def regular_add(bot, user_id: int, added_by: int) -> tuple[bool, str]:
     async with _lock:
         if fairaccess_cooldown_active_for(user_id):
             return False, "Already a regular."
-        w = fairaccess_window_open_for(user_id)
-        rooms = json.loads(w["room_seconds"]) if w else {}
-        await _flag(bot, user_id, rooms, _now(),
-                    window_id=w["id"] if w else None,
-                    applied_by=added_by)
+        await _flag(bot, user_id, _now(), applied_by=added_by)
     await render_panel(bot)
     return True, f"<@{user_id}> is now a regular."
 
@@ -447,11 +410,8 @@ async def regular_remove_all(bot, removed_by: int) -> tuple[bool, str]:
 _render_lock = asyncio.Lock()
 
 
-_HOST_WEEKS = 6
-
-
 def _week_start(ts: int) -> int:
-    """Unix time of the Monday 00:00 that opens `ts`'s week, server local time."""
+    """Unix time of the Monday 00:00 opening `ts`'s week, server local time."""
     d = datetime.fromtimestamp(ts)
     monday = (d - timedelta(days=d.weekday())).replace(
         hour=0, minute=0, second=0, microsecond=0)
@@ -462,53 +422,27 @@ def _hm(seconds: int) -> str:
     return f"{seconds // 3600}h {seconds % 3600 // 60}m"
 
 
-def _month_total(user_id: int, rooms: list[int], now: int) -> int:
-    """Seconds so far this calendar month, same bucketing as _weekly_totals:
-    a visit counts toward the month it started in."""
-    if not rooms:
-        return 0
-    start = int(datetime.fromtimestamp(now).replace(
-        day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
-    total = 0
-    for v in voice_visits_since(user_id, rooms, start):
-        total += v["seconds"]
-        if v["left_at"] is None:
-            total += max(0, now - v["last_join_at"])
-    return total
+def _host_time_rows(user_id: int, rooms: list[int], now: int) -> list[tuple[str, int]]:
+    """[(label, seconds)] for this month, this week and last week.
 
-
-def _weekly_totals(user_id: int, rooms: list[int], now: int,
-                   weeks: int = _HOST_WEEKS) -> list[tuple[int, int]]:
-    """[(week_start, seconds)] for the last `weeks` weeks, newest first.
-
-    A visit counts toward the week it STARTED in, so one running through
-    Sunday midnight lands wholly in the earlier week. Rejoins within the merge
-    gap extend their original row, which is what makes that possible at all —
-    splitting would mean logging every join separately.
-
-    Trailing empty weeks are dropped: voice logging only began 2026-07-24, so
-    the window would otherwise open on rows of 0h that mean "not recorded"
-    rather than "wasn't here". This week and last week always survive, so the
-    week-over-week comparison is always there to read.
+    A visit counts toward the period it STARTED in — one running through
+    Sunday midnight lands wholly in the earlier week. One query covers all
+    three periods; each row is a filtered sum over the same visits.
     """
-    if not rooms:
-        return []
-    this_week = _week_start(now)
-    starts = [int((datetime.fromtimestamp(this_week) - timedelta(weeks=i)).timestamp())
-              for i in range(weeks)]
-    buckets = {s: 0 for s in starts}
-    for v in voice_visits_since(user_id, rooms, starts[-1]):
-        bucket = _week_start(v["started_at"])
-        if bucket not in buckets:
-            continue
-        secs = v["seconds"]
-        if v["left_at"] is None:
-            secs += max(0, now - v["last_join_at"])
-        buckets[bucket] += secs
-    out = [(s, buckets[s]) for s in starts]
-    while len(out) > 2 and out[-1][1] == 0:
-        out.pop()
-    return out
+    this_wk = _week_start(now)
+    last_wk = this_wk - 7 * 86400
+    month = int(datetime.fromtimestamp(now).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
+    visits = voice_visits_since(user_id, rooms, min(month, last_wk)) if rooms else []
+
+    def total(since: int, until: int | None = None) -> int:
+        return sum(v["seconds"] + (max(0, now - v["last_join_at"]) if v["left_at"] is None else 0)
+                   for v in visits if v["started_at"] >= since
+                   and (until is None or v["started_at"] < until))
+
+    return [(f"{datetime.fromtimestamp(now):%B}", total(month)),
+            ("this week", total(this_wk)),
+            ("last week", total(last_wk, this_wk))]
 
 
 def _build_panel(bot) -> discord.ui.LayoutView:
@@ -517,17 +451,12 @@ def _build_panel(bot) -> discord.ui.LayoutView:
     actives = fairaccess_cooldowns_active()
     view = discord.ui.LayoutView(timeout=None)
 
-    # ---- regulars, with the minutes that earned it ----
-    # One card, not a roster plus an attendance list: everyone here is a
-    # regular, so the card's title says it once instead of every row repeating
-    # it. Minutes are #co-working only, since that is what the threshold
-    # measures — a total across every room couldn't be compared against it.
+    # ---- regulars, with their #co-working minutes (what the threshold measures) ----
     cw = {t["user_id"]: t["seconds"] for t in
-          voice_time_totals([FAIRACCESS_REGULAR_ROOM], _now(), limit=10_000)}
+          voice_time_totals([FAIRACCESS_REGULAR_ROOM], _now(), limit=None)}
     listed = sorted((c["user_id"] for c in actives),
                     key=lambda u: cw.get(u, 0), reverse=True)
-    # Several were designated by hand, so a regular with no logged time still
-    # belongs on the list — the minutes are context, not the membership test.
+    # Hand-designated regulars may have no logged time; they still belong here.
     feed_lines = [f"<@{uid}>" + (f" · {cw[uid] // 60} min" if cw.get(uid, 0) >= 60 else "")
                   for uid in listed]
     view.add_item(discord.ui.Container(
@@ -541,20 +470,12 @@ def _build_panel(bot) -> discord.ui.LayoutView:
 
     # ---- the host's own time across their rooms ----
     if STREAMER_DISCORD_ID:
-        now = _now()
-        weekly = _weekly_totals(STREAMER_DISCORD_ID, VOICE_TIME_HOST_ROOMS, now)
-        month = _month_total(STREAMER_DISCORD_ID, VOICE_TIME_HOST_ROOMS, now)
-        rows = [(f"{datetime.fromtimestamp(now):%B}", month, "33"),
-                ("this week", weekly[0][1] if weekly else 0, "1;32"),
-                ("last week", weekly[1][1] if len(weekly) > 1 else 0, "36")]
-        # An ansi code block is the only way to colour individual lines — a
-        # Container's accent_color paints the whole card, not a row. This week
-        # is the only bold one because it's the number being watched. Ansi 30
-        # reads as near-black on Discord's dark theme, so the month is yellow —
-        # legible, and distinct from the two week rows without competing.
+        rows = _host_time_rows(STREAMER_DISCORD_ID, VOICE_TIME_HOST_ROOMS, _now())
+        # ansi block: the only way to colour individual lines. Month yellow,
+        # this week bold green, last week cyan.
         body = "```ansi\n" + "\n".join(
             f"\u001b[{colour}m{label:<12}{_hm(secs)}\u001b[0m"
-            for label, secs, colour in rows) + "\n```"
+            for (label, secs), colour in zip(rows, ("33", "1;32", "36"))) + "\n```"
         view.add_item(discord.ui.Container(
             discord.ui.TextDisplay(f"### <@{STREAMER_DISCORD_ID}>"),
             discord.ui.TextDisplay(body),

@@ -19,35 +19,34 @@ Design contract:
 import asyncio
 import re
 from dataclasses import dataclass
-from html import unescape
 
 import discord
 from aiohttp import ClientTimeout
 
 from .config import CSES_EMOJI, EULER_EMOJI, LEETCODE_PROBLEMS_CHANNEL_ID
 from .database import site_problem_get, site_problem_save
+from .leetcode import _find_forum_tags
 from .logbus import log_error
+from .webutil import BROWSER_UA, strip_tags
 
 _TIMEOUT = ClientTimeout(total=20)
-# Both sites serve plain pages, but a default aiohttp agent gets a worse
-# response from some hosts than a browser one — same UA the recap scrapes with.
-_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-       "(KHTML, like Gecko) Chrome/120 Safari/537.36")
 
 
 @dataclass(frozen=True)
 class _Site:
     label: str          # human name, also the forum tag's name
+    host: str
     emblem: str         # application emoji, shown on the card
     colour: int         # embed colour, approximating the site's own
     url_re: re.Pattern  # problem url -> ref
-    title_re: re.Pattern
+    title_re: re.Pattern  # where the page keeps the problem name
     url_fmt: str
 
 
 SITES: dict[str, _Site] = {
     "cses": _Site(
         label="CSES",
+        host="cses.fi",
         emblem=CSES_EMOJI,
         colour=0x1B6AC6,
         url_re=re.compile(r"cses\.fi/problemset/task/(\d+)", re.I),
@@ -56,6 +55,7 @@ SITES: dict[str, _Site] = {
     ),
     "euler": _Site(
         label="Project Euler",
+        host="projecteuler.net",
         emblem=EULER_EMOJI,
         colour=0x6B5B95,
         url_re=re.compile(r"projecteuler\.net/problem=(\d+)", re.I),
@@ -87,10 +87,6 @@ def problem_url(site_key: str, ref: str) -> str:
     return SITES[site_key].url_fmt.format(ref=ref)
 
 
-def _strip_tags(html: str) -> str:
-    return unescape(re.sub(r"<[^>]+>", "", html)).strip()
-
-
 async def fetch_name(session, site_key: str, ref: str) -> str | None:
     """The problem's name, scraped from its page. None if there's no such problem.
 
@@ -102,7 +98,7 @@ async def fetch_name(session, site_key: str, ref: str) -> str | None:
     site = SITES[site_key]
     url = problem_url(site_key, ref)
     try:
-        async with session.get(url, headers={"User-Agent": _UA}, timeout=_TIMEOUT) as r:
+        async with session.get(url, headers={"User-Agent": BROWSER_UA}, timeout=_TIMEOUT) as r:
             if r.status != 200 or str(r.url).rstrip("/") != url.rstrip("/"):
                 return None
             body = await r.text()
@@ -110,7 +106,7 @@ async def fetch_name(session, site_key: str, ref: str) -> str | None:
         log_error(f"[{site.label.upper()}] name lookup failed for {ref}: {e!r}")
         return None
     m = site.title_re.search(body)
-    name = _strip_tags(m.group(1)) if m else ""
+    name = strip_tags(m.group(1)) if m else ""
     return name or None
 
 
@@ -154,10 +150,9 @@ async def get_or_create_problem_post(bot, site_key: str, text: str) -> tuple[int
         if not isinstance(forum, discord.ForumChannel):
             return None, "problems channel is not a forum channel"
 
-        # Platform tag only, for the reason the Codeforces posts carry one:
-        # Discord orders a thread's tags itself, and difficulty isn't published
-        # by either site anyway. A missing tag doesn't block the post.
-        tags = [t for t in forum.available_tags if t.name == site.label]
+        # Platform tag only; neither site publishes a difficulty. A missing tag
+        # doesn't block the post.
+        tags = _find_forum_tags(forum, [site.label])
 
         try:
             result = await forum.create_thread(

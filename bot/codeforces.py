@@ -34,7 +34,9 @@ from .database import (
     codeforces_problem_get,
     codeforces_problem_save,
 )
+from .leetcode import _find_forum_tags
 from .logbus import log_error
+from .webutil import BROWSER_UA
 
 BASE = "https://codeforces.com"
 _PROBLEMSET_API = f"{BASE}/api/problemset.problems"
@@ -44,9 +46,6 @@ _CACHE_TTL = 7 * 24 * 3600
 # old — otherwise an unknown ref (gym, typo) re-downloads 11k rows each time.
 _MISS_REFRESH_AFTER = 3600
 _TIMEOUT = ClientTimeout(total=30)
-# Codeforces 403s a default aiohttp user agent.
-_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-       "(KHTML, like Gecko) Chrome/120 Safari/537.36")
 
 # Both public URL shapes plus a bare "1421A".
 _URL_RE = re.compile(
@@ -121,7 +120,7 @@ def _band(rating: int | None) -> tuple[str, str, int]:
 
 async def refresh_cache(session: ClientSession) -> int:
     """Mirror the problemset (+ contest names) into the DB. Returns rows written."""
-    headers = {"User-Agent": _UA}
+    headers = {"User-Agent": BROWSER_UA}
     try:
         async with session.get(_PROBLEMSET_API, headers=headers, timeout=_TIMEOUT) as r:
             if r.status != 200:
@@ -233,7 +232,7 @@ async def get_or_create_problem_post(bot, text: str) -> tuple[int | None, str]:
         # — the same two-tag write lands platform-first on one thread and
         # difficulty-first on another, with no way to force it — so the
         # difficulty lives in the card header, where it can't be reordered.
-        tags = [t for t in forum.available_tags if t.name == "Codeforces"]
+        tags = _find_forum_tags(forum, ["Codeforces"])
 
         try:
             result = await forum.create_thread(

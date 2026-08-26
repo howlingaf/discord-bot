@@ -430,36 +430,41 @@ def parse_ref(text: str) -> tuple[str, str] | None:
     return None
 
 
+async def resolve_slug_to_question_id(session: ClientSession, slug: str) -> str | None:
+    """Frontend question id for a slug: the DB first, then the pied API."""
+    existing = leetcode_get_problem_by_slug(slug)
+    if existing:
+        return existing["question_id"]
+    try:
+        async with session.get(LEETCODE_PROBLEM_URL.format(qid=slug)) as resp:
+            if resp.status != 200:
+                print(f"[LEETCODE] could not resolve slug '{slug}': HTTP {resp.status}")
+                return None
+            data = await resp.json()
+    except Exception as e:
+        print(f"[LEETCODE] error resolving slug '{slug}': {e}")
+        return None
+    return str(data.get("questionFrontendId") or data.get("questionId") or "") or None
+
+
 async def get_or_create_problem_post_from_ref(bot, text: str) -> tuple[int | None, str]:
     """Look up or create the post for a problem link, slug or number.
 
-    A slug can't be handed straight to get_or_create_problem_post: both its
-    fast path and the row it saves are keyed on the frontend id, so a problem
-    that already has a thread would get a second one. Resolve to an id first —
-    from the slug index when it's known, otherwise from the API. That costs one
-    extra fetch on the create path, which is worth keeping the locking and
-    dedup in a single place.
+    A slug is resolved to its frontend id first: get_or_create_problem_post
+    keys both its fast path and the row it saves on the id, so handing it a
+    slug for an already-posted problem would create a second thread.
     """
     ref = parse_ref(text)
     if not ref:
         return None, "not a LeetCode problem link"
     kind, value = ref
-    if kind == "id":
-        return await get_or_create_problem_post(bot, value)
-
-    existing = leetcode_get_problem_by_slug(value)
-    if existing:
-        return existing["thread_id"], ""
-    if not bot.http_session:
-        return None, "http session not ready"
-    try:
-        data = await fetch_leetcode_problem(bot.http_session, value)
-    except Exception:
-        return None, f"could not find LeetCode problem '{value}'"
-    qid = str(data["question"].get("questionFrontendId") or "")
-    if not qid:
-        return None, f"could not find LeetCode problem '{value}'"
-    return await get_or_create_problem_post(bot, qid)
+    if kind == "slug":
+        if not bot.http_session:
+            return None, "http session not ready"
+        value = await resolve_slug_to_question_id(bot.http_session, value)
+        if not value:
+            return None, f"could not find LeetCode problem '{ref[1]}'"
+    return await get_or_create_problem_post(bot, value)
 
 
 async def post_leetcode_problem(bot, *, force: bool = False) -> tuple[bool, str]:

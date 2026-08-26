@@ -32,6 +32,20 @@ def _require_bearer(request: web.Request, secret: str):
         raise web.HTTPUnauthorized(text="Invalid or missing auth token")
 
 
+async def _twitch_json(request: web.Request, *required: str) -> dict:
+    """Auth + body for the twitch bot's CONSOLE_SECRET endpoints: a bearer
+    check, a JSON body, and the fields it must carry."""
+    _require_bearer(request, CONSOLE_SECRET)
+    try:
+        payload = await request.json()
+    except Exception:
+        raise web.HTTPBadRequest(text="Invalid JSON")
+    missing = [k for k in required if not payload.get(k)]
+    if missing:
+        raise web.HTTPBadRequest(text=f"missing: {', '.join(missing)}")
+    return payload
+
+
 def _require_recap_auth(request: web.Request):
     """Shared by the recap/post-solution endpoints."""
     _require_bearer(request, RECAP_SECRET)
@@ -174,18 +188,10 @@ def make_web_app(bot_instance) -> web.Application:
     # ---- Twitch bot log relay ----
     @routes.post("/alert")
     async def alert(request: web.Request):
-        """Ping the owner in #twitch-bot-console. For things they need to know
-        while streaming — the twitch bot uses this when an ad break failed and
-        pre-rolls have come back. A real @mention, unlike the log feed's silent
-        lines, because it exists to be noticed."""
-        _require_bearer(request, CONSOLE_SECRET)
-        try:
-            payload = await request.json()
-        except Exception:
-            raise web.HTTPBadRequest(text="Invalid JSON")
-        text = str(payload.get("message") or "").strip()
-        if not text:
-            raise web.HTTPBadRequest(text="`message` is required")
+        """Ping the owner in #twitch-bot-console — a real @mention, because it
+        exists to be noticed (the twitch bot uses it for a failed ad break)."""
+        payload = await _twitch_json(request, "message")
+        text = str(payload["message"]).strip()
         if not (ALERT_CHANNEL_ID and SPOTIFY_ALLOWED_USER_ID):
             raise web.HTTPBadRequest(text="Alert channel or owner id not configured")
         try:
@@ -200,12 +206,13 @@ def make_web_app(bot_instance) -> web.Application:
 
     # ---- Stream alerts (go-live post, then edited into a VOD card) ----
     def _round_duration(raw: str) -> str:
-        """Twitch's "14h12m40s" -> "14h13m": rounded UP to the minute. Seconds
-        are noise on a multi-hour stream, and rounding up means a 59s stream
-        reads "1m", never "0m"."""
-        m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", raw or "")
-        if not m or not raw:
-            return raw or "?"
+        """Twitch's "14h12m40s" -> "14h13m", rounded UP to the minute (so 59s
+        reads "1m", never "0m")."""
+        if not raw:
+            return "?"
+        m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", raw)
+        if not m:
+            return raw
         h, mi, se = (int(x or 0) for x in m.groups())
         total = h * 60 + mi + (1 if se else 0)
         return f"{total // 60}h{total % 60}m" if total >= 60 else f"{total}m"
@@ -229,11 +236,7 @@ def make_web_app(bot_instance) -> web.Application:
     async def stream_alert(request: web.Request):
         """Go-live. Returns the message id so the caller can edit it later.
         A real @everyone — unless test=true, which posts to #testing unpinged."""
-        _require_bearer(request, CONSOLE_SECRET)
-        try:
-            payload = await request.json()
-        except Exception:
-            raise web.HTTPBadRequest(text="Invalid JSON")
+        payload = await _twitch_json(request)
         test = bool(payload.get("test"))
         try:
             channel = await _alert_channel(test)
@@ -248,14 +251,10 @@ def make_web_app(bot_instance) -> web.Application:
     @routes.post("/stream-alert/vod")
     async def stream_alert_vod(request: web.Request):
         """Edit a go-live post into its VOD card. Never re-pings: an edit can't."""
-        _require_bearer(request, CONSOLE_SECRET)
-        try:
-            payload = await request.json()
-            message_id = int(payload["message_id"])
-        except Exception:
-            raise web.HTTPBadRequest(text="Invalid JSON or missing message_id")
+        payload = await _twitch_json(request, "message_id")
+        message_id = int(payload["message_id"])
         vod = {"url": payload.get("vod_url") or TWITCH_CHANNEL_URL,
-               "duration": payload.get("duration") or "?"}
+               "duration": payload.get("duration") or ""}
         try:
             channel = await _alert_channel(bool(payload.get("test")))
             msg = await channel.fetch_message(message_id)
@@ -266,12 +265,7 @@ def make_web_app(bot_instance) -> web.Application:
 
     @routes.post("/twitch-log")
     async def twitch_log(request: web.Request):
-        _require_bearer(request, CONSOLE_SECRET)
-        try:
-            payload = await request.json()
-        except Exception:
-            raise web.HTTPBadRequest(text="Invalid JSON")
-
+        payload = await _twitch_json(request)
         lines = payload.get("lines")
         if lines is None:
             msg = payload.get("message")

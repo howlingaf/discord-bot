@@ -758,19 +758,13 @@ def fairaccess_cooldown_create(user_id: int, applied_at: int, expires_at: int,
 INDEFINITE = 0
 
 
-def fairaccess_cooldown_ever_for(user_id: int, since: int = 0) -> bool:
-    """Whether this user has been cooled down at or after `since` — released
-    and expired ones included.
-
-    The regular-room rule is a lifetime total that never falls back below its
-    threshold, so without this a released cooldown would simply be re-applied
-    on the next sweep. `since` scopes it to the rule's own era, so cooldowns
-    from the superseded per-session rule don't grant a permanent pass.
-    """
+def fairaccess_regular_marked_since(since: int) -> set[int]:
+    """Users with any cooldown row applied at or after `since` — active,
+    released or expired. The regular rule marks each user at most once, so a
+    released row must keep counting or the next sweep re-marks them."""
     with _db() as conn:
-        return conn.execute(
-            "SELECT 1 FROM fairaccess_cooldowns WHERE user_id=? AND applied_at>=? LIMIT 1",
-            (user_id, since)).fetchone() is not None
+        return {r[0] for r in conn.execute(
+            "SELECT DISTINCT user_id FROM fairaccess_cooldowns WHERE applied_at>=?", (since,))}
 
 
 def fairaccess_cooldown_active_for(user_id: int) -> dict | None:
@@ -812,13 +806,6 @@ def fairaccess_cooldowns_due() -> list[dict]:
 def fairaccess_cooldown_mark_expired(cooldown_id: int, now: int):
     with _db() as conn:
         conn.execute("UPDATE fairaccess_cooldowns SET expired_at=? WHERE id=?", (now, cooldown_id))
-        conn.commit()
-
-
-def fairaccess_cooldown_set_expiry(cooldown_id: int, expires_at: int):
-    with _db() as conn:
-        conn.execute("UPDATE fairaccess_cooldowns SET expires_at=? WHERE id=?",
-                     (expires_at, cooldown_id))
         conn.commit()
 
 
@@ -989,13 +976,6 @@ def cses_solved_add(refs: list[str], now: int):
         conn.commit()
 
 
-def cses_solved_seeded() -> bool:
-    """Whether the snapshot has ever been written — an empty table on a real
-    account is indistinguishable from 'solved nothing yet' without this."""
-    with _db() as conn:
-        return conn.execute("SELECT 1 FROM cses_solved LIMIT 1").fetchone() is not None
-
-
 def site_problem_get(site: str, ref: str) -> dict | None:
     table = SITE_PROBLEM_TABLES[site]
     with _db() as conn:
@@ -1068,25 +1048,6 @@ def voice_name_clear(channel_id: int):
         conn.commit()
 
 
-def voice_time_by_channel(user_id: int, now: int,
-                          channel_ids: list[int]) -> list[dict]:
-    """One user's all-time seconds per channel across `channel_ids`, longest
-    first. Open rows include the time accrued since the last join, so the total
-    climbs while they're connected."""
-    if not channel_ids:
-        return []
-    marks = ",".join("?" * len(channel_ids))
-    with _db() as conn:
-        rows = conn.execute(
-            f"SELECT channel_id, SUM(seconds) + SUM(CASE WHEN left_at IS NULL "
-            f"THEN MAX(0, ?-last_join_at) ELSE 0 END) AS total "
-            f"FROM voice_visits WHERE user_id=? AND channel_id IN ({marks}) "
-            f"GROUP BY channel_id ORDER BY total DESC",
-            (now, user_id, *channel_ids),
-        ).fetchall()
-        return [{"channel_id": r[0], "seconds": r[1] or 0} for r in rows]
-
-
 def voice_visits_since(user_id: int, channel_ids: list[int], since: int) -> list[dict]:
     """One user's visits to `channel_ids` that started at or after `since`.
 
@@ -1107,22 +1068,19 @@ def voice_visits_since(user_id: int, channel_ids: list[int], since: int) -> list
                  "left_at": r[2], "last_join_at": r[3]} for r in rows]
 
 
-def voice_time_totals(channel_ids: list[int], now: int, limit: int = 15,
-                      exclude_user_ids: list[int] | None = None) -> list[dict]:
-    """One row per user: their all-time total seconds in `channel_ids`, longest
-    first. Open sessions include the time accrued since the last join, so
-    someone in a room right now keeps climbing."""
+def voice_time_totals(channel_ids: list[int], now: int, limit: int | None = 15) -> list[dict]:
+    """One row per user: all-time seconds in `channel_ids`, longest first. Open
+    sessions include time since the last join. limit=None returns everyone."""
     if not channel_ids:
         return []
     marks = ",".join("?" * len(channel_ids))
-    skip = list(exclude_user_ids or [])
-    skip_clause = f" AND user_id NOT IN ({','.join('?' * len(skip))})" if skip else ""
     with _db() as conn:
         rows = conn.execute(
             f"SELECT user_id, SUM(seconds) + SUM(CASE WHEN left_at IS NULL "
             f"THEN MAX(0, ?-last_join_at) ELSE 0 END) AS total "
-            f"FROM voice_visits WHERE channel_id IN ({marks}){skip_clause} "
-            f"GROUP BY user_id ORDER BY total DESC LIMIT ?",
-            (now, *channel_ids, *skip, limit),
+            f"FROM voice_visits WHERE channel_id IN ({marks}) "
+            f"GROUP BY user_id ORDER BY total DESC"
+            + (" LIMIT ?" if limit is not None else ""),
+            (now, *channel_ids, *([limit] if limit is not None else [])),
         ).fetchall()
         return [{"user_id": r[0], "seconds": r[1] or 0} for r in rows]

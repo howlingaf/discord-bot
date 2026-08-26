@@ -1,11 +1,13 @@
 import re
-from html import unescape
 from urllib.parse import urlparse
 
 import discord
 from aiohttp import ClientSession, ClientTimeout
 
 from .config import (
+    CODEFORCES_EMOJI,
+    CSES_EMOJI,
+    EULER_EMOJI,
     GUILD_ID,
     LEETCODE_BASE,
     LEETCODE_EMOJI,
@@ -20,8 +22,11 @@ from .leetcode import (
     DIFF_EMOJI,
     get_or_create_problem_post,
     fetch_leetcode_problem,
+    resolve_slug_to_question_id,
 )
 from .codeforces import get_or_create_problem_post as cf_get_or_create_post
+from .problemsites import SITES
+from .webutil import BROWSER_UA, strip_tags
 from .logbus import log_error
 from .twitchlink import solution_name, maybe_prompt
 
@@ -42,9 +47,9 @@ DSA_LINK_DOMAINS = (
 # server, no guild emoji slots consumed) — see scripts/sync_platform_emoji.py.
 PLATFORM_EMBLEMS = {
     "leetcode.com": LEETCODE_EMOJI,
-    "codeforces.com": "<:codeforces:1530820117225672890>",
-    "projecteuler.net": "<:projecteuler:1530820117879980144>",
-    "cses.fi": "<:cses:1530822475691196497>",
+    "codeforces.com": CODEFORCES_EMOJI,
+    "projecteuler.net": EULER_EMOJI,
+    "cses.fi": CSES_EMOJI,
 }
 _DEFAULT_EMBLEM = "🔗"
 
@@ -141,6 +146,12 @@ def platform_emblem(url: str) -> str:
     return _DEFAULT_EMBLEM
 
 
+def streamer_solution_line(url: str = "") -> str:
+    """'<@host> submitted a solution!' + the link in <> so it draws no embed."""
+    name = f"<@{STREAMER_DISCORD_ID}>" if STREAMER_DISCORD_ID else f"**{STREAMER_NAME}**"
+    return f"{name} submitted a solution!" + (f"\n<{url}>" if url else "")
+
+
 def link_line(url: str, title: str | None = None, href: str | None = None) -> str:
     """'🔷 [1421A. XORwice](url)' — emblem, problem number, problem name.
 
@@ -171,14 +182,9 @@ def link_line(url: str, title: str | None = None, href: str | None = None) -> st
 # Problem-name lookup per platform. Best effort throughout: a failed fetch just
 # leaves the entry showing its reference (e.g. "Codeforces 1421A") on its own.
 _CF_API = "https://codeforces.com/api/problemset.problems"
-_BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-               "(KHTML, like Gecko) Chrome/120 Safari/537.36")
 _TITLE_TIMEOUT = 20
 # Where each platform keeps the problem name in its page HTML.
-_TITLE_TAGS = {
-    "projecteuler.net": re.compile(r"<h2[^>]*>(.*?)</h2>", re.S | re.I),
-    "cses.fi": re.compile(r"<h1[^>]*>(.*?)</h1>", re.S | re.I),
-}
+_TITLE_TAGS = {site.host: site.title_re for site in SITES.values()}
 _CF_REF_RE = re.compile(
     r"/problemset/problem/(\d+)/(\w+)|/contest/(\d+)/problem/(\w+)", re.I)
 
@@ -192,14 +198,10 @@ def _cf_ref(url: str) -> str | None:
     return f"{contest}{index.upper()}"
 
 
-def _strip_tags(html: str) -> str:
-    return unescape(re.sub(r"<[^>]+>", "", html)).strip()
-
-
 async def fetch_problem_titles(session: ClientSession, urls: list[str]) -> dict[str, str]:
     """Map url -> problem name for the platforms that expose one."""
     titles: dict[str, str] = {}
-    headers = {"User-Agent": _BROWSER_UA}
+    headers = {"User-Agent": BROWSER_UA}
     timeout = ClientTimeout(total=_TITLE_TIMEOUT)
 
     cf = {u: ref for u in urls if (ref := _cf_ref(u)) and "codeforces.com" in _link_host(u)}
@@ -229,7 +231,7 @@ async def fetch_problem_titles(session: ClientSession, urls: list[str]) -> dict[
                     continue
                 m = pattern.search(await resp.text())
             if m:
-                name = _strip_tags(m.group(1))
+                name = strip_tags(m.group(1))
                 if name:
                     titles[url] = name
         except Exception as e:
@@ -255,35 +257,6 @@ async def fetch_streamer_submissions(
         if stream_start <= ts <= stream_end:
             results.append(sub)
     return results
-
-
-async def resolve_slug_to_question_id(
-    session: ClientSession, slug: str
-) -> str | None:
-    """Resolve a problem slug to its frontend question ID.
-
-    Checks the DB first, then falls back to the API.
-    """
-    existing = leetcode_get_problem_by_slug(slug)
-    if existing:
-        return existing["question_id"]
-
-    # Fallback: fetch from API using the /problem/{slug} endpoint
-    # The API also accepts slugs and returns questionFrontendId
-    url = f"https://leetcode-api-pied.vercel.app/problem/{slug}"
-    try:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                print(f"[RECAP] Failed to resolve slug '{slug}': HTTP {resp.status}")
-                return None
-            data = await resp.json()
-            qid = str(data.get("questionFrontendId") or data.get("questionId") or "")
-            if not qid:
-                return None
-            return qid
-    except Exception as e:
-        print(f"[RECAP] Error resolving slug '{slug}': {e}")
-        return None
 
 
 async def process_recap(bot, payload: dict):
@@ -405,11 +378,7 @@ async def process_recap(bot, payload: dict):
         if sub and (sub.get("statusDisplay") or "").lower() == "accepted":
             sub_id = sub.get("id") or ""
             sub_url = f"{LEETCODE_BASE}/problems/{slug}/submissions/{sub_id}/" if sub_id else ""
-            streamer_name = f"<@{STREAMER_DISCORD_ID}>" if STREAMER_DISCORD_ID else f"**{STREAMER_NAME}**"
-            line = f"{streamer_name} submitted a solution!"
-            if sub_url:
-                line += f"\n<{sub_url}>"
-            lines.append(line)
+            lines.append(streamer_solution_line(sub_url))
 
         for cs in entries["chatters"]:
             twitch_user = cs.get("twitch_user") or "anonymous"

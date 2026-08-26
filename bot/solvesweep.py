@@ -6,12 +6,6 @@ post created (or found), a comment with the solution link, and one summary
 card in the recap channel. A sitting with no solves posts nothing at all — no
 card, no "nothing today" message.
 
-Replaced a fixed 05:00 job. A clock had to guess where a session started and
-stopped and then look back a flat 12 hours; the room itself knows exactly.
-Fires on leaving rather than at the 60-minute mark, since a sweep run
-mid-session would list only what was solved so far and the rest would never be
-carded.
-
 Per-platform notes, because the three differ in what they'll tell us:
   * LeetCode and Codeforces both expose a real submission timestamp, so their
     window is exactly the session's span.
@@ -49,14 +43,11 @@ from .config import (
     SOLVE_SESSION_GAP_MINUTES,
     SOLVE_SESSION_MINUTES,
     SOLVE_SESSION_ROOMS,
-    SOLVE_SWEEP_WINDOW_HOURS,
     STREAMER_DISCORD_ID,
-    STREAMER_NAME,
 )
 from .database import (
     cses_solved_add,
     cses_solved_all,
-    cses_solved_seeded,
     solve_post_exists,
     solve_post_save,
     solve_session_save,
@@ -66,10 +57,9 @@ from .database import (
 from .leetcode import get_or_create_problem_post_from_ref as lc_get_or_create_post
 from .logbus import log_error
 from .problemsites import get_or_create_problem_post as site_get_or_create_post
-from .recap import ENTRY_SEP
+from .recap import ENTRY_SEP, fetch_streamer_submissions, streamer_solution_line
+from .webutil import BROWSER_UA, strip_tags
 
-_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-       "(KHTML, like Gecko) Chrome/120 Safari/537.36")
 _CF_STATUS = "https://codeforces.com/api/user.status?handle={handle}&from=1&count=200"
 _CSES = "https://cses.fi"
 _CSES_ROW_RE = re.compile(
@@ -80,39 +70,27 @@ _EMBLEMS = {"leetcode": LEETCODE_EMOJI, "codeforces": CODEFORCES_EMOJI,
             "cses": CSES_EMOJI, "euler": EULER_EMOJI}
 
 
-def _solver_name() -> str:
-    return f"<@{STREAMER_DISCORD_ID}>" if STREAMER_DISCORD_ID else f"**{STREAMER_NAME}**"
-
-
 # ------------------------------------------------------------------ #
 #  Per-platform solve lists                                          #
 # ------------------------------------------------------------------ #
 
 async def leetcode_solves(session, start: int, end: int) -> list[dict]:
-    """Accepted LeetCode submissions in the window, one per problem (earliest
-    accepted — the submission that actually solved it)."""
-    async with session.get(LEETCODE_SUBMISSIONS_URL) as r:
-        if r.status != 200:
-            log_error(f"[SWEEP] LeetCode submissions HTTP {r.status}")
-            return []
-        data = await r.json(content_type=None)
-    subs = data if isinstance(data, list) else data.get("submissions") or []
+    """Accepted LeetCode submissions in the window, one per problem (the
+    earliest accepted — the submission that actually solved it)."""
     out: dict[str, dict] = {}
-    for s in sorted(subs, key=lambda x: int(x.get("timestamp") or 0)):
-        ts = int(s.get("timestamp") or 0)
-        if not (start <= ts <= end) or (s.get("statusDisplay") or "") != "Accepted":
-            continue
-        slug = s.get("titleSlug") or ""
-        if slug and slug not in out:
-            out[slug] = {"ref": slug, "title": s.get("title") or slug,
-                         "sub_id": str(s.get("id") or ""), "ts": ts}
+    for sub in sorted(await fetch_streamer_submissions(session, start, end),
+                      key=lambda x: int(x.get("timestamp") or 0)):
+        slug = sub.get("titleSlug") or ""
+        if slug and slug not in out and (sub.get("statusDisplay") or "") == "Accepted":
+            out[slug] = {"ref": slug, "title": sub.get("title") or slug,
+                         "sub_id": str(sub.get("id") or "")}
     return list(out.values())
 
 
 async def codeforces_solves(session, start: int, end: int) -> list[dict]:
     """Accepted Codeforces submissions in the window, one per problem."""
     url = _CF_STATUS.format(handle=CODEFORCES_HANDLE)
-    async with session.get(url, headers={"User-Agent": _UA}) as r:
+    async with session.get(url, headers={"User-Agent": BROWSER_UA}) as r:
         if r.status != 200:
             log_error(f"[SWEEP] Codeforces user.status HTTP {r.status}")
             return []
@@ -132,18 +110,18 @@ async def codeforces_solves(session, start: int, end: int) -> list[dict]:
         if ref not in out:
             out[ref] = {"ref": ref, "title": p.get("name") or ref,
                         "sub_id": str(s.get("id") or ""),
-                        "contest_id": s.get("contestId") or p.get("contestId"), "ts": ts}
+                        "contest_id": s.get("contestId") or p.get("contestId")}
     return list(out.values())
 
 
 async def _cses_login(session) -> bool:
-    async with session.get(f"{_CSES}/login", headers={"User-Agent": _UA}) as r:
+    async with session.get(f"{_CSES}/login", headers={"User-Agent": BROWSER_UA}) as r:
         html = await r.text()
     m = re.search(r'name="csrf_token" value="([^"]+)"', html)
     if not m:
         log_error("[SWEEP] CSES login form had no csrf token")
         return False
-    async with session.post(f"{_CSES}/login", headers={"User-Agent": _UA},
+    async with session.post(f"{_CSES}/login", headers={"User-Agent": BROWSER_UA},
                             data={"csrf_token": m.group(1),
                                   "nick": CSES_NICK, "pass": CSES_PASS}) as r:
         landed = str(r.url)
@@ -189,18 +167,17 @@ async def cses_solves(session, start: int, end: int) -> list[dict]:
     if not await _cses_login(session):
         return []
 
-    async with session.get(f"{_CSES}/problemset/", headers={"User-Agent": _UA}) as r:
+    async with session.get(f"{_CSES}/problemset/", headers={"User-Agent": BROWSER_UA}) as r:
         page = await r.text()
-    solved = {ref: re.sub(r"<[^>]+>", "", name).strip()
+    solved = {ref: strip_tags(name)
               for ref, name, state in _CSES_ROW_RE.findall(page) if state.strip() == "full"}
     if not solved:
         return []
 
-    seeded = cses_solved_seeded()
     known = cses_solved_all()
     fresh = [r for r in solved if r not in known]
-    cses_solved_add(list(solved), int(datetime.now().timestamp()))
-    if not seeded:
+    cses_solved_add(fresh, int(datetime.now().timestamp()))
+    if not known:
         print(f"[SWEEP] CSES snapshot seeded with {len(solved)} solved problem(s)")
         return []
 
@@ -208,15 +185,14 @@ async def cses_solves(session, start: int, end: int) -> list[dict]:
     for ref in fresh:
         # Newest submission on the task page is the one that solved it.
         async with session.get(f"{_CSES}/problemset/view/{ref}/",
-                               headers={"User-Agent": _UA}) as r:
+                               headers={"User-Agent": BROWSER_UA}) as r:
             body = await r.text() if r.status == 200 else ""
         stamps = _CSES_TS_RE.findall(body)
         if not any(_cses_in_window(t, start, end) for t in stamps):
             print(f"[SWEEP] cses {ref} solved outside this window — skipped")
             continue
         ids = _CSES_RESULT_RE.findall(body)
-        out.append({"ref": ref, "title": solved[ref],
-                    "sub_id": ids[0] if ids else "", "ts": 0})
+        out.append({"ref": ref, "title": solved[ref], "sub_id": ids[0] if ids else ""})
     return out
 
 
@@ -234,19 +210,13 @@ def _submission_url(platform: str, item: dict) -> str:
     return ""
 
 
-async def _post_one(bot, platform: str, item: dict) -> tuple[int | None, bool]:
-    """Create/find the post and comment on it.
-
-    Returns (thread_id, commented). A problem whose comment already exists
-    still reports its thread: the summary card lists everything solved in the
-    session, not just what was new this pass.
-    """
-    already = solve_post_exists(platform, item["ref"], item["sub_id"])
-
+async def _post_one(bot, platform: str, item: dict) -> int | None:
+    """Create/find the problem's post and comment on it once. Returns the
+    thread id even when the comment already existed, so the summary card can
+    list everything solved in the session."""
     if platform == "leetcode":
-        # Handed over as a url, not the bare slug: the slug parser requires a
-        # hyphen so a mistyped word can't pose as one, which would reject the
-        # single-word slugs ("subsets", "triangle") the api legitimately returns.
+        # A url, not the bare slug: the slug parser requires a hyphen (so a
+        # mistyped word can't pose as one), which rejects "subsets".
         thread_id, err = await lc_get_or_create_post(
             bot, f"{LEETCODE_BASE}/problems/{item['ref']}/")
     elif platform == "codeforces":
@@ -255,32 +225,18 @@ async def _post_one(bot, platform: str, item: dict) -> tuple[int | None, bool]:
         thread_id, err = await site_get_or_create_post(bot, platform, item["ref"])
     if not thread_id:
         log_error(f"[SWEEP] {platform} {item['ref']}: {err}")
-        return None, False
-    if already:
-        return thread_id, False
-
-    thread = bot.get_channel(thread_id)
-    if not thread:
-        try:
-            thread = await bot.fetch_channel(thread_id)
-        except Exception as e:
-            log_error(f"[SWEEP] could not fetch thread {thread_id}: {e!r}")
-            return thread_id, False
-
-    # <> around the url so the comment doesn't drag an embed in behind it,
-    # matching the recap's solution replies.
-    line = f"{_solver_name()} submitted a solution!"
-    url = _submission_url(platform, item)
-    if url:
-        line += f"\n<{url}>"
+        return None
+    if solve_post_exists(platform, item["ref"], item["sub_id"]):
+        return thread_id
     try:
-        await thread.send(line, allowed_mentions=discord.AllowedMentions.none())
+        thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
+        await thread.send(streamer_solution_line(_submission_url(platform, item)),
+                          allowed_mentions=discord.AllowedMentions.none())
     except Exception as e:
         log_error(f"[SWEEP] comment failed on {thread_id}: {e!r}")
-        return thread_id, False
-
+        return thread_id
     solve_post_save(platform, item["ref"], item["sub_id"], thread_id)
-    return thread_id, True
+    return thread_id
 
 
 async def _post_card(bot, entries: list[dict]) -> None:
@@ -316,36 +272,32 @@ async def run_sweep(bot, *, window_hours: int | None = None,
     session = bot.http_session
     end = end or int(datetime.now().timestamp())
     if start is None:
-        start = end - (window_hours or SOLVE_SWEEP_WINDOW_HOURS) * 3600
+        start = end - (window_hours or 12) * 3600
 
+    fetchers = {"leetcode": leetcode_solves, "codeforces": codeforces_solves, "cses": cses_solves}
+    results = await asyncio.gather(*(f(session, start, end) for f in fetchers.values()),
+                                   return_exceptions=True)
     found: list[tuple[str, dict]] = []
-    for platform, coro in (("leetcode", leetcode_solves(session, start, end)),
-                           ("codeforces", codeforces_solves(session, start, end))):
-        try:
-            found += [(platform, i) for i in await coro]
-        except Exception as e:
-            log_error(f"[SWEEP] {platform} lookup failed: {e!r}")
-    try:
-        found += [("cses", i) for i in await cses_solves(session, start, end)]
-    except Exception as e:
-        log_error(f"[SWEEP] cses lookup failed: {e!r}")
+    for platform, result in zip(fetchers, results):
+        if isinstance(result, BaseException):
+            log_error(f"[SWEEP] {platform} lookup failed: {result!r}")
+        else:
+            found += [(platform, i) for i in result]
 
     if not found:
         return "nothing solved in the window"
 
-    entries, commented = [], 0
+    # Posting stays sequential: forum-thread creation is Discord-rate-limited.
+    entries = []
     for platform, item in found:
-        thread_id, did = await _post_one(bot, platform, item)
-        if not thread_id:
-            continue
-        commented += did
-        entries.append({"platform": platform, "title": item["title"],
-                        "thread_id": thread_id})
+        thread_id = await _post_one(bot, platform, item)
+        if thread_id:
+            entries.append({"platform": platform, "title": item["title"],
+                            "thread_id": thread_id})
 
     if card and entries:
         await _post_card(bot, entries)
-    return (f"{len(entries)} problem(s), {commented} new comment(s)"
-            + (", card posted" if card and entries else ""))
+    return f"{len(entries)} problem(s)" + (", card posted" if card and entries else "")
 
 
 # ------------------------------------------------------------------ #
@@ -401,7 +353,16 @@ async def on_voice_state(bot, member, before, after) -> None:
         if solve_session_seen(start):
             return   # already swept; a reconnect extended a sitting we did
         solve_session_save(start, end)
+        # Off the voice handler: the sweep is many network round trips and
+        # would hold up everything after it in the event.
+        asyncio.create_task(_sweep_session(bot, start, end, seconds))
+    except Exception as e:
+        log_error(f"[SWEEP] session trigger failed: {e!r}")
+
+
+async def _sweep_session(bot, start: int, end: int, seconds: int) -> None:
+    try:
         print(f"[SWEEP] co-working session {seconds // 60}m — "
               f"{await run_sweep(bot, start=start, end=end, card=True)}")
     except Exception as e:
-        log_error(f"[SWEEP] session trigger failed: {e!r}")
+        log_error(f"[SWEEP] session sweep failed: {e!r}")
