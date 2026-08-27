@@ -18,7 +18,7 @@ from .problemsites import get_or_create_problem_post as site_get_or_create_post
 from .database import twitch_link_delete
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
 from .voicenames import rename as vc_rename
-from .logbus import log_error
+from .logbus import log_error, _chunk
 from .client import bot
 
 vc_register_command(bot)
@@ -167,31 +167,14 @@ async def twitch_console(interaction: discord.Interaction, command: app_commands
 
     await interaction.response.defer()
     ok, output = await call_console(bot.http_session, command.value, args or "")
-    text = f"{'\u2705' if ok else '\u274c'} {output}"
-    for chunk in _chunk_message(text):
-        await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none())
-
-
-def _chunk_message(text: str, limit: int = 1900) -> list[str]:
-    """Split on line breaks to fit Discord's message cap. A code block that
-    spans chunks is closed and reopened so every piece renders monospace —
-    the viewers reports are tables and only make sense that way."""
-    if len(text) <= limit:
-        return [text]
-    fenced = text.rstrip().endswith("```")
-    body = text.rstrip()
-    if fenced:
-        body = body[:-3].rstrip()
-    chunks, cur = [], ""
-    for line in body.split("\n"):
-        if len(cur) + len(line) + 1 > limit - 8:      # room for a closing fence
-            chunks.append(cur)
-            cur = "```\n" if fenced else ""
-        cur += line + "\n"
-    chunks.append(cur)
-    if fenced:
-        chunks = [c.rstrip() + "\n```" for c in chunks]
-    return chunks
+    # Console output is plain text, often a multi-line table; fence every
+    # chunk so it renders monospace, the same way the twitch-log relay does.
+    first = True
+    for chunk in _chunk(output.split("\n"), 1900):
+        prefix = f"{'\u2705' if ok else '\u274c'} " if first else ""
+        first = False
+        await interaction.followup.send(f"{prefix}```\n{chunk}\n```",
+                                        allowed_mentions=discord.AllowedMentions.none())
 
 
 # ---- Fair-access cooldown system ----
