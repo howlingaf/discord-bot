@@ -137,12 +137,15 @@ async def twitch_unlink(interaction: discord.Interaction, handle: str):
 
 
 @bot.tree.command(name="twitch", description="(Admin) Run a console command on the Twitch bot.")
-@app_commands.describe(command="Which Twitch-bot command to run", args="Message to send (required for 'say'; ignored by the others)")
+@app_commands.describe(
+    command="Which Twitch-bot command to run",
+    args="say: the message. viewers: [regulars|viewers|emotes|streams|user NAME] [--since YYYY-MM-DD] [--top N]")
 @app_commands.choices(command=[
     app_commands.Choice(name="status", value="status"),
     app_commands.Choice(name="clear", value="lt_clear"),
     app_commands.Choice(name="test", value="test"),
     app_commands.Choice(name="say", value="say"),
+    app_commands.Choice(name="viewers", value="viewers"),
 ])
 @app_commands.checks.has_permissions(manage_messages=True)
 async def twitch_console(interaction: discord.Interaction, command: app_commands.Choice[str], args: str | None = None):
@@ -165,9 +168,30 @@ async def twitch_console(interaction: discord.Interaction, command: app_commands
     await interaction.response.defer()
     ok, output = await call_console(bot.http_session, command.value, args or "")
     text = f"{'\u2705' if ok else '\u274c'} {output}"
-    if len(text) > 1900:
-        text = text[:1900] + "\u2026"
-    await interaction.followup.send(text, allowed_mentions=discord.AllowedMentions.none())
+    for chunk in _chunk_message(text):
+        await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+
+
+def _chunk_message(text: str, limit: int = 1900) -> list[str]:
+    """Split on line breaks to fit Discord's message cap. A code block that
+    spans chunks is closed and reopened so every piece renders monospace —
+    the viewers reports are tables and only make sense that way."""
+    if len(text) <= limit:
+        return [text]
+    fenced = text.rstrip().endswith("```")
+    body = text.rstrip()
+    if fenced:
+        body = body[:-3].rstrip()
+    chunks, cur = [], ""
+    for line in body.split("\n"):
+        if len(cur) + len(line) + 1 > limit - 8:      # room for a closing fence
+            chunks.append(cur)
+            cur = "```\n" if fenced else ""
+        cur += line + "\n"
+    chunks.append(cur)
+    if fenced:
+        chunks = [c.rstrip() + "\n```" for c in chunks]
+    return chunks
 
 
 # ---- Fair-access cooldown system ----
