@@ -241,7 +241,7 @@ def make_web_app(bot_instance) -> web.Application:
         try:
             channel = await _alert_channel(test)
             msg = await channel.send(
-                f"@everyone {STREAM_ALERT_TEXT}",
+                " ".join(filter(None, ("@everyone", STREAM_ALERT_TEXT))),
                 embed=_alert_embed(payload.get("title") or "", payload.get("game") or "", None),
                 allowed_mentions=discord.AllowedMentions(everyone=not test))
         except Exception as e:
