@@ -111,10 +111,10 @@ LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490
 STREAM_ALERT_CHANNEL_ID = int(os.getenv("STREAM_ALERT_CHANNEL_ID") or "1400572056067641445")
 STREAM_ALERT_TEST_CHANNEL_ID = int(os.getenv("STREAM_ALERT_TEST_CHANNEL_ID") or "1541895984403972147")
 TWITCH_CHANNEL_URL = f"https://twitch.tv/{STREAMER_NAME}"
-# Optional line after the @everyone. Empty by default: the embed's title is the
-# announcement, so a second sentence just repeats it. Set it to bring back a
-# phrase matching Twitch's Go Live Notification (Helix can't read that text).
-STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT", "")
+# Optional line after the @everyone (the mention itself can't be hidden —
+# Discord ignores mentions inside embeds, so it has to sit in the content).
+# Empty string drops it and leaves the bare @everyone.
+STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT", "the howler is back")
 
 # ---------------- Twitch bot console (outbound control API) ----------------
 # Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
