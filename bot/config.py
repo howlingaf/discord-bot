@@ -114,7 +114,7 @@ TWITCH_CHANNEL_URL = f"https://twitch.tv/{STREAMER_NAME}"
 # Optional line after the @everyone (the mention itself can't be hidden —
 # Discord ignores mentions inside embeds, so it has to sit in the content).
 # Empty string drops it and leaves the bare @everyone.
-STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT", "the howler is back")
+STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT", "")
 
 # ---------------- Twitch bot console (outbound control API) ----------------
 # Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
