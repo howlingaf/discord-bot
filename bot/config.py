@@ -121,8 +121,12 @@ STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT", "")
 # #testing until the wording is settled; switch to #general (1390402158364594188).
 WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID") or "1541895984403972147")
 WELCOME_TEXT = os.getenv("WELCOME_TEXT") or "{mention} just joined."
-# Seeded on the join line so waving is one click. Empty seeds nothing.
-WELCOME_REACTION = os.getenv("WELCOME_REACTION") or "<:hi:1544773008609116282>"
+# Seeded on the join line so waving is one click. One is picked at random per
+# join, so the greeting doesn't read the same every time. Comma-separated;
+# empty seeds nothing.
+WELCOME_REACTIONS = [e.strip() for e in (
+    os.getenv("WELCOME_REACTIONS") or "<:hi:1544773008609116282>,\U0001f44b,\U0001fae1,\U0001f64c"
+).split(",") if e.strip()]
 
 # ---------------- Twitch bot console (outbound control API) ----------------
 # Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
