@@ -1,15 +1,13 @@
 """A join line in chat, with a wave reaction, in our own words.
 
 Discord's built-in welcome can't be reworded and its "Wave to say hi" button
-is hardcoded to the Wumpus sticker. This posts our own line and seeds one of
+is hardcoded to the Wumpus sticker. This posts our own line and seeds
 WELCOME_REACTIONS on it, so waving is one click straight on the message.
 
 A reaction rather than a button: a bot can only add a reaction as ITSELF, so a
 button would leave the count stuck at one however many people clicked. Seeding
 it lets each member add their own, which is what makes the count mean anything.
 """
-
-import random
 
 import discord
 
@@ -37,9 +35,9 @@ async def post(bot, member) -> bool:
     except Exception as e:
         log_error(f"[WELCOME] could not post for {member.id}: {e!r}")
         return False
-    if WELCOME_REACTIONS:
-        emoji = random.choice(WELCOME_REACTIONS)
-        # Seeding is cosmetic — the line still stands if the emoji is gone.
+    for emoji in WELCOME_REACTIONS:
+        # Seeding is cosmetic, and each is independent — one emoji since
+        # deleted must not cost the rest theirs.
         try:
             await msg.add_reaction(emoji)
         except Exception as e:
