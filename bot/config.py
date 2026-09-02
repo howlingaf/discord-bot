@@ -125,7 +125,7 @@ WELCOME_TEXT = os.getenv("WELCOME_TEXT") or "{mention} just joined."
 # join, so the greeting doesn't read the same every time. Comma-separated;
 # empty seeds nothing.
 WELCOME_REACTIONS = [e.strip() for e in (
-    os.getenv("WELCOME_REACTIONS") or "<:hi:1544773008609116282>,\U0001f44b,\U0001fae1,\U0001f64c"
+    os.getenv("WELCOME_REACTIONS") or "<:gasm:1544777023405424691>,<:stur:1544775832868880394>"
 ).split(",") if e.strip()]
 
 # ---------------- Twitch bot console (outbound control API) ----------------
