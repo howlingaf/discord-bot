@@ -121,6 +121,12 @@ STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT", "")
 # #testing until the wording is settled; switch to #general (1390402158364594188).
 WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID") or "1541895984403972147")
 WELCOME_TEXT = os.getenv("WELCOME_TEXT") or "{mention} just joined."
+# The wave button. Its icon must be an EMOJI — Discord buttons can't carry a
+# sticker — and the sticker is what a click posts. 0 falls back to the emoji,
+# so the button works before any sticker is uploaded.
+WELCOME_BUTTON_LABEL = os.getenv("WELCOME_BUTTON_LABEL") or "Say hi"
+WELCOME_BUTTON_EMOJI = os.getenv("WELCOME_BUTTON_EMOJI") or "\N{WAVING HAND SIGN}"
+WELCOME_STICKER_ID = int(os.getenv("WELCOME_STICKER_ID") or "0")
 
 # ---------------- Twitch bot console (outbound control API) ----------------
 # Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
