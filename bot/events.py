@@ -54,6 +54,15 @@ async def on_ready():
 
 
 @bot.event
+async def on_member_join(member: discord.Member):
+    from .welcome import on_member_join as welcome_join
+    try:
+        await welcome_join(bot, member)
+    except Exception as e:
+        log_error(f"[JOIN] welcome failed: {e!r}")
+
+
+@bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     before_id = before.channel.id if before and before.channel else None
     after_id = after.channel.id if after and after.channel else None

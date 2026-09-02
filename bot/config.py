@@ -116,6 +116,12 @@ TWITCH_CHANNEL_URL = f"https://twitch.tv/{STREAMER_NAME}"
 # Empty string drops it and leaves the bare @everyone.
 STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT", "")
 
+# ---------------- Join message ----------------
+# Our own join line, since Discord's built-in one can't be reworded. Aimed at
+# #testing until the wording is settled; switch to #general (1390402158364594188).
+WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID") or "1541895984403972147")
+WELCOME_TEXT = os.getenv("WELCOME_TEXT") or "{mention} just joined."
+
 # ---------------- Twitch bot console (outbound control API) ----------------
 # Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
 CONSOLE_SECRET = os.getenv("CONSOLE_SECRET", "")
