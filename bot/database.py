@@ -225,6 +225,15 @@ def db_init():
         )
         """)
 
+        # One row per person, ever. A leave-and-rejoin must not re-trigger the
+        # welcome, so this outlives their membership by design.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS welcomed (
+          user_id     INTEGER PRIMARY KEY,
+          welcomed_at INTEGER NOT NULL
+        )
+        """)
+
         # ---- Fair-access cooldown system ----
         # Singleton runtime state: when the tracked rooms last all went empty
         # (drives the session-window reset) and the pinned admin panel message.
@@ -912,6 +921,27 @@ def codeforces_cache_get(ref: str) -> dict | None:
         return {"ref": r[0], "contest_id": r[1], "index": r[2], "name": r[3],
                 "rating": r[4], "tags": [t for t in (r[5] or "").split(",") if t],
                 "contest_name": r[6]}
+
+
+def welcome_claim(user_id: int) -> bool:
+    """Claim the one welcome this person ever gets. True if it's theirs to take.
+
+    Claims up front rather than recording after the post, so two joins racing
+    can't both win. Release it with welcome_release() if the post then fails.
+    """
+    with _db() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO welcomed(user_id, welcomed_at) VALUES(?,?)",
+            (user_id, int(time.time())))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def welcome_release(user_id: int) -> None:
+    """Give the claim back, so a failed post can be retried on a later join."""
+    with _db() as conn:
+        conn.execute("DELETE FROM welcomed WHERE user_id=?", (user_id,))
+        conn.commit()
 
 
 def codeforces_cache_upsert_all(entries: list[dict]):

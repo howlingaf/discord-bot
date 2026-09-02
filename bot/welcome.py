@@ -12,6 +12,7 @@ it lets each member add their own, which is what makes the count mean anything.
 import discord
 
 from .config import WELCOME_CHANNEL_ID, WELCOME_REACTIONS, WELCOME_TEXT
+from .database import welcome_claim, welcome_release
 from .logbus import log_error
 
 
@@ -46,4 +47,8 @@ async def post(bot, member) -> bool:
 
 
 async def on_member_join(bot, member: discord.Member) -> None:
-    await post(bot, member)
+    """Welcome each person once, however many times they rejoin."""
+    if not welcome_claim(member.id):
+        return
+    if not await post(bot, member):
+        welcome_release(member.id)
