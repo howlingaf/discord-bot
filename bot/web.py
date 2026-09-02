@@ -263,6 +263,36 @@ def make_web_app(bot_instance) -> web.Application:
             return web.json_response({"ok": False, "error": repr(e)})
         return web.json_response({"ok": True})
 
+    @routes.post("/twitch-report")
+    async def twitch_report(request: web.Request):
+        """The end-of-stream report, as embeds, into #twitch-bot-console.
+
+        The twitch bot builds them: it holds the chat database, and shipping
+        rendered sections keeps this end from knowing what a lurker is.
+        """
+        payload = await _twitch_json(request)
+        raw = payload.get("embeds")
+        if not isinstance(raw, list) or not raw:
+            raise web.HTTPBadRequest(text="`embeds` must be a non-empty list")
+        if not ALERT_CHANNEL_ID:
+            raise web.HTTPBadRequest(text="Alert channel not configured")
+        try:
+            channel = (bot_instance.get_channel(ALERT_CHANNEL_ID)
+                       or await bot_instance.fetch_channel(ALERT_CHANNEL_ID))
+            embeds = []
+            for e in raw[:10]:
+                em = discord.Embed(title=e.get("title"), description=e.get("description"),
+                                   colour=0x9146FF)
+                for f in (e.get("fields") or [])[:25]:
+                    em.add_field(name=f.get("name") or "\u200b",
+                                 value=f.get("value") or "\u200b", inline=False)
+                embeds.append(em)
+            msg = await channel.send(embeds=embeds,
+                                     allowed_mentions=discord.AllowedMentions.none())
+        except Exception as e:
+            return web.json_response({"ok": False, "error": repr(e)}, status=200)
+        return web.json_response({"ok": True, "message_id": str(msg.id)})
+
     @routes.post("/twitch-log")
     async def twitch_log(request: web.Request):
         payload = await _twitch_json(request)
