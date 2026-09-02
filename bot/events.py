@@ -25,10 +25,6 @@ async def on_ready():
     from .twitchlink import register as twitchlink_register
     twitchlink_register(bot)
 
-    # register the restart-safe wave button on join messages
-    from .welcome import register as welcome_register
-    welcome_register(bot)
-
     # start the relay that posts Twitch-bot logs into #twitch-bot-console
     from .twitchlog import start as twitchlog_start
     twitchlog_start(bot)

@@ -225,17 +225,6 @@ def db_init():
         )
         """)
 
-        # One row per person per join message, so the wave button can't be
-        # clicked repeatedly into a spam button.
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS welcome_waves (
-          message_id INTEGER NOT NULL,
-          user_id    INTEGER NOT NULL,
-          waved_at   INTEGER NOT NULL,
-          PRIMARY KEY (message_id, user_id)
-        )
-        """)
-
         # ---- Fair-access cooldown system ----
         # Singleton runtime state: when the tracked rooms last all went empty
         # (drives the session-window reset) and the pinned admin panel message.
@@ -940,16 +929,6 @@ def codeforces_cache_upsert_all(entries: list[dict]):
               ",".join(e.get("tags") or []), e.get("contest_name") or "", now)
              for e in entries])
         conn.commit()
-
-
-def welcome_wave_add(message_id: int, user_id: int) -> bool:
-    """True if this is their first wave on that message."""
-    with _db() as conn:
-        cur = conn.execute(
-            "INSERT OR IGNORE INTO welcome_waves(message_id, user_id, waved_at) "
-            "VALUES(?,?,?)", (message_id, user_id, int(time.time())))
-        conn.commit()
-        return cur.rowcount > 0
 
 
 def solve_post_exists(platform: str, ref: str, submission_id: str) -> bool:

@@ -1,30 +1,18 @@
-"""A join line in chat, with a wave button, in our own words.
+"""A join line in chat, with a wave reaction, in our own words.
 
 Discord's built-in welcome can't be reworded and its "Wave to say hi" button
-is hardcoded to the Wumpus sticker. This posts our own line with our own
-button; clicking it waves back with WELCOME_STICKER_ID.
+is hardcoded to the Wumpus sticker. This posts our own line and seeds
+WELCOME_REACTION on it, so waving is one click straight on the message.
 
-Discord buttons carry an emoji, never a sticker — so the button shows
-WELCOME_BUTTON_EMOJI and the sticker is what the click POSTS. With no sticker
-configured the wave still works, it just posts the emoji.
+A reaction rather than a button: a bot can only add a reaction as ITSELF, so a
+button would leave the count stuck at one however many people clicked. Seeding
+it lets each member add their own, which is what makes the count mean anything.
 """
-
-import re
 
 import discord
 
-from .config import (
-    WELCOME_BUTTON_EMOJI,
-    WELCOME_BUTTON_LABEL,
-    WELCOME_CHANNEL_ID,
-    WELCOME_STICKER_ID,
-    WELCOME_TEXT,
-)
-from .database import welcome_wave_add
+from .config import WELCOME_CHANNEL_ID, WELCOME_REACTION, WELCOME_TEXT
 from .logbus import log_error
-
-# custom_id carries the joiner's id so the wave can name who it's aimed at.
-_TEMPLATE = re.compile(r"^welcome:wave:(?P<joiner>\d+)$")
 
 
 def render(member) -> str:
@@ -35,56 +23,6 @@ def render(member) -> str:
     )
 
 
-async def _send_wave(interaction: discord.Interaction, joiner_id: int) -> None:
-    """Post the wave. Falls back to the emoji if the sticker can't be sent."""
-    waver = interaction.user.mention
-    text = f"{waver} waved at <@{joiner_id}>"
-    mentions = discord.AllowedMentions(users=False)  # a wave shouldn't ping
-    if WELCOME_STICKER_ID and interaction.guild:
-        try:
-            sticker = await interaction.guild.fetch_sticker(WELCOME_STICKER_ID)
-            await interaction.channel.send(text, stickers=[sticker],
-                                           allowed_mentions=mentions)
-            return
-        except Exception as e:
-            log_error(f"[WELCOME] sticker {WELCOME_STICKER_ID} unusable: {e!r}")
-    await interaction.channel.send(f"{text} {WELCOME_BUTTON_EMOJI}",
-                                   allowed_mentions=mentions)
-
-
-class WaveButton(discord.ui.DynamicItem[discord.ui.Button], template=_TEMPLATE):
-    def __init__(self, joiner_id: int):
-        self.joiner_id = joiner_id
-        super().__init__(discord.ui.Button(
-            label=WELCOME_BUTTON_LABEL,
-            emoji=WELCOME_BUTTON_EMOJI,
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"welcome:wave:{joiner_id}"))
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match, /):
-        return cls(int(match["joiner"]))
-
-    async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id == self.joiner_id:
-            await interaction.response.send_message(
-                "You can't wave at yourself.", ephemeral=True)
-            return
-        # One wave each, so the button can't be turned into a spam button.
-        if not welcome_wave_add(interaction.message.id, interaction.user.id):
-            await interaction.response.send_message(
-                "You've already waved.", ephemeral=True)
-            return
-        await interaction.response.defer()
-        await _send_wave(interaction, self.joiner_id)
-
-
-def view(joiner_id: int) -> discord.ui.View:
-    v = discord.ui.View(timeout=None)
-    v.add_item(WaveButton(joiner_id))
-    return v
-
-
 async def post(bot, member) -> bool:
     """Best effort: a welcome that fails must never break the join handler."""
     if not WELCOME_CHANNEL_ID:
@@ -92,17 +30,19 @@ async def post(bot, member) -> bool:
     try:
         channel = (bot.get_channel(WELCOME_CHANNEL_ID)
                    or await bot.fetch_channel(WELCOME_CHANNEL_ID))
-        await channel.send(render(member), view=view(member.id),
-                           allowed_mentions=discord.AllowedMentions(users=True))
-        return True
+        msg = await channel.send(
+            render(member), allowed_mentions=discord.AllowedMentions(users=True))
     except Exception as e:
         log_error(f"[WELCOME] could not post for {member.id}: {e!r}")
         return False
+    if WELCOME_REACTION:
+        # Seeding is cosmetic — the line still stands if the emoji is gone.
+        try:
+            await msg.add_reaction(WELCOME_REACTION)
+        except Exception as e:
+            log_error(f"[WELCOME] could not seed {WELCOME_REACTION!r}: {e!r}")
+    return True
 
 
 async def on_member_join(bot, member: discord.Member) -> None:
     await post(bot, member)
-
-
-def register(bot) -> None:
-    bot.add_dynamic_items(WaveButton)
