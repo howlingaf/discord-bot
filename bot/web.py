@@ -103,6 +103,8 @@ def make_web_app(bot_instance) -> web.Application:
             )
 
         spotify_upsert_tokens(access_token, refresh_token, expires_in)
+        from .spotify import spotify_mark_relinked
+        spotify_mark_relinked()   # a new token deserves a fresh chance
         spotify_set_runtime(paused_by_bot=False, last_action_at=0, last_member_count=-1)
 
         return web.Response(

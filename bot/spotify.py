@@ -54,6 +54,10 @@ async def spotify_exchange_code(session: ClientSession, code: str) -> dict:
         return js
 
 
+class SpotifyAuthDead(Exception):
+    """The refresh token will never work again — re-linking is the only fix."""
+
+
 async def spotify_refresh(session: ClientSession, refresh_token: str) -> dict:
     token_url = "https://accounts.spotify.com/api/token"
     data = {
@@ -64,22 +68,46 @@ async def spotify_refresh(session: ClientSession, refresh_token: str) -> dict:
     }
     async with session.post(token_url, data=data) as resp:
         js = await resp.json()
-        if resp.status != 200:
-            raise web.HTTPBadRequest(text=f"Spotify refresh failed: {js}")
-        return js
+        if resp.status == 200:
+            return js
+        # A plain exception, not web.HTTPBadRequest: that's a server RESPONSE
+        # object, and away from a web handler its repr is "<HTTPBadRequest Bad
+        # Request not prepared>" with the text= payload dropped — which is how
+        # this failed for days saying nothing about why.
+        why = f"{js.get('error')}: {js.get('error_description')}" if isinstance(js, dict) else js
+        if resp.status == 400 and isinstance(js, dict) and js.get("error") == "invalid_grant":
+            raise SpotifyAuthDead(why)
+        raise RuntimeError(f"Spotify refresh failed (HTTP {resp.status}): {why}")
+
+
+# Set when Spotify says the refresh token is revoked. Retrying then is a call
+# that cannot succeed, once per voice event, forever — this stops until the
+# owner re-links (the OAuth callback clears it).
+_auth_dead = False
+
+
+def spotify_mark_relinked() -> None:
+    global _auth_dead, _token_fails
+    _auth_dead = False
+    _token_fails = 0
 
 
 async def spotify_get_access_token(session: ClientSession) -> str | None:
+    global _auth_dead
     access_token, refresh_token, expires_at = spotify_get_tokens()
     now = int(time.time())
 
-    if not refresh_token:
+    if not refresh_token or _auth_dead:
         return None
 
     if access_token and expires_at and expires_at > now:
         return access_token
 
-    js = await spotify_refresh(session, refresh_token)
+    try:
+        js = await spotify_refresh(session, refresh_token)
+    except SpotifyAuthDead:
+        _auth_dead = True
+        raise
     new_access = js["access_token"]
     new_refresh = js.get("refresh_token")  # may be absent
     expires_in = js.get("expires_in", 3600)
