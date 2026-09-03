@@ -119,7 +119,7 @@ STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT", "")
 # ---------------- Join message ----------------
 # Our own join line, since Discord's built-in one can't be reworded. Aimed at
 # #testing until the wording is settled; switch to #general (1390402158364594188).
-WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID") or "1541895984403972147")
+WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID") or "1390402158364594188")  # #general
 WELCOME_TEXT = os.getenv("WELCOME_TEXT") or "{mention} just joined."
 # All seeded on the join line, in this order, so waving is one click and the
 # newcomer gets a choice of greeting. Comma-separated; empty seeds nothing.
