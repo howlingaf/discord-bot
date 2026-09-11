@@ -237,15 +237,19 @@ def make_web_app(bot_instance) -> web.Application:
     @routes.post("/stream-alert")
     async def stream_alert(request: web.Request):
         """Go-live. Returns the message id so the caller can edit it later.
-        A real @everyone — unless test=true, which posts to #testing unpinged."""
+
+        No ping: the post is the embed alone. Anyone who wants to be told can
+        follow the channel, which is a choice they made rather than one made
+        for them every time the stream starts.
+        """
         payload = await _twitch_json(request)
         test = bool(payload.get("test"))
         try:
             channel = await _alert_channel(test)
             msg = await channel.send(
-                " ".join(filter(None, ("@everyone", STREAM_ALERT_TEXT))),
+                STREAM_ALERT_TEXT or None,
                 embed=_alert_embed(payload.get("title") or "", payload.get("game") or "", None),
-                allowed_mentions=discord.AllowedMentions(everyone=not test))
+                allowed_mentions=discord.AllowedMentions.none())
         except Exception as e:
             return web.json_response({"ok": False, "error": repr(e)})
         return web.json_response({"ok": True, "message_id": str(msg.id)})

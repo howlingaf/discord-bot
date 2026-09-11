@@ -105,15 +105,14 @@ RECAP_SECRET = os.getenv("RECAP_SECRET", "")
 LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490
 
 # ---------------- Stream alerts ----------------
-# Go-live announcement (replaces Sapphire's): @everyone + an embed with the
-# title and game, edited into a VOD card when the stream ends. Posted by the
-# twitch bot through /stream-alert. Test mode targets #testing and never pings.
+# Go-live announcement (replaces Sapphire's): an embed with the title and game,
+# edited into a VOD card when the stream ends. Posted by the twitch bot through
+# /stream-alert. Test mode targets #testing.
 STREAM_ALERT_CHANNEL_ID = int(os.getenv("STREAM_ALERT_CHANNEL_ID") or "1400572056067641445")
 STREAM_ALERT_TEST_CHANNEL_ID = int(os.getenv("STREAM_ALERT_TEST_CHANNEL_ID") or "1541895984403972147")
 TWITCH_CHANNEL_URL = f"https://twitch.tv/{STREAMER_NAME}"
-# Optional line after the @everyone (the mention itself can't be hidden —
-# Discord ignores mentions inside embeds, so it has to sit in the content).
-# Empty string drops it and leaves the bare @everyone.
+# Optional line of content above the embed. Empty leaves the embed alone,
+# which is the default — the post carries no mention of any kind.
 STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT", "")
 
 # ---------------- Join message ----------------
