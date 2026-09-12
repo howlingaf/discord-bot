@@ -669,7 +669,7 @@ def zerotrac_cache_upsert_all(entries: list[dict]):
         conn.commit()
 
 
-# ---- Fair-access helpers ----
+# ---- Admin panel state (the host's pinned voice-time card) ----
 
 def fairaccess_state_get() -> dict:
     with _db() as conn:
@@ -679,166 +679,13 @@ def fairaccess_state_get() -> dict:
         return {"all_empty_since": row[0], "panel_message_id": row[1]}
 
 
-def fairaccess_set_all_empty_since(ts: int | None):
-    with _db() as conn:
-        conn.execute("UPDATE fairaccess_state SET all_empty_since=? WHERE id=1", (ts,))
-        conn.commit()
-
-
 def fairaccess_set_panel_message(message_id: int):
     with _db() as conn:
         conn.execute("UPDATE fairaccess_state SET panel_message_id=? WHERE id=1", (message_id,))
         conn.commit()
 
 
-def _fa_window_row(r) -> dict:
-    return {
-        "id": r[0], "user_id": r[1], "started_at": r[2], "last_activity_at": r[3],
-        "last_join_at": r[4], "last_join_channel_id": r[5],
-        "room_seconds": r[6], "status": r[7],
-    }
-
-
-_FA_WINDOW_COLS = ("id, user_id, started_at, last_activity_at, last_join_at, "
-                   "last_join_channel_id, room_seconds, status")
-
-
-def fairaccess_window_open_for(user_id: int) -> dict | None:
-    with _db() as conn:
-        r = conn.execute(
-            f"SELECT {_FA_WINDOW_COLS} FROM fairaccess_windows WHERE user_id=? AND status='open'",
-            (user_id,),
-        ).fetchone()
-        return _fa_window_row(r) if r else None
-
-
-def fairaccess_window_create(user_id: int, now: int) -> int:
-    with _db() as conn:
-        cur = conn.execute(
-            "INSERT INTO fairaccess_windows(user_id, started_at, last_activity_at) VALUES(?,?,?)",
-            (user_id, now, now),
-        )
-        conn.commit()
-        return cur.lastrowid
-
-
-def fairaccess_window_update(window_id: int, **fields):
-    """Partial update; pass only the columns to change (None writes NULL)."""
-    assert fields
-    cols = ", ".join(f"{k}=?" for k in fields)
-    with _db() as conn:
-        conn.execute(f"UPDATE fairaccess_windows SET {cols} WHERE id=?",
-                     (*fields.values(), window_id))
-        conn.commit()
-
-
-def fairaccess_windows_open() -> list[dict]:
-    with _db() as conn:
-        rows = conn.execute(
-            f"SELECT {_FA_WINDOW_COLS} FROM fairaccess_windows WHERE status='open'"
-        ).fetchall()
-        return [_fa_window_row(r) for r in rows]
-
-
-def fairaccess_windows_recent(limit: int = 15) -> list[dict]:
-    with _db() as conn:
-        rows = conn.execute(
-            f"SELECT {_FA_WINDOW_COLS} FROM fairaccess_windows "
-            "ORDER BY last_activity_at DESC LIMIT ?", (limit,),
-        ).fetchall()
-        return [_fa_window_row(r) for r in rows]
-
-
-def _fa_cooldown_row(r) -> dict:
-    return {
-        "id": r[0], "user_id": r[1], "applied_at": r[2], "expires_at": r[3],
-        "room_seconds": r[4], "applied_by": r[5], "released_by": r[6],
-        "released_at": r[7], "expired_at": r[8],
-    }
-
-
-_FA_COOLDOWN_COLS = ("id, user_id, applied_at, expires_at, room_seconds, "
-                     "applied_by, released_by, released_at, expired_at")
-
-
-def fairaccess_cooldown_create(user_id: int, applied_at: int, expires_at: int,
-                               room_seconds: str, applied_by: int | None) -> int:
-    with _db() as conn:
-        cur = conn.execute(
-            "INSERT INTO fairaccess_cooldowns(user_id, applied_at, expires_at, room_seconds, applied_by) "
-            "VALUES(?,?,?,?,?)",
-            (user_id, applied_at, expires_at, room_seconds, applied_by),
-        )
-        conn.commit()
-        return cur.lastrowid
-
-
-# expires_at = 0 means indefinite: it never falls due, and only /cooldown
-# release lifts it.
-INDEFINITE = 0
-
-
-def fairaccess_regular_marked_since(since: int) -> set[int]:
-    """Users with any cooldown row applied at or after `since` — active,
-    released or expired. The regular rule marks each user at most once, so a
-    released row must keep counting or the next sweep re-marks them."""
-    with _db() as conn:
-        return {r[0] for r in conn.execute(
-            "SELECT DISTINCT user_id FROM fairaccess_cooldowns WHERE applied_at>=?", (since,))}
-
-
-def fairaccess_cooldown_active_for(user_id: int) -> dict | None:
-    with _db() as conn:
-        r = conn.execute(
-            f"SELECT {_FA_COOLDOWN_COLS} FROM fairaccess_cooldowns "
-            "WHERE user_id=? AND released_at IS NULL AND expired_at IS NULL "
-            "AND (expires_at=0 OR expires_at>?)",
-            (user_id, int(time.time())),
-        ).fetchone()
-        return _fa_cooldown_row(r) if r else None
-
-
-def fairaccess_cooldowns_active() -> list[dict]:
-    with _db() as conn:
-        rows = conn.execute(
-            f"SELECT {_FA_COOLDOWN_COLS} FROM fairaccess_cooldowns "
-            "WHERE released_at IS NULL AND expired_at IS NULL "
-            "AND (expires_at=0 OR expires_at>?)",
-            (int(time.time()),),
-        ).fetchall()
-        return [_fa_cooldown_row(r) for r in rows]
-
-
-def fairaccess_cooldowns_due() -> list[dict]:
-    """Active-until-now cooldowns whose expiry has passed (needs overwrite removal).
-
-    Indefinite ones (expires_at=0) are never due."""
-    with _db() as conn:
-        rows = conn.execute(
-            f"SELECT {_FA_COOLDOWN_COLS} FROM fairaccess_cooldowns "
-            "WHERE released_at IS NULL AND expired_at IS NULL "
-            "AND expires_at>0 AND expires_at<=?",
-            (int(time.time()),),
-        ).fetchall()
-        return [_fa_cooldown_row(r) for r in rows]
-
-
-def fairaccess_cooldown_mark_expired(cooldown_id: int, now: int):
-    with _db() as conn:
-        conn.execute("UPDATE fairaccess_cooldowns SET expired_at=? WHERE id=?", (now, cooldown_id))
-        conn.commit()
-
-
-def fairaccess_cooldown_release(cooldown_id: int, released_by: int, now: int):
-    with _db() as conn:
-        conn.execute(
-            "UPDATE fairaccess_cooldowns SET released_by=?, released_at=? WHERE id=?",
-            (released_by, now, cooldown_id),
-        )
-        conn.commit()
-
-
-# ---- Voice visit log (general presence tracking, decoupled from cooldowns) ----
+# ---- Voice visit log: every user, every voice channel ----
 
 def voice_visit_open_for(user_id: int) -> dict | None:
     with _db() as conn:

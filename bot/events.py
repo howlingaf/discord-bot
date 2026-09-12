@@ -8,7 +8,7 @@ from .spotify import count_humans_in_channel, handle_spotify_auto_pause
 from .leetcode import leetcode_daily_scheduler, leetcode_contest_scheduler
 from .voicechat import on_voice_update
 from .logbus import log_error, start as logbus_start
-from .fairaccess import start as fairaccess_start, on_voice_state as fairaccess_voice
+from .voicetime import start as voicetime_start, on_voice_state as voicetime_voice
 from .solvesweep import on_voice_state as solvesweep_voice
 from .voicenames import on_voice_state as voicenames_voice, start as voicenames_start
 from .client import bot
@@ -49,8 +49,8 @@ async def on_ready():
     from .welcome import register as welcome_register
     welcome_register(bot)
 
-    # fair-access cooldown system (tracked rooms + admin panel)
-    fairaccess_start(bot)
+    # voice time: every user, every channel, plus the host's card
+    voicetime_start(bot)
 
     # restore the chill room's name if whoever renamed it left while we were down
     voicenames_start(bot)
@@ -94,14 +94,14 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     except Exception as e:
         log_error(f"[VOICE] name revert failed: {e!r}")
 
-    # --- Fair-access tracked-room tally/cooldowns + attendance sessions ---
+    # --- Voice time: one row per user per channel stint ---
     try:
-        await fairaccess_voice(bot, member, before, after)
+        await voicetime_voice(bot, member, before, after)
     except Exception as e:
-        log_error(f"[VOICE] fair-access failed: {e!r}")
+        log_error(f"[VOICE] voice time failed: {e!r}")
 
     # --- Solve sweep: a finished co-working session posts its problems ---
-    # After fair-access, which closes the visit row this reads.
+    # After voice time, which closes the visit row this reads.
     try:
         await solvesweep_voice(bot, member, before, after)
     except Exception as e:

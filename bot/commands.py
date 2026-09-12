@@ -177,42 +177,6 @@ async def twitch_console(interaction: discord.Interaction, command: app_commands
                                         allowed_mentions=discord.AllowedMentions.none())
 
 
-# ---- Fair-access cooldown system ----
-
-from . import fairaccess as _fa
-
-fa_regular = app_commands.Group(
-    name="regular", description="(Admin) Regulars",
-    default_permissions=discord.Permissions(manage_messages=True))
-
-
-@fa_regular.command(name="add", description="(Admin) Mark a user a regular (hides the newcomer room).")
-@app_commands.describe(user="Who to mark")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def fa_reg_add(interaction: discord.Interaction, user: discord.User):
-    await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.regular_add(bot, user.id, interaction.user.id)
-    await interaction.followup.send(msg, ephemeral=True)
-
-
-@fa_regular.command(name="remove", description="(Admin) Un-mark a regular, restoring the room (permanent).")
-@app_commands.describe(user="Who to un-mark")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def fa_reg_remove(interaction: discord.Interaction, user: discord.User):
-    await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.regular_remove(bot, user.id, interaction.user.id)
-    await interaction.followup.send(msg, ephemeral=True)
-
-
-@fa_regular.command(name="removeall", description="(Admin) Un-mark every regular at once.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def fa_reg_removeall(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    _, msg = await _fa.regular_remove_all(bot, interaction.user.id)
-    await interaction.followup.send(msg, ephemeral=True)
-
-
-bot.tree.add_command(fa_regular)
 
 
 @bot.event

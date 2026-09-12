@@ -68,7 +68,7 @@ LEETCODE_BIWEEKLY_FORUM_CHANNEL_ID = int(os.getenv("LEETCODE_BIWEEKLY_FORUM_CHAN
 # comment when that session ends, plus one summary card.
 SOLVE_SESSION_ROOMS = [
     int(x) for x in (os.getenv("SOLVE_SESSION_ROOMS") or "").replace(" ", "").split(",") if x
-] or [1482589316520739077, 1529599559167246548]
+] or [1482589316520739077]
 # Sessions shorter than this don't sweep — a drop-in isn't a session.
 SOLVE_SESSION_MINUTES = int(os.getenv("SOLVE_SESSION_MINUTES") or "60")
 # Two visits closer together than this are one session, so stepping between the
@@ -158,39 +158,16 @@ ALERT_CHANNEL_ID = int(os.getenv("ALERT_CHANNEL_ID") or "1516295834046828614")
 # Twitch-link approval prompts post to the same mod console channel.
 TWITCH_LINK_PROMPT_CHANNEL_ID = DISCORD_LOG_CHANNEL_ID
 
-# ---------------- Fair-access cooldown (tracked voice rooms) ----------------
-# Staff-only channel holding the pinned admin panel + append-only action log.
-FAIRACCESS_ADMIN_CHANNEL_ID = int(os.getenv("FAIRACCESS_ADMIN_CHANNEL_ID") or "1529992719697449143")
-# Voice channels subject to the fair-access rules, comma-separated ids. Default
-# is the development/test room; swap in the real 1:1 + streams rooms here.
-FAIRACCESS_TRACKED_ROOMS = [
-    int(x) for x in (os.getenv("FAIRACCESS_TRACKED_ROOMS") or "1528837173275787415").replace(" ", "").split(",") if x
-]
-# Rooms a cooldown actually hides (ViewChannel+Connect deny). Defaults to the
-# tracked list; set narrower so some rooms accrue time but stay enterable.
-FAIRACCESS_ENFORCED_ROOMS = [
-    int(x) for x in (os.getenv("FAIRACCESS_ENFORCED_ROOMS") or "").replace(" ", "").split(",") if x
-] or list(FAIRACCESS_TRACKED_ROOMS)
-# The one room /name can rename (#chillin). 0 disables the command's effect.
+# ---------------- Voice time ----------------
+# Every user's time in every voice channel is recorded (bot/voicetime.py); this
+# channel holds the one pinned card that shows the host's share of it.
+ADMIN_PANEL_CHANNEL_ID = int(os.getenv("ADMIN_PANEL_CHANNEL_ID") or "1529992719697449143")
+# The one room /name can rename. Still the retired #co-working 👥 — /name
+# answers "isn't set up" once that channel is deleted, until this is repointed.
 VOICE_NAME_CHANNEL_ID = int(os.getenv("VOICE_NAME_CHANNEL_ID") or "1529599559167246548")
-# The host gets their own card instead, totalling their time in these rooms:
-# #co-working and #co-working-2. An explicit list rather than "everything but
-# #on-stream", so a voice channel added later doesn't silently start counting.
+# Rooms the host's card totals: #co-working 👂, where the work happens. An
+# explicit list rather than "every voice channel", so #general's weekly
+# hangout and a room added later don't silently count as work.
 VOICE_TIME_HOST_ROOMS = [
     int(x) for x in (os.getenv("VOICE_TIME_HOST_ROOMS") or "").replace(" ", "").split(",") if x
-] or [1482589316520739077, 1529599559167246548]
-# "Regular" = past this many lifetime minutes in FAIRACCESS_REGULAR_ROOM
-# (#co-working); the enforced room is then hidden from them indefinitely.
-FAIRACCESS_REGULAR_ROOM = int(os.getenv("FAIRACCESS_REGULAR_ROOM") or "1482589316520739077")
-FAIRACCESS_REGULAR_MINUTES = int(os.getenv("FAIRACCESS_REGULAR_MINUTES") or "300")
-# Only cooldown rows from this instant on count as "already marked"; older rows
-# came from the superseded per-session rule and were bulk-released.
-FAIRACCESS_REGULAR_RULE_SINCE = int(os.getenv("FAIRACCESS_REGULAR_RULE_SINCE") or "1785439368")
-# Never auto-cooled, whatever their total: the host runs the room.
-FAIRACCESS_EXEMPT_IDS = [
-    int(x) for x in (os.getenv("FAIRACCESS_EXEMPT_IDS") or "").replace(" ", "").split(",") if x
-] or [SPOTIFY_ALLOWED_USER_ID]
-# The tally window resets once all tracked rooms have been empty this long.
-FAIRACCESS_WINDOW_RESET_HOURS = float(os.getenv("FAIRACCESS_WINDOW_RESET_HOURS") or "2")
-# Members with this role (and the server owner) are exempt from tallying. 0 = owner only.
-FAIRACCESS_MOD_ROLE_ID = int(os.getenv("FAIRACCESS_MOD_ROLE_ID") or "0")
+] or [1482589316520739077]
