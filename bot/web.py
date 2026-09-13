@@ -14,6 +14,7 @@ from .config import (
     CONSOLE_SECRET,
     ALERT_CHANNEL_ID,
     STREAM_ALERT_CHANNEL_ID,
+    STREAM_ALERT_IMAGE,
     STREAM_ALERT_TEST_CHANNEL_ID,
     STREAM_ALERT_TEXT,
     TWITCH_CHANNEL_URL,
@@ -219,6 +220,18 @@ def make_web_app(bot_instance) -> web.Application:
         total = h * 60 + mi + (1 if se else 0)
         return f"{total // 60}h{total % 60}m" if total >= 60 else f"{total}m"
 
+    _ALERT_IMAGE_NAME = "stream_alert.png"
+
+    def _alert_image() -> discord.File | None:
+        """A fresh File per send: discord.py consumes the handle on upload."""
+        if not STREAM_ALERT_IMAGE:
+            return None
+        try:
+            return discord.File(STREAM_ALERT_IMAGE, filename=_ALERT_IMAGE_NAME)
+        except OSError as e:
+            print(f"[STREAM ALERT] image unavailable, posting without it: {e!r}")
+            return None
+
     def _alert_embed(title: str, game: str, vod: dict | None) -> discord.Embed:
         e = discord.Embed(title=(title or "Live")[:256],
                           url=vod["url"] if vod else TWITCH_CHANNEL_URL,
@@ -228,6 +241,10 @@ def make_web_app(bot_instance) -> web.Application:
         if vod:
             # The title already links to the VOD; a second link would be noise.
             e.add_field(name="Duration", value=_round_duration(vod["duration"]), inline=True)
+        if STREAM_ALERT_IMAGE:
+            # Resolves against the file uploaded with the message, which stays
+            # attached through edits -- so the VOD card keeps it too.
+            e.set_image(url=f"attachment://{_ALERT_IMAGE_NAME}")
         return e
 
     async def _alert_channel(test: bool):
@@ -246,9 +263,11 @@ def make_web_app(bot_instance) -> web.Application:
         test = bool(payload.get("test"))
         try:
             channel = await _alert_channel(test)
+            image = _alert_image()
             msg = await channel.send(
                 STREAM_ALERT_TEXT or None,
                 embed=_alert_embed(payload.get("title") or "", payload.get("game") or "", None),
+                **({"file": image} if image else {}),
                 allowed_mentions=discord.AllowedMentions.none())
         except Exception as e:
             return web.json_response({"ok": False, "error": repr(e)})

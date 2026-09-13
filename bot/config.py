@@ -114,6 +114,14 @@ TWITCH_CHANNEL_URL = f"https://twitch.tv/{STREAMER_NAME}"
 # Optional line of content above the embed. Empty leaves the embed alone,
 # which is the default — the post carries no mention of any kind.
 STREAM_ALERT_TEXT = os.getenv("STREAM_ALERT_TEXT", "")
+# Image shown at the foot of every go-live post and its VOD card. Shipped with
+# the bot and uploaded with each alert, because a Discord attachment link is
+# signed and expires within a day -- an embed pointing at one breaks. Empty
+# posts the embed without an image.
+STREAM_ALERT_IMAGE = os.getenv("STREAM_ALERT_IMAGE", "assets/stream_alert.png")
+if STREAM_ALERT_IMAGE and not os.path.isabs(STREAM_ALERT_IMAGE):
+    # Relative to the repo, not wherever the process happens to be started.
+    STREAM_ALERT_IMAGE = os.path.join(os.path.dirname(os.path.dirname(__file__)), STREAM_ALERT_IMAGE)
 
 # ---------------- Join message ----------------
 # OFF: joins are Discord's own "Good to see you, X." with its wave sticker
