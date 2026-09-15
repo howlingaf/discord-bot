@@ -137,8 +137,8 @@ async def guest(interaction: discord.Interaction, note: str | None = None,
         await interaction.followup.send(f"Couldn't make a link: {e}", ephemeral=True)
         return
     await interaction.followup.send(
-        f"{url}\n-# Single use · expires <t:{expires}:R> · #on-stream only · "
-        "removed from the server when they leave the call", ephemeral=True)
+        f"{url}\n-# Single use · expires <t:{expires}:R> · drops them straight into "
+        "#on-stream · removed from the server the moment they leave the call", ephemeral=True)
 
 
 @bot.tree.command(name="twitch-unlink", description="(Admin) Forget a Twitch\u2194Discord link so the handle can be re-prompted.")

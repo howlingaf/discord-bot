@@ -102,6 +102,13 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     except Exception as e:
         log_error(f"[VOICE] name revert failed: {e!r}")
 
+    # --- Guest links: remove a guest the moment they leave the call ---
+    try:
+        from .guests import on_voice_state as guests_voice
+        await guests_voice(bot, member, before, after)
+    except Exception as e:
+        log_error(f"[VOICE] guest handling failed: {e!r}")
+
     # --- Voice time: one row per user per channel stint ---
     try:
         await voicetime_voice(bot, member, before, after)

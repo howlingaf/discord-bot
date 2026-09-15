@@ -147,11 +147,16 @@ WELCOME_STICKER_ID = int(os.getenv("WELCOME_STICKER_ID") or "0")
 # gets access to just this channel, and is removed from the server once they
 # leave it -- for interviews and drop-ins, without asking anyone to join.
 GUEST_CHANNEL_ID = int(os.getenv("GUEST_CHANNEL_ID") or "1393005093045145631")  # #on-stream
-# Time after leaving the channel before removal, so a dropped connection
-# doesn't end an interview.
-GUEST_GRACE_SECONDS = int(os.getenv("GUEST_GRACE_SECONDS") or "120")
-# A guest who arrives but never enters the call is removed after this long.
-GUEST_NO_SHOW_SECONDS = int(os.getenv("GUEST_NO_SHOW_SECONDS") or "3600")
+# Given by the invite itself, at the moment it's accepted (Discord's invite
+# role_ids). That's what lets Discord auto-join them into the locked channel:
+# it only does that for someone already allowed in when they click. A role
+# the bot added afterwards would arrive a moment too late.
+GUEST_ROLE_ID = int(os.getenv("GUEST_ROLE_ID") or "1461897560057708758")  # Verified
+# Seconds after leaving the call before removal. 0 = the moment they leave,
+# which is what the owner wants; a dropped connection ends the visit too.
+GUEST_GRACE_SECONDS = int(os.getenv("GUEST_GRACE_SECONDS") or "0")
+# A guest who arrives but never ends up in the call is removed after this long.
+GUEST_NO_SHOW_SECONDS = int(os.getenv("GUEST_NO_SHOW_SECONDS") or "900")
 
 # ---------------- Twitch bot console (outbound control API) ----------------
 # Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
