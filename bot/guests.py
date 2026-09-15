@@ -42,7 +42,13 @@ from .config import (
     GUEST_ROLE_ID,
     GUILD_ID,
 )
-from .database import guest_active, guest_invite_create, guest_invites_unused, guest_update
+from .database import (
+    guest_active,
+    guest_invite_create,
+    guest_invites_expired,
+    guest_invites_unused,
+    guest_update,
+)
 from .logbus import log_error, log_if_persistent
 
 _TICK_SECONDS = 20
@@ -59,7 +65,7 @@ def _now() -> int:
     return int(time.time())
 
 
-async def create_link(bot, created_by: int, note: str | None, hours: int) -> tuple[str, int]:
+async def create_link(bot, created_by: int, note: str | None, minutes: int) -> tuple[str, int]:
     """Make a single-use invite into the guest channel that grants the guest
     role on acceptance. Returns (url, expires_at).
 
@@ -68,7 +74,10 @@ async def create_link(bot, created_by: int, note: str | None, hours: int) -> tup
     reason = f"Guest link for {note}" if note else "Guest link"
     data = await bot.http.request(
         Route("POST", "/channels/{channel_id}/invites", channel_id=GUEST_CHANNEL_ID),
-        json={"max_uses": 1, "max_age": hours * 3600, "unique": True,
+        # Single use, so the link is gone the moment someone arrives on it; the
+        # short max_age retires it if nobody does. Neither limits how long a
+        # guest who's in can stay — an invite only governs getting in.
+        json={"max_uses": 1, "max_age": minutes * 60, "unique": True,
               "role_ids": [str(GUEST_ROLE_ID)]},
         reason=reason)
     if str(GUEST_ROLE_ID) not in {r["id"] for r in data.get("roles", [])}:
@@ -77,8 +86,8 @@ async def create_link(bot, created_by: int, note: str | None, hours: int) -> tup
         await bot.http.request(Route("DELETE", "/invites/{code}", code=data["code"]))
         raise RuntimeError("Discord didn't attach the guest role to the invite")
     now = _now()
-    guest_invite_create(data["code"], note, created_by, now, now + hours * 3600)
-    return f"https://discord.gg/{data['code']}", now + hours * 3600
+    guest_invite_create(data["code"], note, created_by, now, now + minutes * 60)
+    return f"https://discord.gg/{data['code']}", now + minutes * 60
 
 
 def _just_used(code: str, live: dict[str, int]) -> bool:
@@ -174,6 +183,8 @@ async def _tick(bot) -> None:
     if guild is None:
         return
     live = {i.code for i in await guild.invites()}
+    for g in guest_invites_expired(_now()):
+        guest_update(g["code"], ended_at=_now(), outcome="expired")
     # An unused link missing for two ticks running wasn't matched to anyone.
     # Usually it was revoked by hand — but if it was used while the bot missed
     # it, that person kept Verified, so say so rather than retire it silently.

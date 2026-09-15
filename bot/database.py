@@ -839,6 +839,14 @@ def guest_invites_unused(now: int) -> list[dict]:
             "ORDER BY created_at", (now,))]
 
 
+def guest_invites_expired(now: int) -> list[dict]:
+    """Links that ran out unused and haven't been closed off yet."""
+    with _db() as conn:
+        return [_guest_row(r) for r in conn.execute(
+            f"SELECT {_GUEST_COLS} FROM guest_invites "
+            "WHERE user_id IS NULL AND ended_at IS NULL AND expires_at <= ?", (now,))]
+
+
 def guest_active() -> list[dict]:
     """Guests who arrived and whose visit hasn't ended."""
     with _db() as conn:

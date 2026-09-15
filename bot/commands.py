@@ -124,21 +124,22 @@ async def problem_stub(interaction: discord.Interaction, problem: str | None = N
 
 @bot.tree.command(name="guest", description="(Admin) Single-use link into #on-stream for someone who shouldn't have to join.")
 @app_commands.describe(note="Who it's for — only for your records",
-                       hours="How long the link stays valid (default 24)")
+                       minutes="How long the link can be used before it expires (default 15)")
 @app_commands.default_permissions(manage_messages=True)
 @app_commands.checks.has_permissions(manage_messages=True)
 async def guest(interaction: discord.Interaction, note: str | None = None,
-                hours: app_commands.Range[int, 1, 168] = 24):
+                minutes: app_commands.Range[int, 1, 10080] = 15):
     await interaction.response.defer(ephemeral=True)
     try:
-        url, expires = await guest_create_link(bot, interaction.user.id, note, hours)
+        url, expires = await guest_create_link(bot, interaction.user.id, note, minutes)
     except Exception as e:
         log_error(f"[CMD /guest] {e!r}")
         await interaction.followup.send(f"Couldn't make a link: {e}", ephemeral=True)
         return
     await interaction.followup.send(
-        f"{url}\n-# Single use · expires <t:{expires}:R> · drops them straight into "
-        "#on-stream · removed from the server the moment they leave the call", ephemeral=True)
+        f"{url}\n-# Single use · expires <t:{expires}:R> if unused · drops them straight into "
+        "#on-stream · they can stay as long as they like, and are removed the moment they "
+        "leave the call", ephemeral=True)
 
 
 @bot.tree.command(name="twitch-unlink", description="(Admin) Forget a Twitch\u2194Discord link so the handle can be re-prompted.")
