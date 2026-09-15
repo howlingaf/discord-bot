@@ -245,6 +245,25 @@ def db_init():
         )
         """)
 
+        # Guest links: a single-use invite to #on-stream for someone who should
+        # be in the call without joining the server. One row per link; user_id
+        # fills in when someone arrives on it, outcome when their visit ends.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS guest_invites (
+          code        TEXT PRIMARY KEY,
+          note        TEXT,
+          created_by  INTEGER NOT NULL,
+          created_at  INTEGER NOT NULL,
+          expires_at  INTEGER NOT NULL,
+          user_id     INTEGER,
+          joined_at   INTEGER,
+          entered_at  INTEGER,
+          left_at     INTEGER,
+          ended_at    INTEGER,
+          outcome     TEXT
+        )
+        """)
+
         # ---- Fair-access cooldown system ----
         # Singleton runtime state: when the tracked rooms last all went empty
         # (drives the session-window reset) and the pinned admin panel message.
@@ -792,6 +811,49 @@ def welcome_wave_add(message_id: int, user_id: int) -> int | None:
         conn.commit()
         return conn.execute("SELECT COUNT(*) FROM welcome_waves WHERE message_id=?",
                             (message_id,)).fetchone()[0]
+
+
+_GUEST_COLS = ("code, note, created_by, created_at, expires_at, user_id, "
+               "joined_at, entered_at, left_at, ended_at, outcome")
+
+
+def _guest_row(r) -> dict:
+    return dict(zip([c.strip() for c in _GUEST_COLS.split(",")], r))
+
+
+def guest_invite_create(code: str, note: str | None, created_by: int,
+                        created_at: int, expires_at: int) -> None:
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO guest_invites(code, note, created_by, created_at, expires_at) "
+            "VALUES(?,?,?,?,?)", (code, note, created_by, created_at, expires_at))
+        conn.commit()
+
+
+def guest_invites_unused(now: int) -> list[dict]:
+    """Links nobody has arrived on yet and that haven't expired."""
+    with _db() as conn:
+        return [_guest_row(r) for r in conn.execute(
+            f"SELECT {_GUEST_COLS} FROM guest_invites "
+            "WHERE user_id IS NULL AND ended_at IS NULL AND expires_at > ? "
+            "ORDER BY created_at", (now,))]
+
+
+def guest_active() -> list[dict]:
+    """Guests who arrived and whose visit hasn't ended."""
+    with _db() as conn:
+        return [_guest_row(r) for r in conn.execute(
+            f"SELECT {_GUEST_COLS} FROM guest_invites "
+            "WHERE user_id IS NOT NULL AND ended_at IS NULL")]
+
+
+def guest_update(code: str, **fields) -> None:
+    if not fields:
+        return
+    cols = ", ".join(f"{k}=?" for k in fields)
+    with _db() as conn:
+        conn.execute(f"UPDATE guest_invites SET {cols} WHERE code=?", (*fields.values(), code))
+        conn.commit()
 
 
 def welcome_claim(user_id: int) -> bool:

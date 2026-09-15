@@ -18,6 +18,7 @@ from .problemsites import get_or_create_problem_post as site_get_or_create_post
 from .database import twitch_link_delete
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
 from .voicenames import rename as vc_rename
+from .guests import create_link as guest_create_link
 from .logbus import log_error, _chunk
 from .client import bot
 
@@ -119,6 +120,25 @@ async def problem_stub(interaction: discord.Interaction, problem: str | None = N
     hint = f"/lc {problem}" if problem else "/lc <link>"
     await interaction.response.send_message(
         f"That's `{hint}` now.", ephemeral=True)
+
+
+@bot.tree.command(name="guest", description="(Admin) Single-use link into #on-stream for someone who shouldn't have to join.")
+@app_commands.describe(note="Who it's for — only for your records",
+                       hours="How long the link stays valid (default 24)")
+@app_commands.default_permissions(manage_messages=True)
+@app_commands.checks.has_permissions(manage_messages=True)
+async def guest(interaction: discord.Interaction, note: str | None = None,
+                hours: app_commands.Range[int, 1, 168] = 24):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        url, expires = await guest_create_link(bot, interaction.user.id, note, hours)
+    except Exception as e:
+        log_error(f"[CMD /guest] {e!r}")
+        await interaction.followup.send(f"Couldn't make a link: {e}", ephemeral=True)
+        return
+    await interaction.followup.send(
+        f"{url}\n-# Single use · expires <t:{expires}:R> · #on-stream only · "
+        "removed from the server when they leave the call", ephemeral=True)
 
 
 @bot.tree.command(name="twitch-unlink", description="(Admin) Forget a Twitch\u2194Discord link so the handle can be re-prompted.")

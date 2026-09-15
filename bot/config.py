@@ -142,6 +142,17 @@ WELCOME_BUTTON_EMOJI = os.getenv("WELCOME_BUTTON_EMOJI") or "<:hi:15447730086091
 # trade against the count-on-the-label version. 0 keeps the count instead.
 WELCOME_STICKER_ID = int(os.getenv("WELCOME_STICKER_ID") or "0")
 
+# ---------------- Guest links ----------------
+# /guest makes a single-use invite to this voice channel. Whoever arrives on it
+# gets access to just this channel, and is removed from the server once they
+# leave it -- for interviews and drop-ins, without asking anyone to join.
+GUEST_CHANNEL_ID = int(os.getenv("GUEST_CHANNEL_ID") or "1393005093045145631")  # #on-stream
+# Time after leaving the channel before removal, so a dropped connection
+# doesn't end an interview.
+GUEST_GRACE_SECONDS = int(os.getenv("GUEST_GRACE_SECONDS") or "120")
+# A guest who arrives but never enters the call is removed after this long.
+GUEST_NO_SHOW_SECONDS = int(os.getenv("GUEST_NO_SHOW_SECONDS") or "3600")
+
 # ---------------- Twitch bot console (outbound control API) ----------------
 # Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
 CONSOLE_SECRET = os.getenv("CONSOLE_SECRET", "")

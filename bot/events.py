@@ -52,6 +52,10 @@ async def on_ready():
     # voice time: every user, every channel, plus the host's card
     voicetime_start(bot)
 
+    # guest links: /guest invites, and removing guests once they leave the call
+    from .guests import start as guests_start
+    guests_start(bot)
+
     # restore the chill room's name if whoever renamed it left while we were down
     voicenames_start(bot)
 
@@ -59,6 +63,10 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member: discord.Member):
+    # Guests first: their channel access should land before they look around.
+    from .guests import on_member_join as guests_join
+    await guests_join(bot, member)
+
     from .welcome import on_member_join as welcome_join
     try:
         await welcome_join(bot, member)
