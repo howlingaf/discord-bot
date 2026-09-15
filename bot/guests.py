@@ -45,6 +45,10 @@ _ACCESS = discord.PermissionOverwrite(
     use_voice_activation=True, send_messages=True, read_message_history=True)
 
 _lock = asyncio.Lock()
+# Invite codes live on the server as of the last tick (None until the first).
+# A guest link only counts as used by a join if it was here moments before,
+# so one revoked by hand earlier isn't mistaken for the next person's way in.
+_seen_codes: set[str] | None = None
 
 
 def _now() -> int:
@@ -78,7 +82,7 @@ async def on_member_join(bot, member: discord.Member) -> None:
             for delay in (0, 3):
                 await asyncio.sleep(delay)
                 live = {i.code: i.uses for i in await member.guild.invites()}
-                vanished = [g for g in unused if live.get(g["code"], 1) >= 1]
+                vanished = [g for g in unused if _just_used(g["code"], live)]
                 if vanished:
                     break
             if not vanished:
@@ -94,6 +98,15 @@ async def on_member_join(bot, member: discord.Member) -> None:
         print(f"[GUESTS] {member} arrived on guest link {used['code']}{note}")
     except Exception as e:
         log_error(f"[GUESTS] join handling failed for {member.id}: {e!r}")
+
+
+def _just_used(code: str, live: dict[str, int]) -> bool:
+    """Spent by this join: still listed with its one use counted, or gone from
+    the list despite being there at the last tick. Before the first tick
+    there's no "before" to compare, so only a visible use count will do."""
+    if code in live:
+        return live[code] >= 1
+    return _seen_codes is not None and code in _seen_codes
 
 
 def _kept(member: discord.Member) -> bool:
@@ -121,9 +134,19 @@ async def _end(bot, guild, g: dict, outcome: str) -> None:
 
 
 async def _tick(bot) -> None:
+    global _seen_codes
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return
+    live = {i.code for i in await guild.invites()}
+    # An unused link missing for two ticks running wasn't spent on a join —
+    # it was revoked. Retire it so it can never be matched to someone later.
+    if _seen_codes is not None:
+        for g in guest_invites_unused(_now()):
+            if g["code"] not in live and g["code"] not in _seen_codes:
+                guest_update(g["code"], ended_at=_now(), outcome="revoked")
+    _seen_codes = live
+
     channel = guild.get_channel(GUEST_CHANNEL_ID)
     in_call = {m.id for m in getattr(channel, "members", [])}
     now = _now()
