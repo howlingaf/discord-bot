@@ -87,6 +87,11 @@ async def create_link(bot, created_by: int, note: str | None, minutes: int) -> t
         raise RuntimeError("Discord didn't attach the guest role to the invite")
     now = _now()
     guest_invite_create(data["code"], note, created_by, now, now + minutes * 60)
+    # Known live from the moment it's made. The tick no longer fetches invites
+    # while nothing is waiting, so without this a guest arriving before the
+    # next tick couldn't be matched by the link vanishing.
+    global _seen_codes
+    _seen_codes = (_seen_codes or set()) | {data["code"]}
     return f"https://discord.gg/{data['code']}", now + minutes * 60
 
 
@@ -182,21 +187,29 @@ async def _tick(bot) -> None:
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return
-    live = {i.code for i in await guild.invites()}
     for g in guest_invites_expired(_now()):
         guest_update(g["code"], ended_at=_now(), outcome="expired")
-    # An unused link missing for two ticks running wasn't matched to anyone.
-    # Usually it was revoked by hand — but if it was used while the bot missed
-    # it, that person kept Verified, so say so rather than retire it silently.
-    if _seen_codes is not None:
-        for g in guest_invites_unused(_now()):
-            if g["code"] not in live and g["code"] not in _seen_codes:
-                guest_update(g["code"], ended_at=_now(), outcome="unmatched")
-                note = f" ({g['note']})" if g["note"] else ""
-                log_error(f"[GUESTS] guest link {g['code']}{note} disappeared with no arrival "
-                          "matched to it. Fine if it was revoked; if someone used it, they "
-                          "still have Verified — check recent joins.")
-    _seen_codes = live
+    # The invite list is only worth fetching while a guest link is waiting to
+    # be used. Fetching it every tick regardless tripped Discord's invite rate
+    # limit (40062): ~4,300 calls a day, nearly all with nothing to watch.
+    unused = guest_invites_unused(_now())
+    if not unused:
+        _seen_codes = set()
+    else:
+        live = {i.code for i in await guild.invites()}
+        # An unused link missing for two ticks running wasn't matched to anyone.
+        # Usually it was revoked by hand — but if it was used while the bot
+        # missed it, that person kept Verified, so say so rather than retire
+        # it silently.
+        if _seen_codes is not None:
+            for g in unused:
+                if g["code"] not in live and g["code"] not in _seen_codes:
+                    guest_update(g["code"], ended_at=_now(), outcome="unmatched")
+                    note = f" ({g['note']})" if g["note"] else ""
+                    log_error(f"[GUESTS] guest link {g['code']}{note} disappeared with no "
+                              "arrival matched to it. Fine if it was revoked; if someone "
+                              "used it, they still have Verified — check recent joins.")
+        _seen_codes = live
 
     channel = guild.get_channel(GUEST_CHANNEL_ID)
     in_call = {m.id for m in getattr(channel, "members", [])}
