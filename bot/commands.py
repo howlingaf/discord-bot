@@ -7,6 +7,9 @@ from .config import (
     SPOTIFY_REDIRECT_URI,
     SPOTIFY_ALLOWED_USER_ID,
     GUILD_ID,
+    GUEST_CHANNEL_ID,
+    GUEST_ROLE_ID,
+    MODERATOR_ROLE_ID,
     TWITCH_CONSOLE_CHANNEL_ID,
     VOICE_NAME_CHANNEL_ID,
 )
@@ -140,6 +143,59 @@ async def guest(interaction: discord.Interaction, note: str | None = None,
         f"{url}\n-# Single use · expires <t:{expires}:R> if unused · drops them straight into "
         "#on-stream · they can stay as long as they like, and are removed the moment they "
         "leave the call", ephemeral=True)
+
+
+async def _set_on_stream_lock(interaction: discord.Interaction, locked: bool) -> None:
+    """Close or reopen #on-stream to new arrivals. Only Connect changes: people
+    already in the call stay, and everyone can still see who's in it. The
+    owner is an admin and gets in regardless; mods get Connect of their own
+    while it's locked, and it's taken back on unlock so nothing lingers."""
+    guild = interaction.guild
+    channel = guild.get_channel(GUEST_CHANNEL_ID)
+    verified, mods = guild.get_role(GUEST_ROLE_ID), guild.get_role(MODERATOR_ROLE_ID)
+    if channel is None or verified is None or mods is None:
+        await interaction.response.send_message("Couldn't find #on-stream or its roles.", ephemeral=True)
+        return
+    if (channel.overwrites_for(verified).connect is False) == locked:
+        await interaction.response.send_message(
+            f"{channel.mention} is already {'locked' if locked else 'unlocked'}.", ephemeral=True)
+        return
+    reason = f"/{'lock' if locked else 'unlock'} by {interaction.user}"
+    try:
+        # Mods first on lock and last on unlock, so they're never shut out between the two.
+        if locked:
+            await channel.set_permissions(mods, overwrite=_with_connect(channel, mods, True), reason=reason)
+        await channel.set_permissions(verified, overwrite=_with_connect(channel, verified, not locked), reason=reason)
+        if not locked:
+            await channel.set_permissions(mods, overwrite=_with_connect(channel, mods, None), reason=reason)
+    except discord.HTTPException as e:
+        log_error(f"[CMD /{'lock' if locked else 'unlock'}] {e!r}")
+        await interaction.response.send_message(f"Couldn't change it: {e}", ephemeral=True)
+        return
+    await interaction.response.send_message(
+        f"🔒 {channel.mention} is locked: nobody new can join (you and mods still can). "
+        "Everyone already in stays." if locked else f"🔓 {channel.mention} is open again.",
+        ephemeral=True)
+
+
+def _with_connect(channel, role, value):
+    ow = channel.overwrites_for(role)
+    ow.connect = value
+    return ow
+
+
+@bot.tree.command(name="lock", description="(Admin) Stop anyone new from joining #on-stream.")
+@app_commands.default_permissions(manage_messages=True)
+@app_commands.checks.has_permissions(manage_messages=True)
+async def lock(interaction: discord.Interaction):
+    await _set_on_stream_lock(interaction, True)
+
+
+@bot.tree.command(name="unlock", description="(Admin) Let people join #on-stream again.")
+@app_commands.default_permissions(manage_messages=True)
+@app_commands.checks.has_permissions(manage_messages=True)
+async def unlock(interaction: discord.Interaction):
+    await _set_on_stream_lock(interaction, False)
 
 
 @bot.tree.command(name="twitch-unlink", description="(Admin) Forget a Twitch\u2194Discord link so the handle can be re-prompted.")

@@ -158,6 +158,11 @@ GUEST_GRACE_SECONDS = int(os.getenv("GUEST_GRACE_SECONDS") or "0")
 # A guest who arrives but never ends up in the call is removed after this long.
 GUEST_NO_SHOW_SECONDS = int(os.getenv("GUEST_NO_SHOW_SECONDS") or "900")
 
+# /lock and /unlock close #on-stream (GUEST_CHANNEL_ID) to new arrivals by
+# flipping Connect on the Verified role. Moderators only get Connect through
+# Verified, so the lock grants it to them directly while it's on.
+MODERATOR_ROLE_ID = int(os.getenv("MODERATOR_ROLE_ID") or "1400568785638789191")
+
 # ---------------- Twitch bot console (outbound control API) ----------------
 # Shared secret with the Twitch bot; must match its CONSOLE_SECRET. Never logged.
 CONSOLE_SECRET = os.getenv("CONSOLE_SECRET", "")
