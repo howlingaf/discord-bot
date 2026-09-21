@@ -191,6 +191,15 @@ TWITCH_LINK_PROMPT_CHANNEL_ID = DISCORD_LOG_CHANNEL_ID
 # Every user's time in every voice channel is recorded (bot/voicetime.py); this
 # channel holds the one pinned card that shows the host's share of it.
 ADMIN_PANEL_CHANNEL_ID = int(os.getenv("ADMIN_PANEL_CHANNEL_ID") or "1529992719697449143")
+
+# ---------------- Emote card ----------------
+# One standing embed in the admin channel: who is using our Twitch emotes in
+# other people's chats, from the anonymous reader in the Twitch bot. Redrawn
+# once a day, edited in place. 0 disables it.
+EMOTE_CARD_CHANNEL_ID = int(os.getenv("EMOTE_CARD_CHANNEL_ID") or ADMIN_PANEL_CHANNEL_ID)
+EMOTE_CARD_DAYS = int(os.getenv("EMOTE_CARD_DAYS") or "30")
+# The Twitch bot's store, read-only; it owns the file.
+TWITCH_CHAT_DB = os.getenv("TWITCH_CHAT_DB") or "/root/twitch-bot/chat.db"
 # The one room /name can rename. Still the retired #co-working 👥 — /name
 # answers "isn't set up" once that channel is deleted, until this is repointed.
 VOICE_NAME_CHANNEL_ID = int(os.getenv("VOICE_NAME_CHANNEL_ID") or "1529599559167246548")
