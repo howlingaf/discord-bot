@@ -198,6 +198,8 @@ ADMIN_PANEL_CHANNEL_ID = int(os.getenv("ADMIN_PANEL_CHANNEL_ID") or "15299927196
 # once a day, edited in place. 0 disables it.
 EMOTE_CARD_CHANNEL_ID = int(os.getenv("EMOTE_CARD_CHANNEL_ID") or ADMIN_PANEL_CHANNEL_ID)
 EMOTE_CARD_DAYS = int(os.getenv("EMOTE_CARD_DAYS") or "30")
+# Shared prefix of our channel emotes; dropped from the card's column headers.
+EMOTE_PREFIX = os.getenv("EMOTE_PREFIX") or "howlin67"
 # The Twitch bot's store, read-only; it owns the file.
 TWITCH_CHAT_DB = os.getenv("TWITCH_CHAT_DB") or "/root/twitch-bot/chat.db"
 # The one room /name can rename. Still the retired #co-working 👥 — /name
