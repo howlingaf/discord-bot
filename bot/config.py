@@ -187,11 +187,6 @@ ALERT_CHANNEL_ID = int(os.getenv("ALERT_CHANNEL_ID") or "1516295834046828614")
 # Twitch-link approval prompts post to the same mod console channel.
 TWITCH_LINK_PROMPT_CHANNEL_ID = DISCORD_LOG_CHANNEL_ID
 
-# ---------------- Voice time ----------------
-# Every user's time in every voice channel is recorded (bot/voicetime.py); this
-# channel holds the one pinned card that shows the host's share of it.
-ADMIN_PANEL_CHANNEL_ID = int(os.getenv("ADMIN_PANEL_CHANNEL_ID") or "1529992719697449143")
-
 # The one room /name can rename. Still the retired #co-working 👥 — /name
 # answers "isn't set up" once that channel is deleted, until this is repointed.
 VOICE_NAME_CHANNEL_ID = int(os.getenv("VOICE_NAME_CHANNEL_ID") or "1529599559167246548")
