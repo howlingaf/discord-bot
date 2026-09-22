@@ -52,9 +52,6 @@ async def on_ready():
     # voice time: every user, every channel, plus the host's card
     voicetime_start(bot)
 
-    # standing card: our emotes seen in other channels' chat
-    from .emotecard import start as emotecard_start
-    emotecard_start(bot)
 
     # guest links: /guest invites, and removing guests once they leave the call
     from .guests import start as guests_start

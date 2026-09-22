@@ -690,26 +690,6 @@ def zerotrac_cache_upsert_all(entries: list[dict]):
 
 # ---- Admin panel state (the host's pinned voice-time card) ----
 
-def panel_message_get(name: str) -> int | None:
-    """The message id of a standing card, if it has been posted."""
-    with _db() as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS panel_messages ("
-                     "name TEXT PRIMARY KEY, message_id INTEGER NOT NULL)")
-        row = conn.execute(
-            "SELECT message_id FROM panel_messages WHERE name=?", (name,)).fetchone()
-        return row[0] if row else None
-
-
-def panel_message_set(name: str, message_id: int) -> None:
-    with _db() as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS panel_messages ("
-                     "name TEXT PRIMARY KEY, message_id INTEGER NOT NULL)")
-        conn.execute("INSERT INTO panel_messages(name, message_id) VALUES(?,?) "
-                     "ON CONFLICT(name) DO UPDATE SET message_id=excluded.message_id",
-                     (name, message_id))
-        conn.commit()
-
-
 def fairaccess_state_get() -> dict:
     with _db() as conn:
         row = conn.execute(
