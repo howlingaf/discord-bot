@@ -27,7 +27,10 @@ def log_error(*args) -> None:
     """
     try:
         msg = " ".join(str(a) for a in args)
-        print(msg)
+        # "<3>" is the syslog error level: journald strips it and records the
+        # line as an error, so logs.howling.one can filter on it. Every line of
+        # a multi-line message gets it, since journald splits them.
+        print("\n".join(f"<3>{line}" for line in msg.split("\n")))
         _buffer.append(msg)
     except Exception:
         pass
