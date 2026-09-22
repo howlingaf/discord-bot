@@ -49,7 +49,7 @@ from .database import (
     guest_invites_unused,
     guest_update,
 )
-from .logbus import log_error, log_if_persistent
+from .logbus import log_critical, log_error, log_if_persistent
 
 _TICK_SECONDS = 20
 # Roles a guest has without that meaning "keep them": the autorole. The role
@@ -206,7 +206,8 @@ async def _tick(bot) -> None:
                 if g["code"] not in live and g["code"] not in _seen_codes:
                     guest_update(g["code"], ended_at=_now(), outcome="unmatched")
                     note = f" ({g['note']})" if g["note"] else ""
-                    log_error(f"[GUESTS] guest link {g['code']}{note} disappeared with no "
+                    # Someone may be holding Verified they shouldn't: push it.
+                    log_critical(f"[GUESTS] guest link {g['code']}{note} disappeared with no "
                               "arrival matched to it. Fine if it was revoked; if someone "
                               "used it, they still have Verified — check recent joins.")
         _seen_codes = live

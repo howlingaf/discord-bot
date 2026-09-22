@@ -1,10 +1,15 @@
-"""Forward error/failure logs to a mods-only Discord channel (#discord-log).
+"""Record errors, and push the few that can't wait to a mods-only Discord
+channel (#discord-bot-console).
 
-Fully isolated from the rest of the bot: `log_error(...)` is synchronous, never
-awaits and never raises, so it is safe to call from anywhere (including deep
-inside `except` blocks on hot polling paths). All Discord I/O happens in a single
-background task that can never die. Errors/failures only — callers decide what
-gets routed here; routine/success logs stay on `print`.
+`log_error(...)` records a failure at the system log's error level, where
+https://logs.howling.one/discord-bot serves it. `log_critical(...)` also posts
+it to Discord, which is the one channel that reaches the owner's phone when
+they're away from the desk -- so it is for what needs them *now*, not for
+everything that went wrong.
+
+Both are synchronous, never await and never raise, so they are safe to call
+from anywhere (including deep inside `except` blocks on hot polling paths).
+All Discord I/O happens in a single background task that can never die.
 """
 import asyncio
 import collections
@@ -20,20 +25,30 @@ _MAX_MSG = 1900        # leave room for the ``` code-fence wrapper (<2000)
 _buffer: "collections.deque[str]" = collections.deque(maxlen=_MAXLEN)
 
 
+def _log(level: int, args: tuple, to_discord: bool) -> None:
+    try:
+        msg = " ".join(str(a) for a in args)
+        # A syslog level prefix: journald strips it and records the line at
+        # that level, so logs.howling.one can filter on it. Every line of a
+        # multi-line message gets it, since journald splits them.
+        print("\n".join(f"<{level}>{line}" for line in msg.split("\n")))
+        if to_discord:
+            _buffer.append(msg)
+    except Exception:
+        pass
+
+
 def log_error(*args) -> None:
-    """Print like the original `print(...)` AND queue the line for #discord-log.
+    """Print like the original `print(...)`, recorded as an error.
 
     Mirrors `print`'s space-joining of multiple args. Never blocks, never raises.
     """
-    try:
-        msg = " ".join(str(a) for a in args)
-        # "<3>" is the syslog error level: journald strips it and records the
-        # line as an error, so logs.howling.one can filter on it. Every line of
-        # a multi-line message gets it, since journald splits them.
-        print("\n".join(f"<3>{line}" for line in msg.split("\n")))
-        _buffer.append(msg)
-    except Exception:
-        pass
+    _log(3, args, to_discord=False)
+
+
+def log_critical(*args) -> None:
+    """An error that needs the owner now: recorded AND posted to Discord."""
+    _log(2, args, to_discord=True)
 
 
 _ESCALATE_AFTER = 3
