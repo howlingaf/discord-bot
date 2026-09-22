@@ -2,27 +2,24 @@
 
 One row per user per channel stint in `voice_visits`, for everyone (staff
 included), so time is attributed to the room it was actually spent in and any
-total is an aggregate in SQL. Nothing is decided from it — it's a record, read
-by the host's card in the admin channel and by scripts/voice_time.py.
+total is an aggregate in SQL. Nothing is decided from it -- it's a record.
+
+The reporting lives on the website (streaming-analytics reads this database).
+So besides the visits, this keeps `directory` current: the names of members
+and voice channels, so the website can label ids without a Discord token.
 
 This used to sit under a "fair-access" system that hid a newcomer room from
-regulars once they passed a threshold. That's gone; the record it kept wasn't.
+regulars once they passed a threshold, and later drew the host's time as a
+card in the admin channel. Both are gone; the record they kept isn't.
 """
 
 import asyncio
 import time
-from datetime import datetime, timedelta
 
 import discord
 
-from .config import (
-    ADMIN_PANEL_CHANNEL_ID,
-    STREAMER_DISCORD_ID,
-    VOICE_TIME_HOST_ROOMS,
-)
 from .database import (
-    fairaccess_set_panel_message,
-    fairaccess_state_get,
+    directory_upsert,
     heartbeat_get,
     heartbeat_set,
     voice_visit_close,
@@ -30,23 +27,27 @@ from .database import (
     voice_visit_recent_same_channel,
     voice_visit_resume,
     voice_visit_start,
+    voice_visit_user_ids,
     voice_visits_open,
-    voice_visits_since,
 )
 from .logbus import log_error, log_if_persistent
 
-# Refreshes the heartbeat a restart credits open visits up to, and keeps the
-# host card's "this week" current while nobody is moving between channels.
+# Refreshes the heartbeat a restart credits open visits up to.
 _TICK_SECONDS = 300
 # Rejoining the same voice channel within this gap resumes the visit row.
 _VISIT_MERGE_SECONDS = 300
+# Names change rarely; resync them this often in case an event was missed.
+_DIRECTORY_SECONDS = 6 * 3600
 
 _lock = asyncio.Lock()
-_render_lock = asyncio.Lock()
 
 
 def _now() -> int:
     return int(time.time())
+
+
+def _display(member: discord.abc.User) -> str:
+    return getattr(member, "display_name", None) or member.name
 
 
 # ------------------------------------------------------------------ #
@@ -65,9 +66,10 @@ async def on_voice_state(bot, member: discord.Member,
             return  # mute/deafen/stream toggles fire this event too
         async with _lock:
             _visit_transition(member.id, b, a, _now())
-        # Only the host's time is on the card, so only their moves re-render it.
-        if member.id == STREAMER_DISCORD_ID:
-            await render_panel(bot)
+        rows = [("member", member.id, _display(member))]
+        if after.channel:
+            rows.append(("channel", after.channel.id, after.channel.name))
+        directory_upsert(rows, _now())
     except Exception as e:
         log_error(f"[VOICETIME] voice handler failed: {e!r}")
 
@@ -91,90 +93,24 @@ def _visit_transition(user_id: int, left_cid: int | None,
 
 
 # ------------------------------------------------------------------ #
-#  Host card (one pinned message in the admin channel)               #
+#  Directory                                                         #
 # ------------------------------------------------------------------ #
 
-def _week_start(ts: int) -> int:
-    """Unix time of the Monday 00:00 opening `ts`'s week, server local time."""
-    d = datetime.fromtimestamp(ts)
-    monday = (d - timedelta(days=d.weekday())).replace(
-        hour=0, minute=0, second=0, microsecond=0)
-    return int(monday.timestamp())
-
-
-def _hm(seconds: int) -> str:
-    return f"{seconds // 3600}h {seconds % 3600 // 60}m"
-
-
-def _host_time_rows(user_id: int, rooms: list[int], now: int) -> list[tuple[str, int]]:
-    """[(label, seconds)] for this month, this week and last week.
-
-    A visit counts toward the period it STARTED in — one running through
-    Sunday midnight lands wholly in the earlier week. One query covers all
-    three periods; each row is a filtered sum over the same visits.
-    """
-    this_wk = _week_start(now)
-    last_wk = this_wk - 7 * 86400
-    month = int(datetime.fromtimestamp(now).replace(
-        day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
-    visits = voice_visits_since(user_id, rooms, min(month, last_wk)) if rooms else []
-
-    def total(since: int, until: int | None = None) -> int:
-        return sum(v["seconds"] + (max(0, now - v["last_join_at"]) if v["left_at"] is None else 0)
-                   for v in visits if v["started_at"] >= since
-                   and (until is None or v["started_at"] < until))
-
-    return [(f"{datetime.fromtimestamp(now):%B}", total(month)),
-            ("this week", total(this_wk)),
-            ("last week", total(last_wk, this_wk))]
-
-
-def _room_name(bot, channel_id: int) -> str:
-    ch = bot.get_channel(channel_id)
-    return ch.name if ch else str(channel_id)
-
-
-def _build_panel(bot) -> discord.ui.LayoutView:
-    view = discord.ui.LayoutView(timeout=None)
-    if not STREAMER_DISCORD_ID:
-        return view
-    rows = _host_time_rows(STREAMER_DISCORD_ID, VOICE_TIME_HOST_ROOMS, _now())
-    # ansi block: the only way to colour individual lines. Month yellow,
-    # this week bold green, last week cyan.
-    body = "```ansi\n" + "\n".join(
-        f"\u001b[{colour}m{label:<12}{_hm(secs)}\u001b[0m"
-        for (label, secs), colour in zip(rows, ("33", "1;32", "36"))) + "\n```"
-    view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"### <@{STREAMER_DISCORD_ID}>"),
-        discord.ui.TextDisplay(body),
-        discord.ui.TextDisplay(
-            "-# " + " · ".join(f"#{_room_name(bot, c)}" for c in VOICE_TIME_HOST_ROOMS)),
-        accent_color=0xFAA61A))
-    return view
-
-
-async def render_panel(bot) -> None:
-    """Re-render the pinned card in place; recreate it once if it was deleted."""
-    async with _render_lock:
-        try:
-            channel = (bot.get_channel(ADMIN_PANEL_CHANNEL_ID)
-                       or await bot.fetch_channel(ADMIN_PANEL_CHANNEL_ID))
-            view = _build_panel(bot)
-            mid = fairaccess_state_get()["panel_message_id"]
-            if mid:
-                try:
-                    await channel.get_partial_message(mid).edit(view=view)
-                    return
-                except discord.NotFound:
-                    pass  # deleted — recreate below
-            msg = await channel.send(view=view)
-            fairaccess_set_panel_message(msg.id)
+async def _sync_directory(bot) -> None:
+    """Every voice channel, and everyone who has ever had a visit recorded --
+    including people who've since left the server, looked up individually."""
+    rows = []
+    for guild in bot.guilds:
+        rows += [("channel", c.id, c.name) for c in guild.voice_channels + guild.stage_channels]
+    for uid in voice_visit_user_ids():
+        m = next((g.get_member(uid) for g in bot.guilds if g.get_member(uid)), None)
+        if m is None:
             try:
-                await msg.pin()
-            except Exception as e:
-                print(f"[VOICETIME] could not pin panel: {e}")
-        except Exception as e:
-            log_error(f"[VOICETIME] panel render failed: {e!r}")
+                m = await bot.fetch_user(uid)
+            except discord.HTTPException:
+                continue
+        rows.append(("member", uid, _display(m)))
+    directory_upsert(rows, _now())
 
 
 # ------------------------------------------------------------------ #
@@ -185,7 +121,7 @@ def _startup_fixups(bot, now: int) -> None:
     """A restart must not cost anyone the time they were sitting on. A visit
     left open while the bot was down stays open if they're still in that exact
     channel (the whole span counts); otherwise it's credited up to the last
-    heartbeat — the last moment we know they were connected."""
+    heartbeat -- the last moment we know they were connected."""
     beat = heartbeat_get()
     for v in voice_visits_open():
         ch = bot.get_channel(v["channel_id"])
@@ -201,19 +137,20 @@ async def _loop(bot) -> None:
     async with _lock:
         _startup_fixups(bot, _now())
         heartbeat_set(_now())
-    await render_panel(bot)
     print("✅ Voice time tracking started (all voice channels)")
 
-    fails = 0
+    fails, synced = 0, 0.0
     while not bot.is_closed():
-        await asyncio.sleep(_TICK_SECONDS)
         try:
             heartbeat_set(_now())
-            await render_panel(bot)
+            if time.time() - synced >= _DIRECTORY_SECONDS:
+                await _sync_directory(bot)
+                synced = time.time()
             fails = 0
         except Exception as e:
             fails += 1
             log_if_persistent(fails, f"[VOICETIME] tick failed (attempt {fails}): {e!r}")
+        await asyncio.sleep(_TICK_SECONDS)
 
 
 def start(bot) -> None:

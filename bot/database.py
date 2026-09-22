@@ -315,8 +315,8 @@ def db_init():
 
         # ---- Voice visit log (who was in which voice channel, how long) ----
         # One row per stint; sub-5-min rejoins to the same channel resume the
-        # row instead of opening a new one. Feeds the admin panel's sessions
-        # section. Fully decoupled from fair-access tallies.
+        # row instead of opening a new one. Feeds the voice
+        # time report on the website (streaming-analytics reads this file).
         conn.execute("""
         CREATE TABLE IF NOT EXISTS voice_visits (
           id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -330,6 +330,20 @@ def db_init():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_visits_open ON voice_visits(user_id) WHERE left_at IS NULL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_visits_recency ON voice_visits(left_at, last_join_at)")
+
+        # Names for the ids above -- members and channels -- kept current by
+        # voicetime.py. streaming-analytics reads this file to report voice
+        # time on the website, and this is how it labels people and rooms
+        # without holding a Discord token of its own.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS directory (
+          kind       TEXT NOT NULL,       -- 'member' | 'channel'
+          id         INTEGER NOT NULL,
+          name       TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (kind, id)
+        )
+        """)
 
         # Last moment the bot was known alive, stamped by the fair-access sweep.
         # A restart credits dangling voice sessions up to this point instead of
@@ -690,18 +704,24 @@ def zerotrac_cache_upsert_all(entries: list[dict]):
 
 # ---- Admin panel state (the host's pinned voice-time card) ----
 
-def fairaccess_state_get() -> dict:
-    with _db() as conn:
-        row = conn.execute(
-            "SELECT all_empty_since, panel_message_id FROM fairaccess_state WHERE id=1"
-        ).fetchone()
-        return {"all_empty_since": row[0], "panel_message_id": row[1]}
+# ---- Directory: names for member and channel ids ----
 
-
-def fairaccess_set_panel_message(message_id: int):
+def directory_upsert(rows: list[tuple[str, int, str]], now: int) -> None:
+    """(kind, id, name) rows; a changed name overwrites the old one."""
+    if not rows:
+        return
     with _db() as conn:
-        conn.execute("UPDATE fairaccess_state SET panel_message_id=? WHERE id=1", (message_id,))
+        conn.executemany(
+            "INSERT INTO directory (kind, id, name, updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(kind, id) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at "
+            "WHERE directory.name != excluded.name",
+            [(k, i, n, now) for k, i, n in rows])
         conn.commit()
+
+
+def voice_visit_user_ids() -> list[int]:
+    with _db() as conn:
+        return [r[0] for r in conn.execute("SELECT DISTINCT user_id FROM voice_visits")]
 
 
 # ---- Voice visit log: every user, every voice channel ----

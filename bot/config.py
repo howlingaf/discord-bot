@@ -195,9 +195,3 @@ ADMIN_PANEL_CHANNEL_ID = int(os.getenv("ADMIN_PANEL_CHANNEL_ID") or "15299927196
 # The one room /name can rename. Still the retired #co-working 👥 — /name
 # answers "isn't set up" once that channel is deleted, until this is repointed.
 VOICE_NAME_CHANNEL_ID = int(os.getenv("VOICE_NAME_CHANNEL_ID") or "1529599559167246548")
-# Rooms the host's card totals: #co-working 👂, where the work happens. An
-# explicit list rather than "every voice channel", so #general's weekly
-# hangout and a room added later don't silently count as work.
-VOICE_TIME_HOST_ROOMS = [
-    int(x) for x in (os.getenv("VOICE_TIME_HOST_ROOMS") or "").replace(" ", "").split(",") if x
-] or [1482589316520739077]
