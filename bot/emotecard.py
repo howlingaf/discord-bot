@@ -1,12 +1,12 @@
 """A card in the admin channel: where our Twitch emotes get used elsewhere.
 
-The Twitch bot reads ~200 other channels' chat anonymously and records every
-message carrying a `howlin67` emote (twitchbot/emotewatch.py). That record is
+streaming-analytics reads ~200 other channels' chat anonymously and records
+every message carrying a `howlin67` emote (analytics/emotewatch.py there). That record is
 only useful if it's in front of the owner, so this renders it as one embed,
 edited in place once a day rather than posted anew — the channel stays a set
 of standing cards, not a feed.
 
-The data lives in the Twitch bot's chat.db on the same box. This opens it
+The data lives in streaming-analytics' analytics.db on the same box. This opens it
 read-only: nothing here writes to it, and a missing or locked file leaves the
 card as it was rather than failing the tick.
 """
@@ -19,7 +19,7 @@ from datetime import date, datetime
 import discord
 
 from .config import (EMOTE_CARD_CHANNEL_ID, EMOTE_CARD_DAYS, EMOTE_PREFIX,
-                     TWITCH_CHAT_DB)
+                     ANALYTICS_DB, STREAMER_NAME)
 from .database import panel_message_get, panel_message_set
 from .logbus import log_error, log_if_persistent
 
@@ -43,18 +43,19 @@ def _grid(days: int) -> tuple[list[str], list[tuple[str, dict[str, int], int]], 
     """
     since = int(time.time()) - days * 86400
     try:
-        db = sqlite3.connect(f"file:{TWITCH_CHAT_DB}?mode=ro", uri=True, timeout=5)
+        db = sqlite3.connect(f"file:{ANALYTICS_DB}?mode=ro", uri=True, timeout=5)
         try:
             rows = db.execute(
-                "SELECT login, emote, COUNT(*) FROM emote_sightings WHERE ts >= ? "
-                "GROUP BY login, emote", (since,)).fetchall()
+                # The owner's own uses aren't the audience's; never count them.
+                "SELECT login, emote, COUNT(*) FROM emote_sightings WHERE ts >= ? AND login != ? "
+                "GROUP BY login, emote", (since, STREAMER_NAME.lower())).fetchall()
             channels = [c for (c,) in db.execute(
-                "SELECT DISTINCT channel FROM emote_sightings WHERE ts >= ? ORDER BY channel",
-                (since,))]
+                "SELECT DISTINCT channel FROM emote_sightings WHERE ts >= ? AND login != ? ORDER BY channel",
+                (since, STREAMER_NAME.lower()))]
         finally:
             db.close()
     except sqlite3.Error as e:
-        print(f"[EMOTECARD] could not read {TWITCH_CHAT_DB}: {e}")
+        print(f"[EMOTECARD] could not read {ANALYTICS_DB}: {e}")
         return [], [], 0, []
 
     per_emote: dict[str, int] = {}
