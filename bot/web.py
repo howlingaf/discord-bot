@@ -297,6 +297,19 @@ def make_web_app(bot_instance) -> web.Application:
             return web.json_response({"ok": False, "error": repr(e)})
         return web.json_response({"ok": True})
 
+    @routes.post("/stream-problems")
+    async def stream_problems(request: web.Request):
+        """What the stream worked on, from the Twitch bot once the VOD exists:
+        {"vod_id": ..., "items": [{"url", "offset_s", "at"}]}. Each problem's
+        post gets the Twitch tag and a link into the VOD."""
+        payload = await _twitch_json(request, "vod_id", "items")
+        from .streamwork import record
+        try:
+            marked = await record(bot_instance, str(payload["vod_id"]), list(payload["items"]))
+        except Exception as e:
+            return web.json_response({"ok": False, "error": repr(e)})
+        return web.json_response({"ok": True, "marked": marked})
+
     @routes.post("/console-log")
     async def console_log(request: web.Request):
         """Another program on this box saying something in #discord-bot-console

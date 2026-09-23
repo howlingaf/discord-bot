@@ -170,6 +170,10 @@ MODERATOR_ROLE_ID = int(os.getenv("MODERATOR_ROLE_ID") or "1400568785638789191")
 CONSOLE_SECRET = os.getenv("CONSOLE_SECRET", "")
 # Base URL of the Twitch bot's inbound HTTP control API (mirrors its DISCORD_BOT_URL).
 TWITCH_BOT_URL = (os.getenv("TWITCH_BOT_URL") or "http://127.0.0.1:8788").rstrip("/")
+# App credentials, shared with the Twitch bot: used to ask whether a VOD still
+# exists before leaving a link to it on a problem post (bot/streamwork.py).
+TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID", "")
+TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET", "")
 # The one channel where /twitch console commands are accepted (0 = disabled).
 TWITCH_CONSOLE_CHANNEL_ID = int(os.getenv("TWITCH_CONSOLE_CHANNEL_ID") or "0")
 

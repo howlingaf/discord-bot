@@ -205,6 +205,22 @@ def db_init():
         )
         """)
 
+        # One row per problem solved live on stream: the VOD it is in and how
+        # far into it. Kept because the post often doesn't exist yet when the
+        # stream ends, and because the tag has to come back off when Twitch
+        # deletes the VOD (bot/streamwork.py).
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS stream_marks (
+          platform   TEXT NOT NULL,
+          ref        TEXT NOT NULL,
+          vod_id     TEXT NOT NULL,
+          offset_s   INTEGER NOT NULL,
+          marked_at  INTEGER NOT NULL,
+          thread_id  INTEGER,
+          PRIMARY KEY (platform, ref, vod_id)
+        )
+        """)
+
         # One row per co-working session already swept, so a session that gets
         # extended by a reconnect doesn't post a second card.
         conn.execute("""
@@ -1075,3 +1091,34 @@ def voice_time_totals(channel_ids: list[int], now: int, limit: int | None = 15) 
             (now, *channel_ids, *([limit] if limit is not None else [])),
         ).fetchall()
         return [{"user_id": r[0], "seconds": r[1] or 0} for r in rows]
+
+
+# ---------- problems solved on stream (bot/streamwork.py) ----------
+
+def stream_mark_save(platform: str, ref: str, vod_id: str, offset_s: int, marked_at: int) -> None:
+    """The first mention wins: a problem re-opened later in the stream should
+    still link to where it started."""
+    with _db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO stream_marks (platform, ref, vod_id, offset_s, marked_at) "
+            "VALUES (?,?,?,?,?)", (platform, ref, vod_id, offset_s, marked_at))
+
+
+def stream_marks_set_applied(platform: str, ref: str, vod_id: str, thread_id: int) -> None:
+    with _db() as conn:
+        conn.execute("UPDATE stream_marks SET thread_id=? WHERE platform=? AND ref=? AND vod_id=?",
+                     (thread_id, platform, ref, vod_id))
+
+
+def stream_marks_all() -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute("SELECT platform, ref, vod_id, offset_s, marked_at, thread_id "
+                            "FROM stream_marks ORDER BY marked_at").fetchall()
+    return [{"platform": r[0], "ref": r[1], "vod_id": r[2], "offset_s": r[3],
+             "marked_at": r[4], "thread_id": r[5]} for r in rows]
+
+
+def stream_mark_delete(platform: str, ref: str, vod_id: str) -> None:
+    with _db() as conn:
+        conn.execute("DELETE FROM stream_marks WHERE platform=? AND ref=? AND vod_id=?",
+                     (platform, ref, vod_id))

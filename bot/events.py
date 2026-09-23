@@ -29,6 +29,12 @@ async def on_ready():
     from .twitchlog import start as twitchlog_start
     twitchlog_start(bot)
 
+    # keep the Twitch tag on problem posts in step with the VODs behind it
+    if not getattr(bot, "_streamwork_task_started", False):
+        bot._streamwork_task_started = True
+        from .streamwork import sweep_loop as streamwork_sweep
+        bot.loop.create_task(streamwork_sweep(bot))
+
     # start LeetCode schedulers once
     if not getattr(bot, "_daily_task_started", False):
         bot._daily_task_started = True
