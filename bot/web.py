@@ -297,6 +297,21 @@ def make_web_app(bot_instance) -> web.Application:
             return web.json_response({"ok": False, "error": repr(e)})
         return web.json_response({"ok": True})
 
+    @routes.post("/stream-alert/delete")
+    async def stream_alert_delete(request: web.Request):
+        """Remove a stream's card once Twitch has deleted the VOD it is about:
+        what's left is a title and dead links."""
+        payload = await _twitch_json(request, "message_id")
+        try:
+            channel = await _alert_channel(bool(payload.get("test")))
+            msg = await channel.fetch_message(int(payload["message_id"]))
+            await msg.delete()
+        except discord.NotFound:
+            return web.json_response({"ok": True, "already_gone": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": repr(e)})
+        return web.json_response({"ok": True})
+
     @routes.post("/stream-problems")
     async def stream_problems(request: web.Request):
         """What the stream worked on, from the Twitch bot once the VOD exists:
