@@ -17,6 +17,7 @@ from .config import (
     STREAM_ALERT_IMAGE,
     STREAM_ALERT_TEST_CHANNEL_ID,
     STREAM_ALERT_TEXT,
+    STREAM_PING_ROLE_ID,
     TWITCH_CHANNEL_URL,
 )
 from .database import consume_state, spotify_upsert_tokens, spotify_set_runtime
@@ -269,11 +270,16 @@ def make_web_app(bot_instance) -> web.Application:
         try:
             channel = await _alert_channel(test)
             image = _alert_image()
+            # Pings only the people who asked for it on the #readme card. The
+            # later VOD and topic edits can't re-ping: an edit never notifies.
+            role = channel.guild.get_role(STREAM_PING_ROLE_ID) if STREAM_PING_ROLE_ID else None
+            text = " ".join(x for x in (role.mention if role else "", STREAM_ALERT_TEXT or "") if x)
             msg = await channel.send(
-                STREAM_ALERT_TEXT or None,
+                text or None,
                 embed=_alert_embed(payload.get("title") or "", payload.get("game") or "", None),
                 **({"file": image} if image else {}),
-                allowed_mentions=discord.AllowedMentions.none())
+                allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
+                                                         roles=[role] if role else False))
         except Exception as e:
             return web.json_response({"ok": False, "error": repr(e)})
         return web.json_response({"ok": True, "message_id": str(msg.id)})

@@ -21,6 +21,11 @@ async def on_ready():
     # start the #discord-log error forwarder before the schedulers
     logbus_start(bot)
 
+    # the "notify me when live" button on the #readme card
+    from .streamping import attach as streamping_attach, register as streamping_register
+    streamping_register(bot)
+    bot.loop.create_task(streamping_attach(bot))
+
     # register restart-safe Twitch-link approval components
     from .twitchlink import register as twitchlink_register
     twitchlink_register(bot)

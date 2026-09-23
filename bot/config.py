@@ -97,6 +97,8 @@ INFO_CARDS = [
     for pair in (os.getenv("INFO_CARDS")
                  or "1400587372026003536:1541907284622450740").split(",") if pair.strip()
 ]
+# Opt-in from the #readme card: who gets pinged when the stream starts.
+STREAM_PING_ROLE_ID = int(os.getenv("STREAM_PING_ROLE_ID") or "1552402648035233814")
 COWORK_USUAL_HOUR = int(os.getenv("COWORK_USUAL_HOUR") or "22")
 COWORK_TZ = os.getenv("COWORK_TZ") or "America/Chicago"
 
