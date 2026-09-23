@@ -300,13 +300,16 @@ def make_web_app(bot_instance) -> web.Application:
             title=str(payload["title"])[:250],
             url=payload.get("url") or None,
             description="\n".join(lines)[:4000],
-            colour=discord.Colour.from_str("#9146FF"))
-        if payload.get("footer"):
-            embed.set_footer(text=str(payload["footer"])[:2000])
+            color=0x9146FF)
+        # The same image the go-live post carries, at the foot.
+        image = _alert_image()
+        if image:
+            embed.set_image(url=f"attachment://{_ALERT_IMAGE_NAME}")
         cid = STREAM_ALERT_TEST_CHANNEL_ID if payload.get("test") else LAST_NIGHT_CHANNEL_ID
         try:
             channel = bot_instance.get_channel(cid) or await bot_instance.fetch_channel(cid)
-            msg = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            msg = await channel.send(embed=embed, **({"file": image} if image else {}),
+                                     allowed_mentions=discord.AllowedMentions.none())
         except Exception as e:
             return web.json_response({"ok": False, "error": repr(e)})
         return web.json_response({"ok": True, "message_id": str(msg.id)})
