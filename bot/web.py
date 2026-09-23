@@ -16,7 +16,6 @@ from .config import (
     STREAM_ALERT_CHANNEL_ID,
     STREAM_ALERT_IMAGE,
     STREAM_ALERT_TEST_CHANNEL_ID,
-    LAST_NIGHT_CHANNEL_ID,
     STREAM_ALERT_TEXT,
     TWITCH_CHANNEL_URL,
 )
@@ -234,9 +233,13 @@ def make_web_app(bot_instance) -> web.Application:
             print(f"[STREAM ALERT] image unavailable, posting without it: {e!r}")
             return None
 
-    def _alert_embed(title: str, game: str, vod: dict | None) -> discord.Embed:
+    def _alert_embed(title: str, game: str, vod: dict | None,
+                     lines: list[str] | None = None) -> discord.Embed:
         e = discord.Embed(title=(title or "Live")[:256],
                           url=vod["url"] if vod else TWITCH_CHANNEL_URL,
+                          # What the stream covered, each line linking into the
+                          # VOD at that moment (Twitch has no marker API).
+                          description="\n".join(lines)[:4000] if lines else None,
                           color=0x9146FF)
         if game:
             e.add_field(name="Category", value=game[:1024], inline=True)
@@ -277,42 +280,22 @@ def make_web_app(bot_instance) -> web.Application:
 
     @routes.post("/stream-alert/vod")
     async def stream_alert_vod(request: web.Request):
-        """Edit a go-live post into its VOD card. Never re-pings: an edit can't."""
+        """Edit a go-live post into its VOD card, and later into the topic
+        list (`lines`). Never re-pings: an edit can't."""
         payload = await _twitch_json(request, "message_id")
         message_id = int(payload["message_id"])
         vod = {"url": payload.get("vod_url") or TWITCH_CHANNEL_URL,
                "duration": payload.get("duration") or ""}
+        lines = payload.get("lines")
+        lines = [str(x) for x in lines] if isinstance(lines, list) else None
         try:
             channel = await _alert_channel(bool(payload.get("test")))
             msg = await channel.fetch_message(message_id)
-            await msg.edit(embed=_alert_embed(payload.get("title") or "", payload.get("game") or "", vod))
+            await msg.edit(embed=_alert_embed(payload.get("title") or "",
+                                              payload.get("game") or "", vod, lines))
         except Exception as e:
             return web.json_response({"ok": False, "error": repr(e)})
         return web.json_response({"ok": True})
-
-    @routes.post("/stream-topics")
-    async def stream_topics(request: web.Request):
-        """What last night's stream covered, each line linking into the VOD at
-        that moment. Sent by the analytics app; `test` puts it in #testing."""
-        payload = await _twitch_json(request, "title", "lines")
-        lines = [str(x) for x in payload["lines"]]
-        embed = discord.Embed(
-            title=str(payload["title"])[:250],
-            url=payload.get("url") or None,
-            description="\n".join(lines)[:4000],
-            color=0x9146FF)
-        # The same image the go-live post carries, at the foot.
-        image = _alert_image()
-        if image:
-            embed.set_image(url=f"attachment://{_ALERT_IMAGE_NAME}")
-        cid = STREAM_ALERT_TEST_CHANNEL_ID if payload.get("test") else LAST_NIGHT_CHANNEL_ID
-        try:
-            channel = bot_instance.get_channel(cid) or await bot_instance.fetch_channel(cid)
-            msg = await channel.send(embed=embed, **({"file": image} if image else {}),
-                                     allowed_mentions=discord.AllowedMentions.none())
-        except Exception as e:
-            return web.json_response({"ok": False, "error": repr(e)})
-        return web.json_response({"ok": True, "message_id": str(msg.id)})
 
     @routes.post("/console-log")
     async def console_log(request: web.Request):

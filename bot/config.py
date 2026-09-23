@@ -108,11 +108,10 @@ LEETCODE_RECAP_CHANNEL_ID = 1472427491896332490
 # Go-live announcement (replaces Sapphire's): an embed with the title and game,
 # edited into a VOD card when the stream ends. Posted by the twitch bot through
 # /stream-alert. Test mode targets #testing.
-STREAM_ALERT_CHANNEL_ID = int(os.getenv("STREAM_ALERT_CHANNEL_ID") or "1400572056067641445")
+# #streams: one card per stream -- posted at go-live, then edited into the
+# VOD card and finally into the topic list once the review names them.
+STREAM_ALERT_CHANNEL_ID = int(os.getenv("STREAM_ALERT_CHANNEL_ID") or "1472427491896332490")
 STREAM_ALERT_TEST_CHANNEL_ID = int(os.getenv("STREAM_ALERT_TEST_CHANNEL_ID") or "1541895984403972147")
-# #last-night-with-the-howler: the stream's topics, timestamped into the VOD,
-# posted by the analytics app once a stream has been reviewed.
-LAST_NIGHT_CHANNEL_ID = int(os.getenv("LAST_NIGHT_CHANNEL_ID") or "1472427491896332490")
 TWITCH_CHANNEL_URL = f"https://twitch.tv/{STREAMER_NAME}"
 # Optional line of content above the embed. Empty leaves the embed alone,
 # which is the default — the post carries no mention of any kind.
