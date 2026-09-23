@@ -20,6 +20,7 @@ from .config import (
     TWITCH_CHANNEL_URL,
 )
 from .database import consume_state, spotify_upsert_tokens, spotify_set_runtime
+from .logbus import relay
 from .recap import process_recap
 from .spotify import spotify_authorize_url, spotify_exchange_code
 
@@ -286,6 +287,14 @@ def make_web_app(bot_instance) -> web.Application:
             await msg.edit(embed=_alert_embed(payload.get("title") or "", payload.get("game") or "", vod))
         except Exception as e:
             return web.json_response({"ok": False, "error": repr(e)})
+        return web.json_response({"ok": True})
+
+    @routes.post("/console-log")
+    async def console_log(request: web.Request):
+        """Another program on this box saying something in #discord-bot-console
+        (the nightly backup's failures), so only this bot needs the token."""
+        payload = await _twitch_json(request, "message")
+        relay(str(payload["message"]))
         return web.json_response({"ok": True})
 
     @routes.post("/twitch-log")

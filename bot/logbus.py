@@ -51,6 +51,13 @@ def log_critical(*args) -> None:
     _log(2, args, to_discord=True)
 
 
+def relay(*args) -> None:
+    """Post another program's message to #discord-bot-console (the backup
+    script, through POST /console-log). Recorded here at info: the failure
+    itself belongs to that program's own log, not to this bot's."""
+    _log(6, args, to_discord=True)
+
+
 _ESCALATE_AFTER = 3
 
 
