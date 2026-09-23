@@ -16,6 +16,7 @@ from .config import (
     STREAM_ALERT_CHANNEL_ID,
     STREAM_ALERT_IMAGE,
     STREAM_ALERT_TEST_CHANNEL_ID,
+    LAST_NIGHT_CHANNEL_ID,
     STREAM_ALERT_TEXT,
     TWITCH_CHANNEL_URL,
 )
@@ -288,6 +289,27 @@ def make_web_app(bot_instance) -> web.Application:
         except Exception as e:
             return web.json_response({"ok": False, "error": repr(e)})
         return web.json_response({"ok": True})
+
+    @routes.post("/stream-topics")
+    async def stream_topics(request: web.Request):
+        """What last night's stream covered, each line linking into the VOD at
+        that moment. Sent by the analytics app; `test` puts it in #testing."""
+        payload = await _twitch_json(request, "title", "lines")
+        lines = [str(x) for x in payload["lines"]]
+        embed = discord.Embed(
+            title=str(payload["title"])[:250],
+            url=payload.get("url") or None,
+            description="\n".join(lines)[:4000],
+            colour=discord.Colour.from_str("#9146FF"))
+        if payload.get("footer"):
+            embed.set_footer(text=str(payload["footer"])[:2000])
+        cid = STREAM_ALERT_TEST_CHANNEL_ID if payload.get("test") else LAST_NIGHT_CHANNEL_ID
+        try:
+            channel = bot_instance.get_channel(cid) or await bot_instance.fetch_channel(cid)
+            msg = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        except Exception as e:
+            return web.json_response({"ok": False, "error": repr(e)})
+        return web.json_response({"ok": True, "message_id": str(msg.id)})
 
     @routes.post("/console-log")
     async def console_log(request: web.Request):
