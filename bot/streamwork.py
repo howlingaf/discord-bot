@@ -183,6 +183,8 @@ async def sweep(bot) -> None:
         if m["thread_id"]:
             try:
                 await _edit_post(bot, m["thread_id"], line=None)
+            except discord.NotFound:
+                pass        # post deleted since: nothing to clean up, drop the mark
             except Exception as e:
                 log_error(f"[STREAMWORK] untagging {m['platform']}/{m['ref']} failed: {e!r}")
                 continue
