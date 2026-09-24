@@ -20,8 +20,8 @@ for f in sorted(glob.glob(os.path.expanduser("~/emotes/*.png"))):
     lg = logo.resize((92, 92), Image.LANCZOS)
     img.alpha_composite(lg, (W - lg.width - pad, H - lg.height - pad))
     d = ImageDraw.Draw(img)
-    text = "art: @pengukim"
+    text = "credit: @pengukim"
     tb = d.textbbox((0, 0), text, font=font)
-    d.text((pad, H - pad - tb[3]), text, font=font, fill=(0, 0, 0, 170))
+    d.text((pad, H - pad - tb[3]), text, font=font, fill=(255, 255, 255, 230))
     img.save(os.path.join(out, os.path.basename(f)))
 print(len(os.listdir(out)), "banners in", out)
