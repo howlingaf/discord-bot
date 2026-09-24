@@ -1,5 +1,7 @@
 import asyncio
 import hmac
+import os
+import random
 import re
 
 import discord
@@ -225,11 +227,15 @@ def make_web_app(bot_instance) -> web.Application:
     _ALERT_IMAGE_NAME = "stream_alert.png"
 
     def _alert_image() -> discord.File | None:
-        """A fresh File per send: discord.py consumes the handle on upload."""
+        """A fresh File per send: discord.py consumes the handle on upload. For
+        a folder, a random one of its PNGs -- a different emote each stream."""
         if not STREAM_ALERT_IMAGE:
             return None
         try:
-            return discord.File(STREAM_ALERT_IMAGE, filename=_ALERT_IMAGE_NAME)
+            path = STREAM_ALERT_IMAGE
+            if os.path.isdir(path):
+                path = random.choice([os.path.join(path, f) for f in sorted(os.listdir(path)) if f.endswith(".png")])
+            return discord.File(path, filename=_ALERT_IMAGE_NAME)
         except OSError as e:
             print(f"[STREAM ALERT] image unavailable, posting without it: {e!r}")
             return None
