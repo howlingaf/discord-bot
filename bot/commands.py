@@ -21,6 +21,7 @@ from .problemsites import get_or_create_problem_post as site_get_or_create_post
 from .database import twitch_link_delete
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
 from .voicenames import rename as vc_rename
+from .voicelock import set_on_stream_lock
 from .guests import create_link as guest_create_link
 from .logbus import log_error, _chunk
 from .client import bot
@@ -146,42 +147,20 @@ async def guest(interaction: discord.Interaction, note: str | None = None,
 
 
 async def _set_on_stream_lock(interaction: discord.Interaction, locked: bool) -> None:
-    """Close or reopen #on-stream to new arrivals. Only Connect changes: people
-    already in the call stay, and everyone can still see who's in it. The
-    owner is an admin and gets in regardless; mods get Connect of their own
-    while it's locked, and it's taken back on unlock so nothing lingers."""
-    guild = interaction.guild
-    channel = guild.get_channel(GUEST_CHANNEL_ID)
-    verified, mods = guild.get_role(GUEST_ROLE_ID), guild.get_role(MODERATOR_ROLE_ID)
-    if channel is None or verified is None or mods is None:
-        await interaction.response.send_message("Couldn't find #on-stream or its roles.", ephemeral=True)
+    """Close or reopen #on-stream to new arrivals (see voicelock.py)."""
+    ok, msg = await set_on_stream_lock(
+        interaction.guild, locked, f"/{'lock' if locked else 'unlock'} by {interaction.user}")
+    if not ok:
+        await interaction.response.send_message(msg, ephemeral=True)
         return
-    if (channel.overwrites_for(verified).connect is False) == locked:
+    if msg.startswith("already"):
         await interaction.response.send_message(
-            f"{channel.mention} is already {'locked' if locked else 'unlocked'}.", ephemeral=True)
-        return
-    reason = f"/{'lock' if locked else 'unlock'} by {interaction.user}"
-    try:
-        # Mods first on lock and last on unlock, so they're never shut out between the two.
-        if locked:
-            await channel.set_permissions(mods, overwrite=_with_connect(channel, mods, True), reason=reason)
-        await channel.set_permissions(verified, overwrite=_with_connect(channel, verified, not locked), reason=reason)
-        if not locked:
-            await channel.set_permissions(mods, overwrite=_with_connect(channel, mods, None), reason=reason)
-    except discord.HTTPException as e:
-        log_error(f"[CMD /{'lock' if locked else 'unlock'}] {e!r}")
-        await interaction.response.send_message(f"Couldn't change it: {e}", ephemeral=True)
+            f"<#{GUEST_CHANNEL_ID}> is {msg}.", ephemeral=True)
         return
     await interaction.response.send_message(
-        f"🔒 {channel.mention} is locked: nobody new can join (you and mods still can). "
-        "Everyone already in stays." if locked else f"🔓 {channel.mention} is open again.",
+        f"🔒 <#{GUEST_CHANNEL_ID}> is locked: nobody new can join (you and mods still can). "
+        "Everyone already in stays." if locked else f"🔓 <#{GUEST_CHANNEL_ID}> is open again.",
         ephemeral=True)
-
-
-def _with_connect(channel, role, value):
-    ow = channel.overwrites_for(role)
-    ow.connect = value
-    return ow
 
 
 @bot.tree.command(name="lock", description="(Admin) Stop anyone new from joining #on-stream.")

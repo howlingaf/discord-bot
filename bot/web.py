@@ -14,6 +14,7 @@ from .config import (
     SPOTIFY_ALLOWED_USER_ID,
     RECAP_SECRET,
     CONSOLE_SECRET,
+    GUILD_ID,
     ALERT_CHANNEL_ID,
     STREAM_ALERT_CHANNEL_ID,
     STREAM_ALERT_IMAGE,
@@ -344,6 +345,19 @@ def make_web_app(bot_instance) -> web.Application:
         payload = await _twitch_json(request, "message")
         relay(str(payload["message"]))
         return web.json_response({"ok": True})
+
+    @routes.post("/review-lock")
+    async def review_lock(request: web.Request):
+        """Twitch bot: lock #on-stream while a redeemed Track/Album Review
+        is playing, unlock when it ends."""
+        payload = await _twitch_json(request, "locked")
+        from .voicelock import set_on_stream_lock
+        guild = bot_instance.get_guild(GUILD_ID)
+        if guild is None:
+            return web.json_response({"ok": False, "error": "guild not ready"})
+        ok, msg = await set_on_stream_lock(
+            guild, bool(payload["locked"]), "track/album review (twitch bot)")
+        return web.json_response({"ok": ok, "detail": msg})
 
     @routes.post("/twitch-log")
     async def twitch_log(request: web.Request):
