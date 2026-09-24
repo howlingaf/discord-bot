@@ -11,7 +11,7 @@ out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path
 os.makedirs(out, exist_ok=True)
 SCALE = 2                                            # 448x224 emotes -> 896x448, crisp on Discord
 logo = Image.open("/root/discord-bot/assets/emoji/twitch.png").convert("RGBA")
-font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18)   # small and quiet: a credit, not a caption
 for f in sorted(glob.glob(os.path.expanduser("~/emotes/*.png"))):
     em = Image.open(f).convert("RGBA")
     W, H = em.width * SCALE, em.height * SCALE
@@ -21,8 +21,7 @@ for f in sorted(glob.glob(os.path.expanduser("~/emotes/*.png"))):
     img.alpha_composite(lg, (W - lg.width - pad, H - lg.height - pad))
     d = ImageDraw.Draw(img)
     text = "art: @pengukim"
-    tb = d.textbbox((0, 0), text, font=font, stroke_width=4)
-    d.text((pad + 4, H - pad - (tb[3] - tb[1]) - 6), text, font=font, fill=(255, 255, 255, 255),
-           stroke_width=4, stroke_fill=(20, 16, 24, 255))
+    tb = d.textbbox((0, 0), text, font=font)
+    d.text((pad, H - pad - tb[3]), text, font=font, fill=(0, 0, 0, 170))
     img.save(os.path.join(out, os.path.basename(f)))
 print(len(os.listdir(out)), "banners in", out)
