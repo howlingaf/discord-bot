@@ -350,7 +350,11 @@ def make_web_app(bot_instance) -> web.Application:
     async def review_lock(request: web.Request):
         """Twitch bot: lock #on-stream while a redeemed Track/Album Review
         is playing, unlock when it ends."""
-        payload = await _twitch_json(request, "locked")
+        # Not through the required-fields check: it treats a present-but-
+        # False boolean as missing, and {"locked": false} is the unlock.
+        payload = await _twitch_json(request)
+        if "locked" not in payload:
+            raise web.HTTPBadRequest(text="missing: locked")
         from .voicelock import set_on_stream_lock
         guild = bot_instance.get_guild(GUILD_ID)
         if guild is None:
