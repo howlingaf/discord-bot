@@ -22,6 +22,6 @@ for f in sorted(glob.glob(os.path.expanduser("~/emotes/*.png"))):
     d = ImageDraw.Draw(img)
     text = "art: @pengukim"
     tb = d.textbbox((0, 0), text, font=font)
-    d.text((pad, H - pad - tb[3]), text, font=font, fill=(128, 128, 128, 230))
+    d.text((pad, H - pad - tb[3]), text, font=font, fill=(0, 0, 0, 230))
     img.save(os.path.join(out, os.path.basename(f)))
 print(len(os.listdir(out)), "banners in", out)
