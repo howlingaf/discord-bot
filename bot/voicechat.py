@@ -78,11 +78,18 @@ def _watched_channels() -> set[int]:
 
 # ── payloads ────────────────────────────────────────────────────────
 def _member_payload(m: discord.Member) -> dict:
+    # Discord reports muting itself twice over: self_mute is the person's own
+    # mic button, mute is a moderator muting them. Deafened implies muted --
+    # someone who can't hear isn't taking part -- so the overlay shows the
+    # headphones and leaves the mic icon off.
+    vs = m.voice
     return {
         "id": str(m.id),
         "name": m.display_name,
         "avatar": m.display_avatar.url,
         "bot": m.bot,
+        "mute": bool(vs and (vs.self_mute or vs.mute)),
+        "deaf": bool(vs and (vs.self_deaf or vs.deaf)),
     }
 
 
@@ -317,6 +324,10 @@ a {{ color: #00a8fc; }}
 .member:hover {{ background: #35373c; }}
 .member img {{ width: 28px; height: 28px; border-radius: 50%; }}
 .member .name {{ font-size: 13px; font-weight: 500; }}
+/* Muted and deafened: faded, with the icon Discord itself uses. */
+.member.off img, .member.off .name {{ opacity: .45; }}
+.member .state {{ display: none; width: 14px; height: 14px; flex-shrink: 0; fill: #f23f43; }}
+.member.off .state {{ display: block; }}
 .member .bot-tag {{
   background: #5865f2; color: #fff; font-size: 10px; padding: 1px 4px; border-radius: 3px;
   font-weight: 600; margin-left: 2px;
@@ -451,14 +462,21 @@ function connect() {{
 
 let scrollOffset = 0;
 
+// Discord's own mic-off and headphones-off glyphs, so the overlay reads the
+// same way as the client it mirrors.
+const MUTE_ICON = '<svg class="state" viewBox="0 0 24 24"><path d="M6.7 11H5c0 3.4 2.6 6.2 6 6.7V21h2v-3.3c.9-.1 1.7-.4 2.5-.8l-1.5-1.5c-.6.2-1.3.4-2 .4-2.8 0-5.3-2.2-5.3-5.8zm-2-8.3L3.3 4.1l5.4 5.4V11c0 1.8 1.5 3.3 3.3 3.3.2 0 .4 0 .6-.1l1.4 1.4c-.6.3-1.3.4-2 .4v.1l6 6 1.4-1.4L4.7 2.7zM15 11V5c0-1.7-1.3-3-3-3-1.5 0-2.7 1-3 2.4L15 11z"/></svg>';
+const DEAF_ICON = '<svg class="state" viewBox="0 0 24 24"><path d="M3.3 4.1 4.7 2.7l16.6 16.6-1.4 1.4-3.3-3.3c-.5.3-1 .5-1.6.6v-2.1L4.4 5.3c-.1.2-.1.5-.1.7v6h1c1.1 0 2 .9 2 2v4c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V12c0-2.9 1.2-5.6 3.2-7.5L3.3 4.1zM12 4c4.4 0 8 3.6 8 8v4c0 .5-.2 1-.5 1.4L18 15.9V12h1v-.1c0-3.9-3.1-7-7-7-1 0-2 .2-2.9.6L7.6 4c1.3-.6 2.8-1 4.4-1z"/></svg>';
+
 function renderMembers(members) {{
   memberList.innerHTML = "";
   countEl.textContent = members.filter(m => !m.bot).length;
   members.forEach(m => {{
     const div = document.createElement("div");
-    div.className = "member";
+    div.className = "member" + (m.deaf || m.mute ? " off" : "");
     div.innerHTML = '<img src="' + escHtml(m.avatar) + '" alt="">'
-      + '<span class="name">' + escHtml(m.name) + (m.bot ? '<span class="bot-tag">BOT</span>' : '') + '</span>';
+      + '<span class="name">' + escHtml(m.name) + (m.bot ? '<span class="bot-tag">BOT</span>' : '') + '</span>'
+      + (m.deaf ? DEAF_ICON : (m.mute ? MUTE_ICON : ''));
+    div.title = m.deaf ? "Deafened" : (m.mute ? "Muted" : "");
     memberList.appendChild(div);
   }});
   scrollOffset = 0;
