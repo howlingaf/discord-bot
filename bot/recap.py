@@ -28,7 +28,6 @@ from .codeforces import get_or_create_problem_post as cf_get_or_create_post
 from .problemsites import SITES
 from .webutil import BROWSER_UA, strip_tags
 from .logbus import log_error
-from .twitchlink import solution_name, maybe_prompt
 
 
 # The recap is DSA-only: links the streamer shares on stream are dropped unless
@@ -383,8 +382,7 @@ async def process_recap(bot, payload: dict):
         for cs in entries["chatters"]:
             twitch_user = cs.get("twitch_user") or "anonymous"
             url = cs.get("url") or ""
-            await maybe_prompt(bot, twitch_user)  # new handle -> mod approval prompt
-            line = f"{solution_name(twitch_user)} submitted a solution!"
+            line = f"**{twitch_user}** submitted a solution!"
             if url:
                 line += f"\n<{url}>"
             lines.append(line)

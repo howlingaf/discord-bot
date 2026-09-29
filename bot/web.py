@@ -169,14 +169,12 @@ def make_web_app(bot_instance) -> web.Application:
 
         async def _post():
             try:
-                from .twitchlink import solution_name, maybe_prompt
                 thread = bot_instance.get_channel(thread_id) or await bot_instance.fetch_channel(thread_id)
                 lines = []
                 for s in solutions:
                     user = s.get("user") or "anonymous"
                     url = s.get("url") or ""
-                    await maybe_prompt(bot_instance, user)  # new handle -> mod approval prompt
-                    line = f"{solution_name(user)} submitted a solution!"
+                    line = f"**{user}** submitted a solution!"
                     # Only embed real web links — skip javascript:/data: etc.
                     if url.startswith(("http://", "https://")):
                         line += f"\n<{url}>"

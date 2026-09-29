@@ -26,10 +26,6 @@ async def on_ready():
     streamping_register(bot)
     bot.loop.create_task(streamping_attach(bot))
 
-    # register restart-safe Twitch-link approval components
-    from .twitchlink import register as twitchlink_register
-    twitchlink_register(bot)
-
     # start the relay that posts Twitch-bot logs into #twitch-bot-console
     from .twitchlog import start as twitchlog_start
     twitchlog_start(bot)

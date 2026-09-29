@@ -18,7 +18,6 @@ from .spotify import dm_spotify_link
 from .leetcode import get_or_create_problem_post_from_ref as lc_get_or_create_post
 from .codeforces import get_or_create_problem_post as cf_get_or_create_post
 from .problemsites import get_or_create_problem_post as site_get_or_create_post
-from .database import twitch_link_delete
 from .voicechat import on_chat_message, on_chat_edit, on_chat_delete, register_command as vc_register_command
 from .voicenames import rename as vc_rename
 from .voicelock import set_on_stream_lock
@@ -175,21 +174,6 @@ async def lock(interaction: discord.Interaction):
 @app_commands.checks.has_permissions(manage_messages=True)
 async def unlock(interaction: discord.Interaction):
     await _set_on_stream_lock(interaction, False)
-
-
-@bot.tree.command(name="twitch-unlink", description="(Admin) Forget a Twitch\u2194Discord link so the handle can be re-prompted.")
-@app_commands.describe(handle="The Twitch handle to forget")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def twitch_unlink(interaction: discord.Interaction, handle: str):
-    removed = twitch_link_delete(handle.strip().lower())
-    if removed:
-        await interaction.response.send_message(
-            f"\u2705 Forgot Twitch link for **{handle.strip().lower()}** \u2014 it'll be prompted again on the next solution.",
-            ephemeral=True,
-        )
-    else:
-        await interaction.response.send_message(
-            f"\u2139\ufe0f No stored link for **{handle.strip().lower()}**.", ephemeral=True)
 
 
 @bot.tree.command(name="twitch", description="(Admin) Run a console command on the Twitch bot.")

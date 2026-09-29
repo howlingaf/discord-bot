@@ -194,7 +194,6 @@ DISCORD_LOG_CHANNEL_ID = 1516295491753607268
 # noisy, unlike the silent log feeds.
 ALERT_CHANNEL_ID = int(os.getenv("ALERT_CHANNEL_ID") or "1516295834046828614")
 # Twitch-link approval prompts post to the same mod console channel.
-TWITCH_LINK_PROMPT_CHANNEL_ID = DISCORD_LOG_CHANNEL_ID
 
 # The one room /name can rename. Still the retired #co-working 👥 — /name
 # answers "isn't set up" once that channel is deleted, until this is repointed.

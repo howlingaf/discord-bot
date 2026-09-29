@@ -97,16 +97,6 @@ def db_init():
         existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(leetcode_contest_state)")}
         if "thread_id" not in existing_cols:
             conn.execute("ALTER TABLE leetcode_contest_state ADD COLUMN thread_id INTEGER")
-            print("[DB] Added missing column 'thread_id' to leetcode_contest_state")
-
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS twitch_links (
-          twitch_username TEXT PRIMARY KEY,       -- normalized: lowercase
-          discord_user_id INTEGER,                -- NULL until linked
-          status          TEXT NOT NULL,          -- 'pending' | 'linked' | 'dismissed'
-          updated_at      INTEGER NOT NULL DEFAULT 0
-        )
-        """)
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS leetcode_contest_posts (
@@ -564,59 +554,6 @@ def leetcode_set_contest_state(contest_type: str, last_title_slug: str, *, threa
 
 
 # ---- Twitch <-> Discord link helpers ----
-
-def twitch_link_get(twitch_username: str) -> dict | None:
-    """Hot path. Returns {'discord_user_id', 'status'} or None if never seen."""
-    with _db() as conn:
-        row = conn.execute(
-            "SELECT discord_user_id, status FROM twitch_links WHERE twitch_username=?",
-            (twitch_username,),
-        ).fetchone()
-        if not row:
-            return None
-        return {"discord_user_id": row[0], "status": row[1]}
-
-
-def twitch_link_create_pending(twitch_username: str) -> bool:
-    """Atomically claim a handle as 'pending'. Returns True only if WE created the
-    row (caller should post the prompt); False if it already existed."""
-    with _db() as conn:
-        cur = conn.execute(
-            """INSERT OR IGNORE INTO twitch_links(twitch_username, discord_user_id, status, updated_at)
-               VALUES(?, NULL, 'pending', ?)""",
-            (twitch_username, int(time.time())),
-        )
-        conn.commit()
-        return cur.rowcount > 0
-
-
-def twitch_link_set_status(twitch_username: str, status: str, discord_user_id: int | None):
-    """Used by the approve/dismiss callbacks. Idempotent upsert."""
-    with _db() as conn:
-        conn.execute(
-            """INSERT INTO twitch_links(twitch_username, discord_user_id, status, updated_at)
-               VALUES(?,?,?,?)
-               ON CONFLICT(twitch_username) DO UPDATE SET
-                 discord_user_id=excluded.discord_user_id,
-                 status=excluded.status,
-                 updated_at=excluded.updated_at""",
-            (twitch_username, discord_user_id, status, int(time.time())),
-        )
-        conn.commit()
-
-
-def twitch_link_delete(twitch_username: str) -> bool:
-    """Forget a handle entirely so it can be re-prompted (used by /twitch-unlink)."""
-    with _db() as conn:
-        cur = conn.execute(
-            "DELETE FROM twitch_links WHERE twitch_username=?",
-            (twitch_username,),
-        )
-        conn.commit()
-        return cur.rowcount > 0
-
-
-# ---- LeetCode Premium Weekly helpers ----
 
 def leetcode_contest_post_get(contest_slug: str) -> dict | None:
     with _db() as conn:
