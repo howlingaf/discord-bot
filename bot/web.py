@@ -381,4 +381,7 @@ def make_web_app(bot_instance) -> web.Application:
     from .voicechat import register_routes as vc_register
     vc_register(app, bot_instance)
 
+    from .voicerpc import register_routes as vrpc_register
+    vrpc_register(app, bot_instance)
+
     return app
